@@ -1,0 +1,46 @@
+Overseer Personal-Use License
+Copyright (c) 2026 Emre Yavuz (github.com/emreyvz)
+
+Permission is hereby granted, free of charge, to any individual who obtains a
+copy of this software and associated files (the "Software") to use and modify
+the Software for their own PERSONAL, NON-COMMERCIAL purposes, subject to the
+terms below.
+
+YOU MAY:
+  - Use the Software privately, for personal or evaluation purposes.
+  - Modify the Software for your own personal use.
+
+YOU MAY NOT, without the prior written permission of the author:
+  - Sell, rent, license, or otherwise commercialise the Software or any
+    modified version of it.
+  - Redistribute the Software or any derivative of it, whether modified or not,
+    as part of a product or service, or for any commercial gain.
+  - Remove or alter this license or the author's attribution.
+
+RESPONSIBILITY & COMPLIANCE:
+  The Software is a tool intended for defensive awareness, public-safety and
+  forensic purposes. You are solely responsible for how you use it. You must
+  only use it with cameras and streams you own or are authorised to access, and
+  you must comply with all applicable privacy, surveillance and data-protection
+  laws in your jurisdiction. You must not use it to stalk, harass, profile, or
+  otherwise harm any person.
+
+NO WARRANTY:
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+  OTHER LIABILITY, INCLUDING ANY ARISING FROM MISUSE OF THE SOFTWARE, WHETHER IN
+  AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM OR IN CONNECTION WITH
+  THE SOFTWARE OR ITS USE.
+
+CONTACT:
+  For any other permission, licensing request, or complaint, contact the author
+  via https://github.com/emreyvz
+
+---
+
+Third-party components are the property of their respective owners and remain
+under their own licenses, including but not limited to:
+  - Ultralytics YOLO11 (detection models)
+  - Fonts: JetBrains Mono, Space Mono, Chakra Petch (SIL Open Font License)
+  - World map: Natural Earth (public domain) + GeoJSON country boundaries
+Review each component's license before relying on it beyond personal use.

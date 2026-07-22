@@ -1,0 +1,195 @@
+app:
+  log_level: INFO
+  log_dir: logs
+  data_dir: data
+
+camera:
+  connect_timeout: 10.0
+  read_timeout: 10.0
+  reconnect_min_delay: 1.0
+  reconnect_max_delay: 60.0
+  buffer_size: 5
+  freeze_timeout: 10.0
+
+detectors:
+  motion:
+    enabled: true
+    min_area: 500
+    event_threshold_percent: 0.5
+  yolo:
+    model: yolo11s.pt
+    confidence: 0.25
+    frame_interval: 2
+    imgsz: 1280
+  person:
+    enabled: true
+  vehicle:
+    enabled: true
+  animal:
+    enabled: true
+  accessory:
+    enabled: true
+  weapon:
+    enabled: true
+
+events:
+  throttle_seconds: 10.0
+  snapshot_on_event: true
+
+analyzers:
+  frame_interval: 2
+  daynight:
+    enabled: true
+    night_below: 50.0
+    day_above: 70.0
+  fog:
+    enabled: true
+    contrast_ref: 50.0
+    edge_ref: 0.05
+    sharpness_ref: 300.0
+    onset: 0.6
+    clear: 0.3
+  rain:
+    enabled: true
+    diff_threshold: 25
+    onset: 0.5
+    clear: 0.3
+    min_onset_seconds: 3.0
+  wind:
+    enabled: true
+    max_flow: 6.0
+    strong: 0.5
+  weather:
+    enabled: true
+    fog_high: 0.6
+    rain_high: 0.5
+    wind_high: 0.5
+    cloud_high: 0.5
+    min_dwell_seconds: 30.0
+  lightning:
+    enabled: true
+    spike_delta: 40.0
+    spike_ratio: 1.5
+    refractory_seconds: 2.0
+  meteor:
+    enabled: true
+    diff_threshold: 40
+    min_elongation: 3.0
+    min_area: 8
+    max_area: 400
+  satellite:
+    enabled: true
+    diff_threshold: 30
+    min_track_length: 6
+    min_speed: 0.5
+    max_speed: 8.0
+    max_direction_std_deg: 15.0
+  tampering:
+    enabled: true
+    defocus_sharpness: 60.0
+    defocus_clear: 120.0
+    obstruction_contrast: 8.0
+    obstruction_clear: 16.0
+    move_mad: 45.0
+    move_frames: 3
+
+recording:
+  mode: event
+  dir: data/recordings
+  fps: 15
+  pre_roll_seconds: 5.0
+  post_roll_seconds: 5.0
+  segment_seconds: 300
+  max_buffer_mb: 512
+  codecs: [mp4v, XVID, MJPG]
+timelapse:
+  enabled: true
+  dir: data/timelapse
+  sample_interval_seconds: 10.0
+  fps: 30
+  max_segment_seconds: 21600
+heatmap:
+  decay: 0.98
+  width: 240
+  alpha: 0.5
+retention:
+  enabled: true
+  interval_hours: 1.0
+  max_age_days: 30
+  max_total_gb: 20.0
+statistics:
+  enabled: true
+  rollup_interval_hours: 6.0
+  export_dir: data/exports
+zones:
+  loiter_seconds: 30.0    # dwell threshold before a LOITERING event (per-zone override in DB)
+  expire_seconds: 5.0     # drop a track's zone state after this many seconds unseen
+  tailgate_seconds: 2.0   # crossing by a different track within this window -> TAILGATING
+  queue_min: 3            # queue-zone occupancy threshold for a QUEUE event
+trajectory:
+  enabled: true
+  buffer_size: 30
+  expire_seconds: 5.0
+  running_speed: 250.0     # px/sec (relative)
+  stopped_seconds: 5.0
+  stopped_eps: 15.0
+  uturn_window: 12
+  uturn_angle: 150.0
+pose:
+  enabled: true
+  buffer_size: 30
+  expire_seconds: 5.0
+  standing_aspect: 1.2
+  fallen_aspect: 0.8
+  crowd_min: 8
+  fight_distance: 80.0
+  fight_motion: 120.0
+objects:
+  enabled: true
+  buffer_size: 300
+  expire_seconds: 30.0
+  abandon_seconds: 10.0
+  obj_eps: 20.0
+  owner_distance: 120.0
+  stable_seconds: 3.0
+  removed_seconds: 5.0
+alerts:
+  enabled: true
+  cooldown_seconds: 60.0
+  crowd_min: 8
+  incident_window_minutes: 15
+anomaly:
+  enabled: true
+  window_seconds: 60.0
+  k: 3.0
+  warmup_windows: 8
+  min_count: 5
+  alpha: 0.15
+overseer:
+  sound: true
+  lens: true
+  trails: true
+rest_api:
+  enabled: false
+  host: "127.0.0.1"
+  port: 8787
+forensic:
+  enabled: true
+  sample_interval_seconds: 2.0
+  expire_seconds: 5.0
+  queue_size: 64
+  batch_size: 8
+  retention_days: 7
+  accessory_iou: 0.1
+  reid:
+    enabled: true
+    model: osnet_x0_25.torchscript   # expected file name under models/
+    url: null                        # if the operator provides it, ModelManager downloads it
+    sha256: null
+    input: [256, 128]
+  attribute_model:
+    enabled: false                   # falls back to classic+COCO until a PAR model is provided
+    model: par.torchscript
+    labels: [tisort, gomlek, ceket, hoodie, elbise]
+  colors:
+    palette: default

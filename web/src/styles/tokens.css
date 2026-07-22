@@ -1,0 +1,63 @@
+/* OVERSEER — Overseer design tokens (brief §2). Do not introduce colors outside this file. */
+:root {
+  /* — Color — */
+  --void: #000000;          /* pure-black canvas (POV) */
+  --carbon: #0a0b0c;        /* panel base (use ~86% opaque) */
+  --carbon-2: #121417;      /* raised panel / row divider */
+  --ink: #ececec;           /* primary text, reticle, grid */
+  --ink-dim: #7c8288;       /* secondary / telemetry */
+  --ink-ghost: #3a3e42;     /* faintest decor text */
+  --hairline: rgba(236, 236, 236, 0.14);
+
+  --scarlet: #e10600;       /* OVERSEER RED — alarm only (never #ff0000) */
+  --scarlet-hot: #ff1a1a;   /* glow / peak */
+  --scarlet-glow: rgba(225, 6, 0, 0.55);
+  --scarlet-ink: #0a0a0a;   /* dark text on a red block */
+
+  --paper: #f4f3ef;         /* white-mode ground (warm paper) */
+  --paper-ink: #0a0a0a;
+  --paper-line: rgba(10, 10, 10, 0.1);
+
+  --cyan: #38d0e3;          /* map data-paths ONLY */
+  --cyan-dim: #1b6e78;
+
+  /* — Typography — */
+  --font-mono: "JetBrains Mono", "Space Mono", ui-monospace, monospace;
+  --font-type: "Space Mono", "JetBrains Mono", monospace;
+  --font-display: "Chakra Petch", "JetBrains Mono", sans-serif;
+  --tracking: 0.14em;
+  --tracking-wide: 0.24em;
+
+  /* — Scale (px) — */
+  --fs-micro: 10px;
+  --fs-label: 11px;
+  --fs-data: 13px;
+  --fs-banner: 16px;
+  --fs-title: 22px;
+  --fs-boot: 34px;
+
+  /* — Space & line — */
+  --u: 4px;
+  --pad: 12px;
+  --radius: 0px;
+  --border: 1px;
+  --hud-opacity: 0.86;
+
+  /* — Motion (ms) — */
+  --t-micro: 70ms;
+  --t-snap: 120ms;
+  --t-move: 220ms;
+  --t-glitch: 130ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-step: steps(6, end);
+
+  /* — Z layers — */
+  --z-video: 0;
+  --z-postfx: 10;
+  --z-grid: 20;
+  --z-overlay: 30;
+  --z-panel: 40;
+  --z-banner: 50;
+  --z-boot: 100;
+  --z-cmd: 110;
+}

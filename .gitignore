@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+logs/
+data/
+models/
+*.pt
+*.onnx
+.coverage
+node_modules/
+web/release/
+
+# Secrets & local-only files — never commit
+config/ai_secret.json
+config/youtube_cookies.txt

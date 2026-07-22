@@ -1,0 +1,4 @@
+# Keep shell scripts LF so they run on macOS and Linux; keep .cmd CRLF for Windows.
+*.sh   text eol=lf
+*.cmd  text eol=crlf
+* text=auto

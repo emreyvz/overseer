@@ -1,0 +1,92 @@
+// OVERSEER — REST client for the FastAPI bridge. Falls back gracefully when offline.
+const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:8787'
+
+async function get<T>(path: string): Promise<T> {
+  const r = await fetch(API_BASE + path)
+  if (!r.ok) throw new Error(`${r.status}`)
+  return r.json() as Promise<T>
+}
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const r = await fetch(API_BASE + path, {
+    method, headers: { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (!r.ok) throw new Error(`${r.status}`)
+  return r.json() as Promise<T>
+}
+const post = <T>(p: string, b: unknown) => send<T>('POST', p, b)
+const put = <T>(p: string, b: unknown) => send<T>('PUT', p, b)
+const del = <T>(p: string) => send<T>('DELETE', p)
+
+export interface SearchHit { kind: string; ts: number; type: string; label: string; snapshot?: string | null }
+export interface EventRow { id: number; ts: number; type: string; label: string; conf?: number | null; snapshot?: string | null }
+export interface CaseRow { id: number; name: string; threat: string; notes: string; created: number; targets: number }
+
+export const api = {
+  base: API_BASE,
+  search: (q: string, opt: { source?: string; start?: number; end?: number } = {}) => {
+    const p = new URLSearchParams({ q })
+    if (opt.source) p.set('source', opt.source)
+    if (opt.start) p.set('start', String(opt.start))
+    if (opt.end) p.set('end', String(opt.end))
+    return get<{ hits: SearchHit[]; deferred?: string[]; unmatched?: string[] }>(`/api/search?${p}`)
+  },
+  events: (limit = 200) => get<EventRow[]>(`/api/events?limit=${limit}`),
+  stats: (start: number, end: number) => get<Record<string, number>>(`/api/stats?start=${start}&end=${end}`),
+  storage: () => get<{ recordings: number; sizeGB: number; oldest: number; recent: { kind: string; start: number; end: number; sizeMB: number; mode: string }[] }>(`/api/storage`),
+  recordings: () => get<{ id: number; kind: string; mode: string; start: number; end: number; sizeMB: number; url: string | null }[]>(`/api/recordings`),
+  deleteRecording: (id: number) => del<{ ok: boolean }>(`/api/recordings/${id}`),
+  storageCleanup: (what: 'snapshots' | 'clips' | 'recordings') => post<{ ok: boolean; removed: number }>(`/api/storage/cleanup`, { what }),
+  cases: () => get<CaseRow[]>(`/api/cases`),
+  addCase: (name: string) => post<{ id: number }>(`/api/cases`, { name }),
+  addSource: (name: string, url: string) => post<{ id: number }>(`/api/sources`, { name, url }),
+  updateSource: (id: string, name: string, url: string) => put<{ ok: boolean }>(`/api/sources/${id}`, { name, url }),
+  deleteSource: (id: string) => del<{ ok: boolean }>(`/api/sources/${id}`),
+  setCoords: (id: string, lat: number, lng: number) =>
+    post<{ ok: boolean; coords: [number, number] }>(`/api/sources/${id}/coords`, { lat, lng }),
+  ptz: (id: string, pan: number, tilt: number, zoom: number) =>
+    post<{ ok: boolean; reason?: string }>(`/api/ptz/${id}`, { pan, tilt, zoom }),
+  inspect: (id: string, x: number, y: number) =>
+    post<{ detections: import('./types').Detection[] }>(`/api/inspect/${id}`, { x, y }),
+  visualMatch: (image: string, kind?: string, minScore?: number) =>
+    post<{ matches: { camId: string; cam: string; score: number; cls?: string; margin?: number; ambiguous?: boolean; bbox: [number, number, number, number] }[] }>(`/api/visualmatch`, { image, kind, minScore }),
+  aiStatus: () => get<AiStatus>(`/api/ai/status`),
+  aiConfig: (cfg: { provider?: string; base_url?: string; api_key?: string; model?: string; vision_model?: string; features?: Record<string, boolean> }) =>
+    post<AiStatus>(`/api/ai/config`, cfg),
+  aiTest: (cfg: { provider?: string; base_url?: string; api_key?: string; model?: string }) =>
+    post<{ ok: boolean; detail: string }>(`/api/ai/test`, cfg),
+  aiChat: (prompt: string, system?: string) => post<{ reply: string | null; disabled?: boolean }>(`/api/ai/chat`, { prompt, system }),
+  aiQuery: (text: string) => post<{ filter: { kind?: string; color?: string; height?: string; time?: string } | null; disabled?: boolean }>(`/api/ai/query`, { text }),
+  aiSummarize: (events: { type: string; cam: string; label?: string }[]) => post<{ summary: string | null; disabled?: boolean }>(`/api/ai/summarize`, { events }),
+  aiExplain: (alert: { type: string; summary: string; cam: string }) => post<{ explanation: string | null; disabled?: boolean }>(`/api/ai/explain`, { alert }),
+  aiDescribe: (id: string) => post<{ description: string | null; disabled?: boolean }>(`/api/ai/describe/${id}`, {}),
+  aiRule: (text: string, apply = false, rule?: AiRule) => post<{ rule: AiRule | null; created?: number | null; disabled?: boolean }>(`/api/ai/rule`, { text, apply, rule }),
+  aiCorrelate: (alerts: { ts: string; severity: string; type: string; cam: string; summary: string }[]) =>
+    post<{ result: { incident?: boolean; title?: string; assessment?: string; action?: string; cams?: string[] } | null; disabled?: boolean }>(`/api/ai/correlate`, { alerts }),
+  aiAdvise: (alert: { type: string; summary: string; cam: string }) => post<{ action: string | null; disabled?: boolean }>(`/api/ai/advise`, { alert }),
+  aiSearchEvents: (text: string, events: { ts: string; type: string; cam: string; label?: string }[]) =>
+    post<{ result: { answer?: string; matches?: number[] } | null; disabled?: boolean }>(`/api/ai/searchevents`, { text, events }),
+  shutdown: () => post<{ ok: boolean }>(`/api/shutdown`, {}),
+}
+
+export type AiFeatureKey = 'chat' | 'search' | 'summarize' | 'explain' | 'vision' | 'rules' | 'correlate' | 'advise' | 'semantic'
+export interface AiStatus {
+  enabled: boolean
+  provider?: string
+  model?: string
+  base?: string
+  vision?: boolean
+  vision_model?: string
+  keyHint?: string
+  features?: Record<string, boolean>
+}
+export interface AiRule {
+  name?: string
+  event_type: string
+  source_id?: number | null
+  zone_id?: number | null
+  min_count?: number | null
+  min_confidence?: number | null
+  severity?: string
+  cooldown_s?: number
+}
