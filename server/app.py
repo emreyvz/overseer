@@ -472,6 +472,22 @@ async def api_roster_watch(det_id: str, body: dict) -> Any:
     return entry if entry else JSONResponse({"error": "not found"}, status_code=404)
 
 
+@app.get("/api/plates")
+async def api_plates_list() -> Any:
+    """The plate watchlist — reading any of these on any camera raises a PLATE WATCHLIST HIT."""
+    return {"plates": backend.list_watched_plates() if backend else []}
+
+
+@app.post("/api/plates")
+async def api_plates_watch(payload: dict) -> Any:
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    plate = str(payload.get("plate", "")).strip()
+    if not plate:
+        return JSONResponse({"error": "no plate"}, status_code=400)
+    return {"plates": backend.watch_plate(plate, bool(payload.get("on", True)))}
+
+
 @app.post("/api/roster/{det_id}/find")
 async def api_roster_find(det_id: str) -> Any:
     """Find this roster subject across all cameras by appearance (ReID) — returns scored hits."""

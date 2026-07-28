@@ -25,7 +25,7 @@
     } catch { /* keep the last good list */ }
   }
   onMount(() => {
-    refresh(); timer = setInterval(refresh, 3000)
+    refresh(); loadPlates(); timer = setInterval(refresh, 3000)
     clock = setInterval(() => (now = Date.now()), 1000)   // drives LIVE + relative times in the dossier
   })
   onDestroy(() => { if (timer) clearInterval(timer); if (clock) clearInterval(clock) })
@@ -52,6 +52,22 @@
   let nPeople = $derived(entries.filter((e) => e.cls === 'person').length)
   let nVehicles = $derived(entries.filter((e) => e.cls === 'vehicle').length)
   let nWatched = $derived(entries.filter((e) => e.watched).length)
+
+  // plate watchlist (BOLO for plates) — reading any of these on any camera fires an alert
+  let platesWatched = $state<string[]>([])
+  let platePanel = $state(false)
+  let plateInput = $state('')
+  async function loadPlates() { try { platesWatched = (await api.watchedPlates()).plates } catch { /* offline */ } }
+  async function addPlate() {
+    const p = plateInput.trim()
+    if (!p) return
+    sfx('sonar'); plateInput = ''
+    try { platesWatched = (await api.watchPlate(p, true)).plates } catch { /* offline */ }
+  }
+  async function removePlate(p: string) {
+    sfx('click')
+    try { platesWatched = (await api.watchPlate(p, false)).plates } catch { /* offline */ }
+  }
 
   const photo = (e: RosterEntry) => (e.snapshot ? API + e.snapshot : '')
   // compact combined line for the small gallery cards
@@ -80,7 +96,25 @@
       <button class="schip" class:on={sort === 'recent'} onclick={() => (sort = 'recent')}>RECENT</button>
       <button class="schip" class:on={sort === 'seen'} onclick={() => (sort = 'seen')}>MOST SEEN</button>
     </div>
+    <button class="chip caps platebtn" class:on={platePanel || platesWatched.length > 0} onclick={() => (platePanel = !platePanel)}>▤ PLATE BOLO{#if platesWatched.length} {platesWatched.length}{/if}</button>
   </div>
+
+  {#if platePanel}
+    <div class="platewatch">
+      <div class="pwh caps"><span class="hot">◉</span> PLATE WATCHLIST · ANY CAMERA READ FIRES AN ALERT</div>
+      <div class="pwadd">
+        <input class="pwin caps" bind:value={plateInput} placeholder="PLATE e.g. 34ABC123" spellcheck="false"
+          onkeydown={(e) => e.key === 'Enter' && addPlate()} />
+        <button class="pwgo caps" onclick={addPlate}>WATCH</button>
+      </div>
+      <div class="pwlist">
+        {#each platesWatched as p (p)}
+          <span class="pwtag caps">{p}<button class="pwx" onclick={() => removePlate(p)} aria-label="remove">×</button></span>
+        {/each}
+        {#if platesWatched.length === 0}<span class="pwnone caps">NO PLATES WATCHED</span>{/if}
+      </div>
+    </div>
+  {/if}
 
   {#if shown.length === 0}
     <div class="empty caps">SCANNING ALL CAMERAS · THE ROSTER FILLS AUTOMATICALLY AS PEOPLE AND VEHICLES ARE SEEN</div>
@@ -132,6 +166,24 @@
   .sort { display: flex; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); }
   .schip { padding: 5px 12px; background: #0a0d10; color: var(--ink-dim); border: 0; font-size: 9px; letter-spacing: var(--tracking); cursor: pointer; }
   .schip.on { background: #14161a; color: var(--ink); }
+  .platebtn { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 40%, transparent); }
+  .platebtn.on { border-color: var(--cyan); color: var(--cyan); background: rgba(56,208,227,0.08); }
+  .platewatch { border: 1px solid var(--hairline); background: #0a0d10; padding: 12px 14px; margin: 0 0 16px;
+    display: flex; flex-direction: column; gap: 10px; animation: pwin 200ms var(--ease); }
+  @keyframes pwin { from { opacity: 0; transform: translateY(-6px); } }
+  .pwh { font-size: 9px; letter-spacing: 0.16em; color: var(--ink-dim); } .pwh .hot { color: var(--scarlet); }
+  .pwadd { display: flex; gap: 8px; }
+  .pwin { flex: 1; background: #000; border: 1px solid var(--hairline); color: var(--ink); font-family: var(--font-mono);
+    font-size: var(--fs-label); letter-spacing: 0.16em; padding: 7px 10px; outline: none; }
+  .pwin:focus { border-color: var(--cyan); } .pwin::placeholder { color: var(--ink-ghost); }
+  .pwgo { padding: 7px 16px; border: 1px solid var(--scarlet); color: var(--ink); font-size: 9px; letter-spacing: var(--tracking); cursor: pointer; background: none; }
+  .pwgo:hover { background: var(--scarlet); color: #fff; }
+  .pwlist { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pwtag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--cyan) 40%, transparent);
+    color: var(--cyan); font-size: 9px; letter-spacing: 0.12em; font-weight: 700; }
+  .pwx { background: none; border: 0; color: var(--ink-dim); font-size: 13px; line-height: 1; cursor: pointer; padding: 0; }
+  .pwx:hover { color: var(--scarlet); }
+  .pwnone { color: var(--ink-ghost); font-size: 9px; }
   .empty { color: var(--ink-dim); padding: 40px 0; text-align: center; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding-bottom: 40px; }
   .card { background: #0a0d10; border: 1px solid var(--hairline); padding: 0; cursor: pointer; text-align: left;

@@ -6,8 +6,9 @@
   import { onDestroy, onMount } from 'svelte'
   import { tweened } from 'svelte/motion'
   import { cubicOut } from 'svelte/easing'
-  import { cameras, activeCam, mode, triggerGlitch, flashBanner } from '../../lib/stores'
+  import { cameras, activeCam, mode, triggerGlitch, flashBanner, watchlistOpen } from '../../lib/stores'
   import { annotations, annotate } from '../../lib/annotations'
+  import { enroll } from '../../lib/watchlist'
   import { api } from '../../lib/api'
   import { trUpper } from '../../lib/lexicon'
   import { sfx } from '../../lib/audio'
@@ -29,7 +30,7 @@
 
   let a = $derived($annotations[entry.id] ?? {})
   let live = $derived(now - entry.last_ts < LIVE_MS)
-  let kind = $derived(entry.cls === 'vehicle' ? 'VEHICLE OF INTEREST' : 'PERSON OF INTEREST')
+  let kind = $derived(entry.cls === 'vehicle' ? 'VEHICLE DOSSIER' : 'SUBJECT DOSSIER')
   const camByName = (name?: string | null) => $cameras.find((c) => c.name === name)
   const photo = $derived(entry.snapshot ? `${API}${entry.snapshot}?t=${entry.last_ts}` : '')
   const heroSrc = $derived(cutout ? `${API}/api/roster/${entry.id}/cutout?t=${entry.last_ts}` : photo)
@@ -59,16 +60,23 @@
   // journey supercut — the subject's per-camera clips stitched into one video
   let superUrl = $state<string | null>(null)
   let superLoading = $state(false)
-  // cross-camera ReID search — find this subject on other cameras
-  let matches = $state<{ cam: string; score: number; ambiguous?: boolean }[] | null>(null)
+  // cross-camera ReID search — enroll the subject and hand off to the animated LOCATE screen
   let finding = $state(false)
-  $effect(() => { void entry.id; watchLocal = null; superUrl = null; matches = null })  // reset per subject
+  $effect(() => { void entry.id; watchLocal = null; superUrl = null })  // reset per subject
   async function findAcross() {
-    if (finding) return
+    if (finding || !photo) return
     finding = true; sfx('sonar')
-    try { const r = await api.findAcross(entry.id); matches = r.matches ?? [] }
-    catch { matches = [] }
-    finding = false
+    try {
+      const blob = await (await fetch(photo)).blob()
+      const img = await new Promise<string>((ok, no) => {
+        const fr = new FileReader(); fr.onload = () => ok(fr.result as string); fr.onerror = no; fr.readAsDataURL(blob)
+      })
+      enroll({ kind: entry.cls === 'vehicle' ? 'vehicle' : 'person', name: a.alias || entry.id,
+        image: img, threat: 'watch', color: entry.attrs?.upper_color, cam: entry.cam ?? undefined })
+      flashBanner('LOCATING ACROSS FEEDS_', false, 1400)
+      watchlistOpen.set(true)
+      close()
+    } catch { flashBanner('CANNOT LOCATE', false, 1200); finding = false }
   }
   async function playJourney() {
     if (superLoading) return
@@ -169,7 +177,7 @@
   <div class="vign"></div>
   <div class="scan"></div>
   <button class="close caps" onclick={close}>CLOSE <span>✕</span></button>
-  <div class="watermark caps">{entry.cls === 'vehicle' ? 'VOI' : 'POI'}</div>
+  <div class="watermark caps">{entry.id}</div>
 
   <div class="stage">
     <!-- HERO -->
@@ -215,20 +223,7 @@
         <button class="watch caps" class:on={watched} onclick={toggleWatch}>{watched ? '◉ WATCHING' : '◎ WATCHLIST'}</button>
         {#if focusNode}<button class="observe caps" onclick={() => observe(focusNode.name)}><span class="ico"></span>OBSERVE</button>{/if}
       </div>
-      <button class="find caps" onclick={findAcross}>{finding ? 'SEARCHING ALL CAMERAS…' : '⌖ FIND ACROSS CAMERAS'}</button>
-      {#if matches}
-        <div class="matches">
-          <div class="mh caps">CROSS-CAMERA HITS · {matches.length}</div>
-          {#if matches.length === 0}<div class="mnone caps">NO MATCH ON OTHER CAMERAS</div>{/if}
-          {#each matches as m (m.cam)}
-            <button class="mrow caps" onclick={() => observe(m.cam)} ondblclick={() => observe(m.cam)}>
-              <span class="mcam">{m.cam}</span>
-              <span class="mscore" class:amb={m.ambiguous}>{Math.round(m.score * 100)}%{#if m.ambiguous} ?{/if}</span>
-              <span class="mgo">▶</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
+      <button class="find caps" onclick={findAcross}>{finding ? 'LOCATING_' : '⌖ FIND ACROSS CAMERAS'}</button>
     </section>
 
     <!-- LIVE + SIGHTING + MOVEMENT TRACE -->
@@ -418,15 +413,6 @@
   .find { padding: 10px; cursor: pointer; background: none; border: 1px solid var(--cyan); color: var(--cyan);
     font-family: var(--font-display); font-size: 11px; letter-spacing: 0.16em; animation: fadeup 560ms 620ms both; }
   .find:hover { background: var(--cyan); color: #04070a; }
-  .matches { display: flex; flex-direction: column; border: 1px solid var(--hairline); animation: fadeup 320ms both; }
-  .mh { padding: 7px 10px; font-size: 8px; letter-spacing: 0.18em; color: var(--ink-dim); border-bottom: 1px solid var(--hairline); background: rgba(4,7,10,0.6); }
-  .mnone { padding: 10px; font-size: 9px; color: var(--ink-ghost); text-align: center; }
-  .mrow { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px; padding: 7px 10px;
-    background: none; border: 0; border-bottom: 1px solid var(--hairline); cursor: pointer; text-align: left; }
-  .mrow:last-child { border-bottom: 0; } .mrow:hover { background: rgba(56,208,227,0.07); }
-  .mcam { color: var(--ink); font-size: 10px; letter-spacing: 0.06em; }
-  .mscore { color: var(--cyan); font-size: 10px; font-variant-numeric: tabular-nums; } .mscore.amb { color: var(--amber, #d8a200); }
-  .mgo { color: var(--ink-dim); font-size: 8px; }
   .bolo { position: absolute; top: 46px; left: 12px; z-index: 3; padding: 3px 9px; background: var(--scarlet); color: #fff;
     font-size: 8px; letter-spacing: 0.18em; box-shadow: 0 0 12px var(--scarlet-glow); animation: fadein 400ms 700ms both; }
 

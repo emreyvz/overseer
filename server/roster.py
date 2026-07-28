@@ -257,6 +257,7 @@ class RosterHarvester(threading.Thread):
                  attrs_fn: Callable[[Any, str], dict] | None = None,
                  clip_fn: Callable[[Any, tuple], str | None] | None = None,
                  watch_hit_fn: Callable[[dict], None] | None = None,
+                 plate_hit_fn: Callable[[str, Any], None] | None = None,
                  watch_cooldown: float = 45.0,
                  interval: float = 4.0) -> None:
         super().__init__(daemon=True, name="RosterHarvester")
@@ -270,6 +271,7 @@ class RosterHarvester(threading.Thread):
         self._attrs_fn = attrs_fn
         self._clip_fn = clip_fn
         self._watch_hit_fn = watch_hit_fn
+        self._plate_hit_fn = plate_hit_fn
         self._watch_cooldown = float(watch_cooldown)
         self._interval = float(interval)
         self._i = 0
@@ -303,6 +305,11 @@ class RosterHarvester(threading.Thread):
                     plate = self._plate_fn(crop)
                 except Exception:  # noqa: BLE001
                     plate = None
+                if plate and self._plate_hit_fn is not None:   # plate watchlist across all cameras
+                    try:
+                        self._plate_hit_fn(plate, cam)
+                    except Exception:  # noqa: BLE001
+                        pass
             attrs = None
             if self._attrs_fn is not None:
                 try:

@@ -137,6 +137,10 @@ class Backend:
         from .plates import LivePlateReader
         self.plates = LivePlateReader(
             interval=float(self.config.get("match.anpr.live_interval", 2.5)))
+        # Plate watchlist (BOLO for plates): reading a watched plate on any camera fires an alert
+        self._plate_watch: set[str] = set()
+        self._plate_watch_last: dict[str, float] = {}
+        self._plate_watch_cd = float(self.config.get("match.anpr.watch_cooldown", 30.0))
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -452,6 +456,7 @@ class Backend:
                     attrs_fn=self._roster_attrs,
                     clip_fn=self._roster_clip if bool(self.config.get("roster.clips", True)) else None,
                     watch_hit_fn=self._roster_watch_hit,
+                    plate_hit_fn=self._roster_plate_hit,
                     watch_cooldown=float(self.config.get("roster.watch_cooldown", 45.0)),
                     interval=float(self.config.get("roster.interval", 4.0)),
                 )
@@ -649,6 +654,42 @@ class Backend:
             self._supercut_cache[det_id] = (len(segs), url)
         return url
 
+    # ---- plate watchlist ----------------------------------------------
+    def watch_plate(self, plate: str, on: bool = True) -> list[str]:
+        from match.anpr.normalize import normalize_plate
+        p = normalize_plate(plate)
+        if p:
+            if on:
+                self._plate_watch.add(p)
+            else:
+                self._plate_watch.discard(p)
+                self._plate_watch_last.pop(p, None)
+        return self.list_watched_plates()
+
+    def list_watched_plates(self) -> list[str]:
+        return sorted(self._plate_watch)
+
+    def _check_plate_watch(self, plate: str | None, cam: str | None) -> None:
+        """If a just-read plate is on the watchlist, raise an alert (cooldown-gated per plate)."""
+        if not plate or not self._plate_watch:
+            return
+        from match.anpr.normalize import normalize_plate
+        p = normalize_plate(plate)
+        if not p or p not in self._plate_watch:
+            return
+        now = time.time()
+        if now - self._plate_watch_last.get(p, 0.0) < self._plate_watch_cd:
+            return
+        self._plate_watch_last[p] = now
+        self._emit({"t": "alert", "d": {
+            "ts": now * 1000, "severity": "critical", "type": "PLATE WATCHLIST HIT",
+            "summary": f"Plate {p} read on {cam or '—'}", "cam": cam or "", "ack": False,
+            "snapshot": self._alert_snapshot(), "reason": f"Watched plate {p} detected",
+        }})
+
+    def _roster_plate_hit(self, plate: str, cam: str | None) -> None:
+        self._check_plate_watch(plate, cam)
+
     def _roster_embed(self, crop: Any, cls: str) -> Any:
         """A ReID appearance embedding for a crop, for roster de-duplication. Serialized so
         the harvester thread doesn't race a concurrent visual search on the same encoder."""
@@ -804,6 +845,7 @@ class Backend:
                         plate = self.plates.plate_for(det["id"])
                         if plate:
                             det["plate"] = plate[0]
+                            self._check_plate_watch(plate[0], self._source_name(self._source_id))
                         make = self.live_make.make_for(det["id"])
                         if make:
                             det["make"] = make

@@ -60,6 +60,8 @@ export const api = {
   supercut: (id: string) => get<{ url: string }>(`/api/roster/${id}/supercut`),
   findAcross: (id: string) =>
     post<{ matches: { camId: string; cam: string; score: number; ambiguous?: boolean }[] }>(`/api/roster/${id}/find`, {}),
+  watchedPlates: () => get<{ plates: string[] }>(`/api/plates`),
+  watchPlate: (plate: string, on: boolean) => post<{ plates: string[] }>(`/api/plates`, { plate, on }),
   aiStatus: () => get<AiStatus>(`/api/ai/status`),
   aiConfig: (cfg: { provider?: string; base_url?: string; api_key?: string; model?: string; vision_model?: string; features?: Record<string, boolean> }) =>
     post<AiStatus>(`/api/ai/config`, cfg),
