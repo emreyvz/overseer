@@ -33,7 +33,7 @@
   import Watchlist from './components/Watchlist.svelte'
   import AiConsole from './components/AiConsole.svelte'
 
-  const MODE_KEYS: Record<string, Mode> = { g: 'topology', a: 'forensic', r: 'archive' }
+  const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive' }
 
   onMount(() => { startZoneEngine(); startAnomalyEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus() } })
 

@@ -18,7 +18,6 @@
   // Bottom nav — clickable, active-highlighted. Kept lean; heavier tools live in ⌘.
   const NAV = [
     { label: 'POV', key: '1-9', mode: 'pov', act: () => mode.set('pov') },
-    { label: 'MAP', key: 'G', mode: 'topology', act: () => mode.set('topology') },
     { label: 'SOURCES', key: 'C', mode: '', act: () => { pickerView.set('grid'); stage.set('select') } },
     { label: 'FORENSIC', key: 'A', mode: 'forensic', act: () => mode.set('forensic') },
     { label: 'WATCHLIST', key: 'W', mode: '', act: () => watchlistOpen.set(true) },
