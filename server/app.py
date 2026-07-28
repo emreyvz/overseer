@@ -432,6 +432,31 @@ async def api_platematch(payload: dict[str, Any]) -> Any:
     return {"matches": matches}
 
 
+@app.get("/api/roster")
+async def api_roster() -> Any:
+    """Session roster: every person/vehicle seen, deduped, with a photo (+plate for cars)."""
+    return backend.roster.list() if backend else []
+
+
+@app.get("/api/roster/{det_id}")
+async def api_roster_entry(det_id: str) -> Any:
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    entry = backend.roster.get(det_id)
+    return entry if entry else JSONResponse({"error": "not found"}, status_code=404)
+
+
+@app.get("/api/roster/{det_id}/cutout")
+async def api_roster_cutout(det_id: str) -> Response:
+    """The roster photo with its background removed (YOLO-seg), as a transparent PNG."""
+    if backend is None:
+        return Response(status_code=503)
+    png = await asyncio.to_thread(backend.roster.cutout_png, det_id)
+    if not png:
+        return Response(status_code=404)
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/inspect/{source_id}")
 async def api_inspect(source_id: int, payload: dict[str, float]) -> Any:
     """'Look closer' at a clicked point — returns any objects found there."""

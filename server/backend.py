@@ -106,6 +106,13 @@ class Backend:
         from .plates import LivePlateReader
         self.plates = LivePlateReader(
             interval=float(self.config.get("match.anpr.live_interval", 2.5)))
+        # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
+        # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
+        from match.seg_backend import YoloSegBackend
+        from .roster import SessionRoster
+        _seg_name = str(self.config.get("match.models.seg", "") or "")
+        _roster_seg = YoloSegBackend(Path("models") / _seg_name) if _seg_name else None
+        self.roster = SessionRoster(self.snapshots, self._snap_dir, _roster_seg)
         self._prewarm_thumbs()
         self.ooi = OOIManager()   # object-of-interest visual tracker
         self.pose_kp = PoseKP()   # keypoint pose behaviours (hand-raise)
@@ -332,6 +339,7 @@ class Backend:
                 frame_interval=int(self.config.get("detectors.yolo.frame_interval", 2)),
                 slice_grid=int(self.config.get("detectors.yolo.slice", 0)),
                 slice_overlap=float(self.config.get("detectors.yolo.slice_overlap", 0.2)),
+                person_confidence=float(self.config.get("detectors.yolo.person_confidence", 0.18)),
             )
             for det in create_yolo_detectors(self.config, backend):
                 plugins.register(det)
@@ -451,6 +459,12 @@ class Backend:
                     plate = self.plates.plate_for(det["id"])
                     if plate:
                         det["plate"] = plate[0]
+                # session roster: keep a deduped photo + metadata for each person/vehicle
+                if cls in ("person", "vehicle") and d.track_id is not None:
+                    rx1, ry1, rx2, ry2 = max(0, int(x1)), max(0, int(y1)), int(x2), int(y2)
+                    if rx2 > rx1 and ry2 > ry1:
+                        self.roster.observe(det["id"], cls, img[ry1:ry2, rx1:rx2], now,
+                                            plate=det.get("plate"), attrs=det.get("attrs"))
                 dets.append(det)
                 idx += 1
         self.plates.prune({d["id"] for d in dets})

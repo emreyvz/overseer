@@ -75,10 +75,13 @@ class YoloBackend:
         frame_interval: int = 2,
         slice_grid: int = 0,
         slice_overlap: float = 0.2,
+        person_confidence: float | None = None,
     ) -> None:
         self._model = YOLO(str(model_path))
         self._device = device
         self._confidence = confidence
+        # people get their own (usually lower) floor for awkward-pose recall
+        self._person_conf = person_confidence if person_confidence is not None else confidence
         self._imgsz = imgsz
         self._frame_interval = max(1, frame_interval)
         # Sliced inference (SAHI-style) for small/distant object recall — off (0/1) by
@@ -103,13 +106,18 @@ class YoloBackend:
         dark = self._lowlight and mean < 75.0
         if dark:
             src = _enhance_lowlight(src, mean)
-        # In the dark, drop the confidence floor so faint pedestrians are still
-        # found; generic objects are filtered downstream so this won't add noise.
-        conf = self._confidence * 0.7 if dark else self._confidence
+        # In the dark, drop the confidence floor so faint pedestrians are still found.
+        # People in awkward poses (sitting, half-submerged swimmers) score lower than a
+        # standing pedestrian, so PEOPLE get a lower floor than everything else — recall for
+        # those poses without loosening vehicles/objects into false positives. We run the
+        # detector at the lower floor and re-apply each class's own threshold below.
+        dim = 0.7 if dark else 1.0
+        person_conf = self._person_conf * dim
+        base_conf = self._confidence * dim
         results = self._model.track(
             source=src,
             persist=True,
-            conf=conf,
+            conf=min(person_conf, base_conf),
             imgsz=self._imgsz,
             device=self._device,
             # ultralytics 8.4 deprecated the bool `half=` flag in favor of the unified
@@ -131,10 +139,13 @@ class YoloBackend:
                 if mapped is None:
                     continue
                 category, label = mapped
+                cf = float(boxes.conf[i])
+                if cf < (person_conf if category == "person" else base_conf):
+                    continue  # per-class floor: people lenient, everything else strict
                 x1, y1, x2, y2 = (int(v) for v in boxes.xyxy[i].tolist())
                 track_id = int(boxes.id[i]) if boxes.id is not None else None
                 detections.append(Detection(
-                    label=label, confidence=float(boxes.conf[i]),
+                    label=label, confidence=cf,
                     bbox=(x1, y1, x2, y2), category=category, track_id=track_id,
                 ))
         self._cache_seq = frame.seq
@@ -159,8 +170,8 @@ class YoloBackend:
                 continue
             try:
                 res = self._model(
-                    source=crop, conf=self._confidence, imgsz=tile_imgsz,
-                    device=self._device,
+                    source=crop, conf=min(self._person_conf, self._confidence),
+                    imgsz=tile_imgsz, device=self._device,
                     quantize="fp16" if self._device.startswith("cuda") else None,
                     classes=list(COCO_CLASS_MAP.keys()), verbose=False,
                 )
@@ -174,9 +185,12 @@ class YoloBackend:
                 if mapped is None:
                     continue
                 category, label = mapped
+                cf = float(boxes.conf[i])
+                if cf < (self._person_conf if category == "person" else self._confidence):
+                    continue
                 bx1, by1, bx2, by2 = (int(v) for v in boxes.xyxy[i].tolist())
                 cands.append(((bx1 + x0, by1 + y0, bx2 + x0, by2 + y0),
-                              float(boxes.conf[i]), category, label))
+                              cf, category, label))
         keep = select_supplements(existing, [(c[0], c[1]) for c in cands])
         return [Detection(label=cands[i][3], confidence=cands[i][1], bbox=cands[i][0],
                           category=cands[i][2], track_id=None) for i in keep]
