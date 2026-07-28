@@ -39,6 +39,10 @@ Full resolution live analysis with a "look closer" tool that crops, upscales and
 
 Lock onto any detection for a live target card with its class, attributes and projected path. If the target leaves the frame and returns, overseer re acquires it on its own.
 
+![Profile: where and when](demo/profile_tracking_when_where.png)
+
+Open any person or vehicle from the roster into a full profile screen. A large photo and a read of who or what it is sit beside a short clip of the sighting and the live feed of the camera it is on right now, while an interactive map traces where and when it was seen across every camera, with a live thumbnail at each stop and a timeline you can scrub. From here you flag it to the watchlist so any re sighting raises an alert, find it across all feeds by appearance, jump straight to a camera to keep watching, or replay its whole journey stitched into one clip.
+
 ### Forensic search
 
 ![Forensic search](demo/forensic_search.png)
