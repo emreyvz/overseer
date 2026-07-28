@@ -59,6 +59,16 @@ def test_trail_records_cameras_over_time(tmp_path: Path) -> None:
     assert gate["count"] == 2 and gate["first"] == 0.0 and gate["last"] == 5000.0
 
 
+def test_sighting_clip_lifecycle(tmp_path: Path) -> None:
+    r = _roster(tmp_path)
+    rid = r.observe_reid("person", _crop(), _emb(1), now=0.0)   # gets a snapshot
+    assert r.needs_clip(rid) is True                            # logged but no clip yet
+    assert r.get(rid)["clip"] is None
+    r.set_clip(rid, "/snapshots/clips/sight_1.webm")
+    assert r.needs_clip(rid) is False                           # won't be recaptured
+    assert r.get(rid)["clip"] == "/snapshots/clips/sight_1.webm"
+
+
 def test_reid_dedups_same_subject(tmp_path: Path) -> None:
     r = _roster(tmp_path)
     emb = _emb(1)
