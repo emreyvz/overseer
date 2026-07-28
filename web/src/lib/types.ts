@@ -90,6 +90,7 @@ export interface RosterEntry {
   cam?: string | null           // camera the subject was last seen on
   first_cam?: string | null     // camera the subject was FIRST seen on
   clip?: string | null          // short sighting clip (/snapshots/clips/...), prefix with API base
+  watched?: boolean             // flagged as BOLO — re-sightings raise a WATCHLIST HIT alert
   trail?: RosterSighting[]      // movement trail: cameras visited, earliest first
   first_ts: number
   last_ts: number

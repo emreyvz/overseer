@@ -69,6 +69,21 @@ def test_sighting_clip_lifecycle(tmp_path: Path) -> None:
     assert r.get(rid)["clip"] == "/snapshots/clips/sight_1.webm"
 
 
+def test_watchlist_hit_cooldown_and_camera_change(tmp_path: Path) -> None:
+    r = _roster(tmp_path)
+    rid = r.observe_reid("person", _crop(), _emb(1), now=0.0, cam="Gate")
+    assert r.take_watch_hit(rid, "Gate", now=1.0, cooldown=45.0) is None   # not watched -> no hit
+    r.watch(rid, True)
+    assert r.get(rid)["watched"] is True
+    hit = r.take_watch_hit(rid, "Gate", now=2.0, cooldown=45.0)
+    assert hit is not None and hit["id"] == rid                           # first re-sighting fires
+    assert r.take_watch_hit(rid, "Gate", now=5.0, cooldown=45.0) is None  # same cam, within cooldown
+    assert r.take_watch_hit(rid, "Lobby", now=6.0, cooldown=45.0) is not None  # new camera -> fires
+    assert r.take_watch_hit(rid, "Gate", now=100.0, cooldown=45.0) is not None  # cooldown elapsed
+    r.watch(rid, False)
+    assert r.take_watch_hit(rid, "Gate", now=101.0, cooldown=45.0) is None  # unwatched -> silent
+
+
 def test_reid_dedups_same_subject(tmp_path: Path) -> None:
     r = _roster(tmp_path)
     emb = _emb(1)

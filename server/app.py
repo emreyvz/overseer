@@ -462,6 +462,16 @@ async def api_roster_entry(det_id: str) -> Any:
     return entry if entry else JSONResponse({"error": "not found"}, status_code=404)
 
 
+@app.post("/api/roster/{det_id}/watch")
+async def api_roster_watch(det_id: str, body: dict) -> Any:
+    """Flag/unflag a subject as watched (BOLO). While watched, re-identifying the subject on
+    any camera raises a WATCHLIST HIT alert."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    entry = backend.roster.watch(det_id, bool(body.get("on", True)))
+    return entry if entry else JSONResponse({"error": "not found"}, status_code=404)
+
+
 @app.get("/api/roster/{det_id}/cutout")
 async def api_roster_cutout(det_id: str) -> Response:
     """The roster photo with its background removed (YOLO-seg), as a transparent PNG."""
