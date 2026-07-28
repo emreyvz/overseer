@@ -197,6 +197,19 @@ class SessionRoster:
             e = self._entries.get(det_id)
             return self._public(e) if e else None
 
+    def snapshot_bgr(self, det_id: str) -> tuple | None:
+        """The subject's stored photo as a BGR image plus its class — the query for a
+        'find this subject across cameras' ReID search."""
+        import cv2
+        with self._lock:
+            e = self._entries.get(det_id)
+            path = e["snapshot_path"] if e else None
+            cls = e["cls"] if e else ""
+        if not path or not Path(path).exists():
+            return None
+        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        return (img, cls) if img is not None else None
+
     def cutout_png(self, det_id: str) -> bytes | None:
         """The entry's photo with its background removed (YOLO-seg) as a transparent PNG;
         falls back to the plain photo when segmentation is unavailable."""
