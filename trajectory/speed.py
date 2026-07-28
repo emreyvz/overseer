@@ -50,7 +50,8 @@ class SpeedEstimator:
     def __init__(self, meters_per_pixel: float = 0.05, window: float = 1.2,
                  ema_alpha: float = 0.4, min_kmh: float = 3.0,
                  max_kmh: float = 300.0, buffer: int = 40, expire: float = 4.0,
-                 scale_alpha: float = 0.3) -> None:
+                 scale_alpha: float = 0.3, still_px: float = 25.0,
+                 cam_alpha: float = 0.2) -> None:
         self._mpp = max(1e-6, float(meters_per_pixel))
         self._window = max(0.1, float(window))
         self._alpha = min(1.0, max(0.05, float(ema_alpha)))
@@ -59,14 +60,23 @@ class SpeedEstimator:
         self._buffer = int(buffer)
         self._expire = float(expire)
         self._scale_alpha = min(1.0, max(0.05, float(scale_alpha)))
+        self._still_px = max(1.0, float(still_px))    # px/s below which a box is "still in frame"
+        self._cam_alpha = min(1.0, max(0.02, float(cam_alpha)))
+        self._cam_speed = 0.0                         # learned camera ground speed (km/h) on a dashcam
         self._tracks: dict[int, _Track] = {}
 
     def reset(self) -> None:
         self._tracks.clear()
+        self._cam_speed = 0.0
+
+    def camera_speed(self) -> float:
+        """The learned ground speed (km/h) of a moving camera, 0 when fixed/unknown."""
+        return self._cam_speed
 
     def update(self, track_id: int, bbox: tuple[float, float, float, float],
                now: float, ego_delta: tuple[float, float] = (0.0, 0.0),
-               scale_ref_m: float | None = None, scale_reliable: bool = True) -> float | None:
+               scale_ref_m: float | None = None, scale_reliable: bool = True,
+               cam_moving: bool = False) -> float | None:
         """Fold in one sighting; return the current smoothed km/h estimate (>= 0), or None
         until there is enough motion history to say anything.
 
@@ -106,11 +116,25 @@ class SpeedEstimator:
         dt = now - t0
         if dt <= 1e-3:
             return None
+        apparent_pps = math.hypot(x - x0, y - y0) / dt          # object motion in the frame
+        ego_pps = math.hypot(ex - ex0, ey - ey0) / dt           # camera parallax at its location
         # ground-relative displacement = object displacement minus the camera's own shift
         gdx = (x - x0) - (ex - ex0)
         gdy = (y - y0) - (ey - ey0)
         px_per_s = math.hypot(gdx, gdy) / dt
-        kmh = px_per_s * mpp * 3.6
+        # Dashcam handling. Where the camera induces clear parallax (a box off the focus of
+        # expansion), that parallax IS the camera's own motion, so ego_pps × scale gives the
+        # camera's ground speed — learn it. A box that sits still in the frame while the camera
+        # moves is keeping pace with it (a car ahead), but near the focus of expansion it shows
+        # no local parallax to measure, so lend it the learned camera speed instead of "stopped".
+        if cam_moving and ego_pps > self._still_px:
+            cand = ego_pps * mpp * 3.6
+            self._cam_speed = (cand if self._cam_speed <= 0.0
+                               else self._cam_alpha * cand + (1 - self._cam_alpha) * self._cam_speed)
+        if cam_moving and apparent_pps < self._still_px and self._cam_speed > self._min_kmh:
+            kmh = self._cam_speed
+        else:
+            kmh = px_per_s * mpp * 3.6
         if kmh > self._max_kmh:            # implausible (track-id reuse / teleport) -> ignore
             return tr.ema
         if kmh < self._min_kmh:
