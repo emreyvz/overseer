@@ -52,3 +52,26 @@ def test_model_attributes_classify(tmp_path: Path) -> None:
     result = ma.classify([np.full((80, 40, 3), 200, np.uint8)])
     assert len(result) == 1
     assert result[0] in labels
+
+
+def _script_fixed_argmax(path: Path, num: int, hot: int) -> None:
+    class Fixed(torch.nn.Module):
+        def __init__(self, n: int, k: int) -> None:
+            super().__init__()
+            self.n = n
+            self.k = k
+        def forward(self, x: torch.Tensor) -> torch.Tensor:  # N,3,H,W -> N,num
+            logits = torch.zeros(x.shape[0], self.n)
+            logits[:, self.k] = 9.0
+            return logits
+    torch.jit.script(Fixed(num, hot)).save(str(path))
+
+
+def test_model_attributes_out_of_range_is_none(tmp_path: Path) -> None:
+    # model emits 5 classes but only 3 labels are known; argmax lands on class 4 ->
+    # honest 'unknown' (None), never a wrapped-around arbitrary label
+    model = tmp_path / "par_big.ts"
+    labels = ["tisort", "gomlek", "ceket"]
+    _script_fixed_argmax(model, num=5, hot=4)
+    ma = ModelAttributes(model, "cpu", labels)
+    assert ma.classify([np.full((80, 40, 3), 200, np.uint8)]) == [None]

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from forensic.palette import dominant_color_name
+from forensic.palette import dominant_color_name_conf
 from plugins.base import Detection
 
 
@@ -21,18 +21,33 @@ class AttributeSet:
 
 
 class ClassicalAttributes:
-    """Colors from HSV, height band and build from bbox geometry. No model."""
+    """Colours from HSV over the subject's central column (to cut background bleed),
+    height band and build from bbox geometry. No model. attr_conf carries how reliable the
+    colour read was, so search can down-weight noisy attributes.
+
+    Note: height_band/build are bbox-geometry proxies and are inherently camera-relative
+    (a person close to the lens reads 'tall'); they are kept for coarse filtering but the
+    stored attr_conf reflects the colour evidence, which is the discriminative attribute."""
 
     def extract(
         self, crop_bgr: np.ndarray, bbox: tuple[int, int, int, int],
         frame_hw: tuple[int, int],
     ) -> AttributeSet:
-        ch = crop_bgr.shape[0]
-        if ch >= 2:
-            upper = crop_bgr[: ch // 2]
-            lower = crop_bgr[ch // 2:]
+        ch, cw = crop_bgr.shape[:2]
+        # central column: the subject is centred in a tight detection box; trimming the
+        # left/right thirds removes most of the background that contaminated the colour.
+        if cw >= 5:
+            x0, x1c = int(cw * 0.2), int(cw * 0.8)
+            core = crop_bgr[:, x0:x1c]
         else:
-            upper = lower = crop_bgr
+            core = crop_bgr
+        if core.shape[0] >= 2:
+            upper = core[: core.shape[0] // 2]
+            lower = core[core.shape[0] // 2:]
+        else:
+            upper = lower = core
+        up_name, up_conf = dominant_color_name_conf(upper)
+        lo_name, lo_conf = dominant_color_name_conf(lower)
         x1, y1, x2, y2 = bbox
         bh = max(1, y2 - y1)
         bw = max(1, x2 - x1)
@@ -42,11 +57,49 @@ class ClassicalAttributes:
         aspect = bw / bh
         build = "slim" if aspect < 0.35 else ("broad" if aspect > 0.5 else "medium")
         return AttributeSet(
-            upper_color=dominant_color_name(upper),
-            lower_color=dominant_color_name(lower),
+            upper_color=up_name,
+            lower_color=lo_name,
             height_band=height_band,
             build=build,
+            attr_conf=round(min(up_conf, lo_conf), 4),
         )
+
+
+def _mode(values: list) -> tuple[object, float]:
+    """Most common value + its agreement fraction. Deterministic tie-break by str()."""
+    counts: dict = {}
+    for v in values:
+        counts[v] = counts.get(v, 0) + 1
+    best = max(counts.items(), key=lambda kv: (kv[1], str(kv[0])))
+    return best[0], best[1] / len(values)
+
+
+def vote_attributes(samples: list[AttributeSet]) -> AttributeSet:
+    """Aggregate several samples of the SAME tracklet into one, using the modal value per
+    field so a single noisy frame can't define the tracklet. attr_conf becomes the mean
+    per-field agreement scaled by the samples' own colour confidence — high only when the
+    frames agree AND their colour reads were reliable. Accessories are unioned (seeing a
+    backpack in some frames is enough to record it)."""
+    if not samples:
+        raise ValueError("vote_attributes requires at least one sample")
+    up, up_a = _mode([s.upper_color for s in samples])
+    lo, lo_a = _mode([s.lower_color for s in samples])
+    hb, hb_a = _mode([s.height_band for s in samples])
+    bd, bd_a = _mode([s.build for s in samples])
+    clothes = [s.clothing_type for s in samples if s.clothing_type]
+    clothing = _mode(clothes)[0] if clothes else None
+    accessories: list[str] = []
+    for s in samples:
+        for a in s.accessories:
+            if a not in accessories:
+                accessories.append(a)
+    agreement = (up_a + lo_a + hb_a + bd_a) / 4.0
+    mean_conf = sum(s.attr_conf for s in samples) / len(samples)
+    return AttributeSet(
+        upper_color=up, lower_color=lo, height_band=hb, build=bd,
+        clothing_type=clothing, accessories=accessories,
+        attr_conf=round(agreement * mean_conf, 4),
+    )
 
 
 def _containment(person: tuple[int, int, int, int],
