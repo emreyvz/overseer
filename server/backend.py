@@ -20,6 +20,7 @@ import numpy as np
 
 from alerts.engine import AlertEngine
 from alerts.summary import EventSummarizer
+from alerts.threat import ThreatScorer, escalate
 from camera.file_reader import FileLoopReader
 from camera.frame_buffer import FrameBuffer
 from camera.health import HealthMonitor
@@ -84,6 +85,12 @@ class Backend:
         self.db.seed_default_source()
         self.alert_engine = AlertEngine(EventSummarizer(), self._source_name)
         self.alert_engine.set_rules(self.db.list_alert_rules())
+        # Correlated threat scoring: fuses co-occurring events per camera so dangerous
+        # combinations escalate (and surface even when no single rule was configured).
+        self.threat = ThreatScorer(
+            window_s=float(self.config.get("threat.window_seconds", 25.0)))
+        self._threat_synth_cooldown = float(self.config.get("threat.synth_cooldown_s", 30.0))
+        self._last_threat_synth: dict[object, float] = {}
         self._ensure_coords()
 
         # Behavioural monitors (constructed once, reset per source).
@@ -258,7 +265,7 @@ class Backend:
 
             self.zones.set_zones(self.db.list_zones(source_id))
             self.trajectory.reset(); self.pose.reset(); self.objects.reset(); self.ooi.clear()
-            self.speed.reset()
+            self.speed.reset(); self.threat.reset(); self._last_threat_synth.clear()
             self.alert_engine.reset(); self.alert_engine.set_rules(self.db.list_alert_rules())
 
             self._buffer = FrameBuffer(maxsize=int(self.config.get("camera.buffer_size", 5)))
@@ -958,6 +965,7 @@ class Backend:
             "ts": ev.timestamp * 1000, "type": type_en, "label": (ev.label or "").upper(),
             "conf": ev.confidence, "cam": str(ev.source_id or ""),
         }})
+        threat = self.threat.observe(ev)   # standing threat for this camera after this event
         alert = self.alert_engine.evaluate(ev)
         if alert is not None:
             snap_url = self._alert_snapshot()
@@ -970,12 +978,38 @@ class Backend:
             mark = self._alert_mark(
                 ev.bbox, _EVENT_KIND.get(ev.type.name, "person"),
                 ev.label or type_en, zone_id=int(zid) if isinstance(zid, int) else None)
+            # a live correlated threat raises this alert's severity and explains why
+            severity = escalate(alert.severity, threat.level) if threat.combo else alert.severity
+            reason = "; ".join(threat.reasons) if threat.combo else None
             self._emit({"t": "alert", "d": {
-                "ts": alert.timestamp * 1000, "severity": alert.severity,
+                "ts": alert.timestamp * 1000, "severity": severity,
                 "type": type_en, "summary": f"{type_en} · {self._source_name(alert.source_id)}",
                 "cam": self._source_name(alert.source_id), "ack": False,
                 "snapshot": snap_url, "clip": self._save_clip(), "mark": mark,
+                **({"reason": reason} if reason else {}),
             }})
+        elif threat.combo and threat.level in ("high", "critical"):
+            # a dangerous COMBINATION with no matching rule — surface it as its own threat,
+            # rate-limited per camera so a persistent situation doesn't spam
+            self._maybe_synth_threat(ev, threat, type_en)
+
+    def _maybe_synth_threat(self, ev: Event, threat: Any, type_en: str) -> None:
+        src = ev.source_id
+        last = self._last_threat_synth.get(src)
+        if last is not None and ev.timestamp - last < self._threat_synth_cooldown:
+            return
+        self._last_threat_synth[src] = ev.timestamp
+        reason = "; ".join(threat.reasons)
+        mark = self._alert_mark(ev.bbox, _EVENT_KIND.get(ev.type.name, "person"),
+                                "THREAT")
+        self._emit({"t": "alert", "d": {
+            "ts": ev.timestamp * 1000, "severity": threat.severity,
+            "type": "CORRELATED THREAT",
+            "summary": f"{reason} · {self._source_name(src)}",
+            "cam": self._source_name(src), "ack": False,
+            "snapshot": self._alert_snapshot(), "clip": self._save_clip(), "mark": mark,
+            "reason": f"Correlated signals: {', '.join(threat.signals)}",
+        }})
 
     # ---- MJPEG sources -----------------------------------------------
     def latest_jpeg(self) -> bytes | None:

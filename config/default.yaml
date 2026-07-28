@@ -202,6 +202,13 @@ alerts:
   cooldown_seconds: 60.0
   crowd_min: 8
   incident_window_minutes: 15
+# Correlated threat scoring: co-occurring events within window_seconds on one camera are
+# fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
+# a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT
+# alert (rate-limited per camera by synth_cooldown_s).
+threat:
+  window_seconds: 25.0
+  synth_cooldown_s: 30.0
 anomaly:
   enabled: true
   window_seconds: 60.0
