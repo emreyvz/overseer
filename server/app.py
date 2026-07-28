@@ -201,8 +201,24 @@ async def api_sources() -> Any:
 async def api_add_source(payload: dict[str, str]) -> Any:
     if backend is None:
         return JSONResponse({"error": "backend down"}, status_code=503)
-    sid = backend.db.add_source(payload["name"], payload["url"])
+    sid = backend.add_source(payload["name"], payload["url"])  # auto-places it on the map
     return {"id": sid}
+
+
+@app.post("/api/discover")
+async def api_discover(payload: dict[str, Any]) -> Any:
+    """ONVIF auto-discovery: find cameras on the LAN; with credentials, also resolve their
+    rtsp:// URLs so they can be added in one click."""
+    from .onvif import discover, stream_uri
+    timeout = float(payload.get("timeout", 3.0) or 3.0)
+    user = str(payload.get("user", "") or "")
+    password = str(payload.get("password", "") or "")
+    devices = await asyncio.to_thread(discover, min(max(timeout, 1.0), 8.0))
+    if user:
+        for d in devices:
+            if d.get("xaddr"):
+                d["rtsp"] = await asyncio.to_thread(stream_uri, d["xaddr"], user, password)
+    return {"devices": devices}
 
 
 @app.put("/api/sources/{source_id}")

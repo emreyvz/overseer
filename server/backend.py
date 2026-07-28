@@ -190,6 +190,15 @@ class Backend:
                 except Exception:  # noqa: BLE001
                     pass
 
+    def add_source(self, name: str, url: str) -> int:
+        """Add a camera AND immediately give it map coordinates, so a freshly added camera
+        shows up on the map right away instead of being invisible until manually placed.
+        The operator can then drag it to its real spot."""
+        sid = self.db.add_source(name, url)
+        self._ensure_coords()   # assigns spread coords to the new (coordless) source
+        self._emit({"t": "cameras", "d": self.sources_payload()})
+        return sid
+
     def _source_name(self, sid: int | None) -> str:
         if sid is None:
             return "—"

@@ -40,6 +40,8 @@ export const api = {
   cases: () => get<CaseRow[]>(`/api/cases`),
   addCase: (name: string) => post<{ id: number }>(`/api/cases`, { name }),
   addSource: (name: string, url: string) => post<{ id: number }>(`/api/sources`, { name, url }),
+  discover: (user?: string, password?: string, timeout?: number) =>
+    post<{ devices: { ip: string; name?: string; hardware?: string; location?: string; xaddr?: string; rtsp?: string | null }[] }>(`/api/discover`, { user, password, timeout }),
   updateSource: (id: string, name: string, url: string) => put<{ ok: boolean }>(`/api/sources/${id}`, { name, url }),
   deleteSource: (id: string) => del<{ ok: boolean }>(`/api/sources/${id}`),
   setCoords: (id: string, lat: number, lng: number) =>

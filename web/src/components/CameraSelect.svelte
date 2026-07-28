@@ -41,6 +41,27 @@
     } catch { flashBanner('SAVE FAILED — SERVER OFFLINE', true, 1600) }
     busy = false
   }
+  // — ONVIF auto-discovery (item: find LAN cameras) —
+  let scanning = $state(false)
+  let found = $state<{ ip: string; name?: string; hardware?: string; rtsp?: string | null }[]>([])
+  let discUser = $state(''), discPass = $state('')
+  async function discover() {
+    if (scanning) return
+    sfx('sonar'); scanning = true; found = []
+    try {
+      const res = await api.discover(discUser.trim() || undefined, discPass.trim() || undefined, 4)
+      found = res.devices || []
+      flashBanner(found.length ? `FOUND ${found.length} ONVIF CAMERA${found.length > 1 ? 'S' : ''}` : 'NO ONVIF CAMERAS ON THIS NETWORK', found.length === 0, 1700)
+    } catch { flashBanner('DISCOVERY FAILED', true, 1500) }
+    scanning = false
+  }
+  function useDevice(d: { ip: string; name?: string; hardware?: string; rtsp?: string | null }) {
+    sfx('click')
+    fName = d.name || d.hardware || `CAM ${d.ip}`
+    fUrl = d.rtsp || `rtsp://${d.ip}:554/`
+    editId = null
+  }
+
   function edit(c: Camera) { editId = c.id; fName = c.name; fUrl = c.url ?? '' }
   function remove(c: Camera) {
     sfx('click')
@@ -75,6 +96,24 @@
             {#if editId}<button class="b" onclick={resetForm}>CANCEL</button>{/if}
           </div>
         </div>
+
+        <div class="ph caps">DISCOVER · ONVIF</div>
+        <div class="disc">
+          <div class="dcreds">
+            <input bind:value={discUser} class="dc" placeholder="USER (optional)" spellcheck="false" />
+            <input bind:value={discPass} type="password" class="dc" placeholder="PASSWORD" spellcheck="false" />
+            <button class="b" onclick={discover} disabled={scanning}>{scanning ? 'SCANNING…' : '⦿ SCAN LAN'}</button>
+          </div>
+          <div class="dhint caps">Finds ONVIF cameras on your network. Add credentials to auto-fill the RTSP URL.</div>
+          {#each found as d}
+            <button class="drow" onclick={() => useDevice(d)}>
+              <span class="dnm">{d.name || d.hardware || 'ONVIF CAMERA'}</span>
+              <span class="dip">{d.ip}{#if d.rtsp} · ✓ RTSP{/if}</span>
+              <span class="duse caps">USE ▸</span>
+            </button>
+          {/each}
+        </div>
+
         <div class="ph caps">SOURCES</div>
         <div class="rows caps">
           {#each $cameras as c}
@@ -178,6 +217,18 @@
   .form input:focus { outline: none; border-color: var(--scarlet); }
   .uhint { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.12em; margin-top: -3px; }
   .fbtn { display: flex; gap: 8px; }
+  .disc { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+  .dcreds { display: flex; gap: 8px; }
+  .dc { flex: 1; min-width: 0; background: #05070a; border: 1px solid var(--hairline); color: var(--ink);
+    font-family: inherit; font-size: 10px; padding: 6px 8px; }
+  .dc:focus { border-color: var(--scarlet); outline: none; }
+  .dhint { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.1em; }
+  .drow { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    background: #0a0d10; border: 1px solid var(--hairline); padding: 6px 10px; cursor: pointer; color: var(--ink); }
+  .drow:hover { border-color: var(--scarlet); }
+  .dnm { flex: 1; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dip { font-size: 9px; color: var(--ink-dim); }
+  .duse { font-size: 8px; color: var(--scarlet); letter-spacing: var(--tracking); }
   .b { padding: 6px 16px; border: 1px solid var(--ink-dim); font-size: var(--fs-micro); letter-spacing: var(--tracking); color: var(--ink-dim); }
   .b:hover { border-color: var(--scarlet); color: var(--scarlet); }
   .b:disabled { opacity: 0.5; cursor: default; }
