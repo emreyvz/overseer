@@ -61,7 +61,7 @@ class ModelAttributes:
         self._size = input_size
         self._model = torch.jit.load(str(model_path), map_location=device).eval()
 
-    def classify(self, crops: list[np.ndarray]) -> list[str]:
+    def classify(self, crops: list[np.ndarray]) -> list[str | None]:
         if not crops:
             return []
         tensor = self._torch.from_numpy(_preprocess(crops, self._size)).to(
@@ -70,4 +70,8 @@ class ModelAttributes:
         with self._torch.no_grad():
             logits = self._model(tensor)
         idx = logits.detach().cpu().numpy().argmax(axis=1)
-        return [self._labels[int(i) % len(self._labels)] for i in idx]
+        # Honest bounds check: if the model's output dimension doesn't match the label
+        # list, return None ("unknown") for the out-of-range class rather than wrapping
+        # the index around with modulo and asserting an arbitrary label.
+        return [self._labels[int(i)] if 0 <= int(i) < len(self._labels) else None
+                for i in idx]

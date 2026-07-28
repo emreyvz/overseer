@@ -9,7 +9,7 @@ from loguru import logger
 
 from camera.frame_buffer import Frame
 from core.config import Config
-from forensic.attributes import ClassicalAttributes
+from forensic.attributes import AttributeSet, ClassicalAttributes, vote_attributes
 from forensic.index import MetadataIndex
 from forensic.tracklet import CropJob, TrackletManager, TrackletView
 from plugins.base import Detection
@@ -66,6 +66,11 @@ class ForensicWorker(threading.Thread):
         self._embedder = embedder
         self._attribute_model = attribute_model
         self._batch_size = max(1, batch_size)
+        # Temporal voting: a bounded history of recent attribute samples per tracklet, so
+        # the stored attributes are a vote across frames, not whatever one noisy frame said.
+        self._attr_history: dict[int, deque[AttributeSet]] = {}
+        self._history_len = 7
+        self._max_tracked = 512
         # Named _stop_event (not _stop) to avoid shadowing threading.Thread's
         # private _stop bound method, which Thread.join() invokes internally
         # once the thread finishes; overwriting it with an Event breaks join().
@@ -91,14 +96,28 @@ class ForensicWorker(threading.Thread):
         for i, job in enumerate(jobs):
             if i < len(clothing) and clothing[i] is not None:
                 job.attributes.clothing_type = clothing[i]
+            voted = self._accumulate_and_vote(job.tracklet_id, job.attributes)
             try:
                 path = self._snapshots.save(job.crop, prefix="tracklet")
-                self._index.save_sample(job.tracklet_id, job.attributes, str(path), now)
+                self._index.save_sample(job.tracklet_id, voted, str(path), now)
             except OSError:
                 logger.exception("tracklet snapshot failed")
-                self._index.save_sample(job.tracklet_id, job.attributes, None, now)
+                self._index.save_sample(job.tracklet_id, voted, None, now)
             if vectors is not None and i < len(vectors) and vectors[i].size:
                 self._index.set_embedding(job.tracklet_id, vectors[i], now)
+
+    def _accumulate_and_vote(self, tracklet_id: int,
+                             attrs: AttributeSet) -> AttributeSet:
+        """Append this sample to the tracklet's bounded history and return the vote across
+        it. With a single sample the vote is that sample (agreement 1.0)."""
+        hist = self._attr_history.get(tracklet_id)
+        if hist is None:
+            if len(self._attr_history) >= self._max_tracked:
+                self._attr_history.pop(next(iter(self._attr_history)))  # evict oldest
+            hist = deque(maxlen=self._history_len)
+            self._attr_history[tracklet_id] = hist
+        hist.append(attrs)
+        return vote_attributes(list(hist))
 
     def run(self) -> None:
         while not self._stop_event.is_set():
