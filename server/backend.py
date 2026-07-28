@@ -330,6 +330,8 @@ class Backend:
                 confidence=float(self.config.get("detectors.yolo.confidence", 0.35)),
                 imgsz=int(self.config.get("detectors.yolo.imgsz", 960)),
                 frame_interval=int(self.config.get("detectors.yolo.frame_interval", 2)),
+                slice_grid=int(self.config.get("detectors.yolo.slice", 0)),
+                slice_overlap=float(self.config.get("detectors.yolo.slice_overlap", 0.2)),
             )
             for det in create_yolo_detectors(self.config, backend):
                 plugins.register(det)
