@@ -31,7 +31,7 @@
 
   const photo = (e: RosterEntry) => (e.snapshot ? API + e.snapshot : '')
   const attrLine = (e: RosterEntry) =>
-    [e.attrs?.subtype, e.attrs?.upper_color, e.cls === 'person' ? e.attrs?.height : undefined]
+    [e.attrs?.make, e.attrs?.subtype, e.attrs?.upper_color, e.cls === 'person' ? e.attrs?.height : undefined]
       .filter(Boolean).map((s) => trUpper(String(s))).join(' · ')
   const hhmm = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
   function open(e: RosterEntry) { sfx('ping', { volume: 0.25 }); selected = e; cutout = false }
@@ -79,6 +79,7 @@
       </div>
       <div class="prow caps"><span class="kk">ID</span><span class="vv">{selected.id}</span></div>
       <div class="prow caps"><span class="kk">CLASS</span><span class="vv">{trUpper(selected.cls)}</span></div>
+      {#if selected.attrs?.make}<div class="prow caps"><span class="kk">MAKE</span><span class="vv">{trUpper(selected.attrs.make)}<span class="est"> ~est</span></span></div>{/if}
       {#if selected.attrs?.subtype}<div class="prow caps"><span class="kk">TYPE</span><span class="vv">{trUpper(selected.attrs.subtype)}</span></div>{/if}
       {#if selected.plate}<div class="prow caps"><span class="kk">PLATE</span><span class="vv plate">{selected.plate}</span></div>{/if}
       {#if attrLine(selected)}<div class="prow caps"><span class="kk">ATTR</span><span class="vv">{attrLine(selected)}</span></div>{/if}
@@ -133,6 +134,7 @@
   .prow { display: flex; justify-content: space-between; gap: 10px; font-size: 9px; }
   .prow .kk { color: var(--ink-dim); } .prow .vv { color: var(--ink); }
   .prow .plate { color: var(--cyan); }
+  .prow .est { color: var(--ink-dim); letter-spacing: 0.06em; }
   .psep { height: 1px; background: var(--hairline); margin: 4px 0; }
   .nl { font-size: 8px; color: var(--ink-dim); }
   .notes { min-height: 70px; resize: vertical; background: #05070a; border: 1px solid var(--hairline);

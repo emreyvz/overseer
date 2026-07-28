@@ -41,6 +41,7 @@ from storage.recorder import Recorder
 from storage.snapshots import SnapshotService
 from trajectory.monitor import TrajectoryMonitor
 from trajectory.speed import SpeedEstimator
+from vehicle.make import MakeClassifier
 from vision.motion import MotionDetector
 from zones.monitor import ZoneMonitor
 from .media import MediaLibrary
@@ -130,6 +131,14 @@ class Backend:
         self.roster = SessionRoster(
             self.snapshots, self._snap_dir, _roster_seg,
             dedup_threshold=float(self.config.get("roster.dedup_threshold", 0.82)))
+        # Vehicle make/brand classifier for roster profiles (CPU, off the GPU hot path).
+        # Quiet unless its weights are present under models/ (uv run -m match.tools.export_models
+        # --only carbrand). Confidence-gated so it never asserts a confident-but-wrong brand.
+        self.make = MakeClassifier(
+            Path("models") / str(self.config.get("vehicle.make.model", "vehicle_make.torchscript")),
+            min_conf=float(self.config.get("vehicle.make.min_conf", 0.35)),
+            min_margin=float(self.config.get("vehicle.make.min_margin", 0.10)),
+            min_area=int(self.config.get("vehicle.make.min_area", 4096)))
         self._embed_lock = threading.Lock()   # serialize ReID encoder use (harvester vs search)
         self._roster_harvester = None
         self._roster_det = None
@@ -506,7 +515,12 @@ class Backend:
         try:
             band = crop[: max(1, crop.shape[0] // 2)] if cls == "person" else crop
             col = dominant_color_name(band)
-            return {"upper_color": col} if col and col != "unknown" else {}
+            attrs = {"upper_color": col} if col and col != "unknown" else {}
+            if cls == "vehicle":
+                hit = self.make.classify(crop)   # confidence-gated brand; None if unsure
+                if hit:
+                    attrs["make"] = hit[0]
+            return attrs
         except Exception:  # noqa: BLE001
             return {}
 
