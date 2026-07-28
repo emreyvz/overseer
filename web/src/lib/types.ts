@@ -24,6 +24,7 @@ export interface Detection {
   plate?: string        // vehicles: estimated licence plate from live ANPR
   subtype?: string      // vehicles: fine COCO type — car / truck / bus / motorcycle / bicycle
   speed?: number        // vehicles: rough km/h estimate (uncalibrated → comparable, not exact)
+  make?: string         // vehicles: estimated brand from the ViT classifier (confidence-gated)
 }
 
 export interface FrameMeta {

@@ -17,6 +17,7 @@ Worker/harvester-thread only.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import cv2
@@ -55,6 +56,7 @@ class MakeClassifier:
         self._torch = None
         self._loaded = False
         self._ok = False
+        self._lock = threading.Lock()   # one scripted model, possibly shared across threads
         self._cache: dict[int, tuple[str | None, float]] = {}   # track_id -> (make, ts)
 
     def _load(self) -> bool:
@@ -103,7 +105,8 @@ class MakeClassifier:
         if crop.shape[0] * crop.shape[1] < self._min_area:
             return None
         try:
-            probs = self._probs(crop)
+            with self._lock:            # serialize shared use (roster harvester + live reader)
+                probs = self._probs(crop)
         except Exception:  # noqa: BLE001
             return None
         return _pick(probs, self._labels, self._min_conf, self._min_margin)

@@ -25,7 +25,11 @@ thumbs:
 roster:
   enabled: true
   detector: yolo11n.pt      # separate from the analysis model so it never races it
-  confidence: 0.3
+  # Recall floor for the background harvester. Lowered so vehicles/people the strong live
+  # model sees are also captured into the roster (the light yolo11n scores lower on the same
+  # crop); the ReID dedup + min-area snapshot gate keep low-confidence noise out. For maximum
+  # recall on a GPU with headroom, set detector: yolo11s.pt (same model as the live pass).
+  confidence: 0.25
   imgsz: 960
   interval: 4.0             # seconds to cycle through every camera once
   dedup_threshold: 0.82     # ReID cosine above which two sightings are the same identity
@@ -185,6 +189,7 @@ vehicle:
     min_conf: 0.35          # top-1 probability floor
     min_margin: 0.10        # required lead over the runner-up brand
     min_area: 4096          # skip crops smaller than this (unreliable)
+    live_interval: 4.0      # seconds between brand reads per tracked vehicle (live card)
 pose:
   enabled: true
   buffer_size: 30

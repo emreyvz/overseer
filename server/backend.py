@@ -139,6 +139,11 @@ class Backend:
             min_conf=float(self.config.get("vehicle.make.min_conf", 0.35)),
             min_margin=float(self.config.get("vehicle.make.min_margin", 0.10)),
             min_area=int(self.config.get("vehicle.make.min_area", 4096)))
+        # Background brand reader for the live tracking card (classification is CPU-bound, so
+        # it runs off-thread and the card reads the cached brand — never stalls the analysis).
+        from .live_make import LiveMakeReader
+        self.live_make = LiveMakeReader(
+            self.make, interval=float(self.config.get("vehicle.make.live_interval", 4.0)))
         self._embed_lock = threading.Lock()   # serialize ReID encoder use (harvester vs search)
         self._roster_harvester = None
         self._roster_det = None
@@ -275,6 +280,7 @@ class Backend:
             self.zones.set_zones(self.db.list_zones(source_id))
             self.trajectory.reset(); self.pose.reset(); self.objects.reset(); self.ooi.clear()
             self.speed.reset(); self.threat.reset(); self._last_threat_synth.clear()
+            self.live_make.reset()
             self.alert_engine.reset(); self.alert_engine.set_rules(self.db.list_alert_rules())
 
             self._buffer = FrameBuffer(maxsize=int(self.config.get("camera.buffer_size", 5)))
@@ -633,16 +639,23 @@ class Backend:
                     if d.track_id is not None:
                         cx1, cy1, cx2, cy2 = max(0, int(x1)), max(0, int(y1)), int(x2), int(y2)
                         if cx2 > cx1 and cy2 > cy1:
-                            self.plates.offer(det["id"], img[cy1:cy2, cx1:cx2], now)
+                            crop = img[cy1:cy2, cx1:cx2]
+                            self.plates.offer(det["id"], crop, now)
+                            self.live_make.offer(det["id"], crop, now)   # brand, off-thread
                         plate = self.plates.plate_for(det["id"])
                         if plate:
                             det["plate"] = plate[0]
+                        make = self.live_make.make_for(det["id"])
+                        if make:
+                            det["make"] = make
                         kmh = self.speed.update(d.track_id, (x1, y1, x2, y2), now)
                         if kmh is not None:
                             det["speed"] = round(kmh)
                 dets.append(det)
                 idx += 1
-        self.plates.prune({d["id"] for d in dets})
+        vehicle_ids = {d["id"] for d in dets}
+        self.plates.prune(vehicle_ids)
+        self.live_make.prune(vehicle_ids)
         self.speed.prune(now)
         self._emit({"t": "detections", "d": dets})
 
@@ -1082,6 +1095,7 @@ class Backend:
         if self._roster_harvester is not None:
             self._roster_harvester.stop()
         self.plates.stop()
+        self.live_make.stop()
         self.thumbs.stop_all()
         try:
             self._unsub()
