@@ -113,8 +113,7 @@ class Backend:
         self.ego = EgoMotion(
             width=int(self.config.get("egomotion.width", 320)),
             moving_flow=float(self.config.get("egomotion.moving_flow", 1.3)))
-        self._ego_cum = (0.0, 0.0)   # running camera shift since connect
-        self._cam_moving = False
+        self._cam_moving = False   # camera itself in motion (dashcam) — surfaced to the HUD
         self.thumbs = ThumbHub(
             max_workers=int(self.config.get("thumbs.max_workers", 24)),
             cache_dir=self.data_dir / "thumbs",
@@ -295,7 +294,7 @@ class Backend:
             self.trajectory.reset(); self.pose.reset(); self.objects.reset(); self.ooi.clear()
             self.speed.reset(); self.threat.reset(); self._last_threat_synth.clear()
             self.live_make.reset()
-            self.ego.reset(); self._ego_cum = (0.0, 0.0); self._cam_moving = False
+            self.ego.reset(); self._cam_moving = False
             self.alert_engine.reset(); self.alert_engine.set_rules(self.db.list_alert_rules())
 
             self._buffer = FrameBuffer(maxsize=int(self.config.get("camera.buffer_size", 5)))
@@ -620,10 +619,9 @@ class Backend:
         self._clip_ring.append(cv2.resize(img, (640, max(1, int(h * 640 / w)))) if w > 640 else img.copy())
 
         now = time.time()
-        # camera ego-motion: measure the global shift once per frame and accumulate it, so
-        # vehicle speeds below are ground-relative (a moving/dashcam feed is compensated).
-        edx, edy, self._cam_moving = self.ego.update(img)
-        self._ego_cum = (self._ego_cum[0] + edx, self._ego_cum[1] + edy)
+        # camera ego-motion: fit the per-frame flow model once, so each vehicle's speed below
+        # can be measured relative to the ground (a moving/dashcam feed is compensated per-object).
+        self._cam_moving = self.ego.update(img)
         # feed the rolling window for appearance search (active camera only, bounded size)
         if self._source_id is not None and bool(self.config.get("match.enabled", True)):
             mw = int(self.config.get("match.store_max_width", 960))
@@ -673,7 +671,10 @@ class Backend:
                         make = self.live_make.make_for(det["id"])
                         if make:
                             det["make"] = make
-                        kmh = self.speed.update(d.track_id, (x1, y1, x2, y2), now, ego=self._ego_cum)
+                        # the camera's own flow AT THIS VEHICLE'S ground point — so a car keeping
+                        # pace on a dashcam reads the camera's speed, not "stopped".
+                        ego_delta = self.ego.flow_at((x1 + x2) / 2.0, y2)
+                        kmh = self.speed.update(d.track_id, (x1, y1, x2, y2), now, ego_delta=ego_delta)
                         if kmh is not None:
                             det["speed"] = round(kmh)
                 dets.append(det)
