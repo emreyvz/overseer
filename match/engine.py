@@ -16,7 +16,7 @@ Design points that make it reliable and testable:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -73,6 +73,7 @@ class MatchEngine:
         scoring: ScoringConfig | None = None,
         plate_reader=None,                       # callable(crop) -> list[(text, conf)] | None
         plate_voter: PlateVoter | None = None,
+        plate_fold: bool = False,                # fold OCR-confusable glyphs when voting
         category_to_cls: dict[str, str] | None = None,
     ) -> None:
         self.encoders = encoders
@@ -81,6 +82,7 @@ class MatchEngine:
         self.cfg = scoring or ScoringConfig()
         self.plate_reader = plate_reader
         self.plate_voter = plate_voter or PlateVoter()
+        self.plate_fold = bool(plate_fold)
         self.cat2cls = category_to_cls or dict(_DEFAULT_CAT2CLS)
 
     def _encoder_for(self, cls: str) -> Encoder | None:
@@ -118,7 +120,7 @@ class MatchEngine:
         return reads
 
     def _match_source(self, query: Query, src: SourceFrames, qv: np.ndarray,
-                      enc: Encoder) -> _SourceScore | None:
+                      enc: Encoder, cfg: ScoringConfig) -> _SourceScore | None:
         per_frame_best: list[float] = []
         best_score = -2.0
         best_meta: tuple | None = None      # (bbox, det_conf, frame_hw, coverage)
@@ -154,16 +156,17 @@ class MatchEngine:
                 bbox, det_conf, _ = cands[top]
                 best_meta = (bbox, det_conf, frame.shape[:2], covs[top])
                 best_within_margin = margin(frame_best, runner)
-                best_within_amb = is_ambiguous(frame_best, runner, self.cfg)
+                best_within_amb = is_ambiguous(frame_best, runner, cfg)
 
         if best_meta is None:
             return None                   # no same-class candidate anywhere in the window
-        agg_score, support = aggregate_window(per_frame_best, self.cfg)
+        agg_score, support = aggregate_window(per_frame_best, cfg)
         # We return even when appearance had no temporal support (agg_score < 0): for
         # vehicles a voted plate can still make this a definitive hit. match() decides
         # acceptance from score OR plate.
         bbox, det_conf, frame_hw, coverage = best_meta
-        plate, plate_conf = self.plate_voter.vote(plate_reads) if plate_reads else (None, 0.0)
+        plate, plate_conf = (self.plate_voter.vote(plate_reads, fold_confusable=self.plate_fold)
+                             if plate_reads else (None, 0.0))
         return _SourceScore(
             source_id=src.source_id, source_name=src.source_name, score=agg_score,
             support=support, bbox=bbox, frame_hw=frame_hw, det_conf=det_conf,
@@ -171,14 +174,19 @@ class MatchEngine:
             within_ambiguous=best_within_amb, plate=plate, plate_conf=plate_conf,
         )
 
-    def match(self, query: Query, sources: list[SourceFrames]) -> MatchResult:
+    def match(self, query: Query, sources: list[SourceFrames],
+              accept_threshold: float | None = None) -> MatchResult:
+        """Rank sources for the query. ``accept_threshold`` overrides the config's accept
+        threshold for this call only (thread-safe — the shared config is not mutated), so
+        an operator's per-search sensitivity control doesn't race across concurrent
+        requests."""
+        cfg = (replace(self.cfg, accept_threshold=float(accept_threshold))
+               if accept_threshold is not None else self.cfg)
         warnings: list[str] = []
         enc = self._encoder_for(query.cls)
         if enc is None or not enc.available():
             return MatchResult(query_cls=query.cls,
                                warnings=("no encoder available for class",))
-        if not enc.available():  # pragma: no cover - defensive
-            warnings.append("encoder unavailable")
         if query.crop is None or query.crop.size == 0:
             return MatchResult(query_cls=query.cls, warnings=("empty query crop",))
 
@@ -190,12 +198,13 @@ class MatchEngine:
 
         scored: list[_SourceScore] = []
         for src in sources:
-            s = self._match_source(query, src, qv, enc)
+            s = self._match_source(query, src, qv, enc, cfg)
             if s is None:
                 continue
             plate_ok = bool(query.plate and s.plate
-                            and plates_match(query.plate, s.plate))
-            if s.score >= self.cfg.accept_threshold or plate_ok:
+                            and plates_match(query.plate, s.plate,
+                                             fold_confusable=self.plate_fold))
+            if s.score >= cfg.accept_threshold or plate_ok:
                 scored.append(s)
 
         # deterministic ordering: score desc, then source_id asc as a stable tiebreak
@@ -205,16 +214,17 @@ class MatchEngine:
         for rank, s in enumerate(scored):
             runner = scored[rank + 1].score if rank + 1 < len(scored) else None
             cross_margin = margin(s.score, runner)
-            cross_amb = is_ambiguous(s.score, runner, self.cfg)
+            cross_amb = is_ambiguous(s.score, runner, cfg)
             plate_match = bool(
-                query.plate and s.plate and plates_match(query.plate, s.plate)
+                query.plate and s.plate
+                and plates_match(query.plate, s.plate, fold_confusable=self.plate_fold)
             )
             eff_margin = min(s.within_margin, cross_margin)
             ambiguous = bool(s.within_ambiguous or cross_amb) and not plate_match
             conf = confidence(
                 score=s.score, margin_val=eff_margin, det_conf=s.det_conf,
                 mask_coverage=s.mask_coverage, trust=enc.trust, support=s.support,
-                cfg=self.cfg, plate_match=plate_match,
+                cfg=cfg, plate_match=plate_match,
             )
             x1, y1, x2, y2 = s.bbox
             fh, fw = s.frame_hw

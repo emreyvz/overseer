@@ -160,6 +160,31 @@ def test_plate_short_circuit_is_definitive() -> None:
     assert hit.ambiguous is False
 
 
+def test_accept_threshold_override_is_per_call() -> None:
+    eng = _engine(full_frame_detector("person"))
+    q = Query(cls="person", crop=pattern_a())
+    # cam-B is a different (but non-degenerate) pattern that scores modestly
+    other = np.zeros((80, 40, 3), dtype=np.uint8)
+    other[:20] = (0, 0, 200)
+    other[20:] = (0, 120, 60)
+    sources = [SourceFrames(2, "cam-B", [other] * 3)]
+    strict = eng.match(q, sources, accept_threshold=0.99)
+    loose = eng.match(q, sources, accept_threshold=0.1)
+    assert len(loose.hits) >= len(strict.hits)
+    # the shared config is not mutated by the override
+    assert eng.cfg.accept_threshold == 0.6
+
+
+def test_inactive_single_frame_camera_matches() -> None:
+    eng = _engine(full_frame_detector("person"))
+    q = Query(cls="person", crop=pattern_a())
+    # a single-frame window (an inactive camera's thumbnail) still yields a hit
+    sources = [SourceFrames(1, "cam-A", [pattern_a()])]
+    res = eng.match(q, sources)
+    assert len(res.hits) == 1
+    assert res.hits[0].evidence.temporal_support == 1
+
+
 def test_wrong_class_never_matches() -> None:
     # query is a person but every detection is a vehicle -> nothing to compare
     eng = _engine(full_frame_detector("vehicle"))

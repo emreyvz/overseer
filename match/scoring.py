@@ -51,18 +51,28 @@ def cosine(a: Sequence[float] | np.ndarray, b: Sequence[float] | np.ndarray) -> 
     return float(np.dot(a, b) / (na * nb))
 
 
+def required_support(n_candidate_frames: int, cfg: ScoringConfig) -> int:
+    """How many supporting frames are needed to assert a match. Normally
+    ``min_temporal_support``, but never more than the number of frames actually available
+    for this source: an inactive camera we only have a single frame for must still be
+    searchable, and its single frame IS all the evidence there is (temporal_support in the
+    hit's evidence tells the operator the match rests on one frame)."""
+    return min(cfg.min_temporal_support, max(1, n_candidate_frames))
+
+
 def aggregate_window(scores: Sequence[float], cfg: ScoringConfig) -> tuple[float, int]:
     """Aggregate per-frame scores into one stable window score.
 
     Returns (aggregated_score, support_count). ``support_count`` is the number of frames
-    at or above ``frame_floor``. If support is below ``min_temporal_support`` the match is
-    not asserted and the score is -1.0 — a single lucky frame can never win. Aggregation
-    is a ``'lower'``-interpolated percentile so the result is always an observed value and
-    thus exactly reproducible across platforms."""
+    at or above ``frame_floor``. If support is below ``required_support`` the match is not
+    asserted and the score is -1.0 — one lucky frame among many can never win, but a source
+    that only offered a few frames is judged against what it offered. Aggregation is a
+    ``'lower'``-interpolated percentile so the result is always an observed value and thus
+    exactly reproducible across platforms."""
     s = [float(x) for x in scores]
     supporting = sorted(x for x in s if x >= cfg.frame_floor)
     support = len(supporting)
-    if support < cfg.min_temporal_support:
+    if support < required_support(len(s), cfg):
         return (-1.0, support)
     val = float(np.percentile(supporting, cfg.aggregate_percentile, method="lower"))
     return (val, support)

@@ -193,3 +193,33 @@ forensic:
     labels: [tisort, gomlek, ceket, hoodie, elbise]
   colors:
     palette: default
+
+# Reliable live appearance matching (match/ engine). Replaces the colour-histogram
+# visual match. Model paths are relative to models/; when a weight file is absent the
+# engine falls back to the deterministic baseline encoder and says so in evidence.
+match:
+  enabled: true
+  detect_conf: 0.25          # YOLO confidence for candidate detection during a search
+  window_seconds: 3.0        # rolling window read on a search (live but stable)
+  max_frames: 20             # ring-buffer cap per source
+  store_max_width: 960       # downscale stored frames to bound memory
+  scoring:
+    frame_floor: 0.5
+    min_temporal_support: 2
+    aggregate_percentile: 80.0
+    accept_threshold: 0.6
+    min_margin: 0.06
+  models:
+    person_reid: osnet_x1_0.torchscript     # person ReID; empty/missing => baseline
+    vehicle_reid: veri_reid.torchscript      # vehicle ReID
+    generic: dinov2_vits14.torchscript       # generic object/animal embedding
+    seg: yolo11n-seg.pt                       # foreground segmentation (ultralytics)
+  reid_input: [256, 128]
+  vehicle_input: [256, 256]
+  generic_input: [224, 224]
+  anpr:
+    enabled: true
+    langs: [en]
+    gpu: true
+    min_agreement: 3
+    fold_confusable: true

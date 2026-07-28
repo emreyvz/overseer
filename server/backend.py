@@ -28,6 +28,9 @@ from core.pipeline import AnalysisResult, AnalysisWorker, EventRecorder
 from events.bus import EventBus
 from events.types import Event
 from forensic.palette import dominant_color_name
+from match.engine import SourceFrames
+from match.rolling import RollingFrameStore
+from match.types import Query
 from objects.monitor import ObjectMonitor
 from plugins.manager import PluginManager
 from pose.monitor import PoseMonitor
@@ -99,6 +102,14 @@ class Backend:
         self.ai = LLMClient()       # GLM/OpenAI-compatible assistant layer
         self._yolo = None           # YoloBackend handle for 'look closer'
         self._clip_ring: deque = deque(maxlen=40)  # recent frames for incident clips
+        # Live-but-stable appearance matching: a per-source rolling frame window + a
+        # lazily-built engine (real ReID/ANPR/seg models if present, baseline otherwise).
+        self.rolling = RollingFrameStore(
+            window_seconds=float(self.config.get("match.window_seconds", 3.0)),
+            max_frames=int(self.config.get("match.max_frames", 20)),
+        )
+        self.match_engine = None
+        self.match_info: dict = {}
 
         self._reader: StreamReader | None = None
         self._worker: AnalysisWorker | None = None
@@ -347,6 +358,11 @@ class Backend:
         self._clip_ring.append(cv2.resize(img, (640, max(1, int(h * 640 / w)))) if w > 640 else img.copy())
 
         now = time.time()
+        # feed the rolling window for appearance search (active camera only, bounded size)
+        if self._source_id is not None and bool(self.config.get("match.enabled", True)):
+            mw = int(self.config.get("match.store_max_width", 960))
+            stored = cv2.resize(img, (mw, max(1, int(h * mw / w)))) if w > mw else img.copy()
+            self.rolling.add(self._source_id, stored, now)
         dets = []
         idx = 0
         weapon_box = None
@@ -565,101 +581,110 @@ class Backend:
             return cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
         return None
 
-    @staticmethod
-    def _gray_world(bgr: Any) -> Any:
-        """Gray-world white balance (catalog 14, colour constancy). Each camera has its
-        own colour cast; normalising it means the SAME jacket reads the same hue on
-        every feed, so cross-camera appearance matching stops drifting on white balance."""
+    def _ensure_match_engine(self):
+        """Build the appearance-match engine once, lazily (it needs the YOLO detector).
+        Specialized ReID/ANPR/seg models load if their weights are present under models/,
+        else the deterministic baseline is used and reported in self.match_info."""
+        if self.match_engine is not None:
+            return self.match_engine
+        if self._yolo is None:
+            return None
+        from match.factory import build_engine
+        conf = float(self.config.get("match.detect_conf", 0.25))
+
+        def detect(frame: Any) -> Any:
+            return self._yolo.detect_crop(frame, conf=conf)
+
         try:
-            b, g, r = cv2.split(bgr.astype(np.float32))
-            mb, mg, mr = float(b.mean()) + 1e-6, float(g.mean()) + 1e-6, float(r.mean()) + 1e-6
-            mgray = (mb + mg + mr) / 3.0
-            b *= mgray / mb; g *= mgray / mg; r *= mgray / mr
-            return cv2.merge([b, g, r]).clip(0, 255).astype(np.uint8)
+            self.match_engine, self.match_info = build_engine(
+                self.config, detect, models_dir="models", category_to_cls=_CATEGORY_CLS)
+            log.info("match engine ready: %s", self.match_info)
+        except Exception:  # noqa: BLE001 - degrade gracefully; search just returns nothing
+            log.exception("match engine build failed")
+            self.match_engine = None
+        return self.match_engine
+
+    def _infer_query_class(self, crop: Any) -> str:
+        """Best-guess the class of an uploaded query crop by detecting inside it."""
+        if self._yolo is None:
+            return "object"
+        try:
+            dets = self._yolo.detect_crop(crop, conf=0.2)
         except Exception:  # noqa: BLE001
-            return bgr
+            return "object"
+        best, best_conf = "object", -1.0
+        for d in dets:
+            if d.confidence > best_conf:
+                best_conf = d.confidence
+                best = _CATEGORY_CLS.get(d.category, "object")
+        return best
+
+    def _query_plate(self, crop: Any) -> str | None:
+        """Read a plate off the query crop itself; a confident read seeds a definitive
+        cross-camera plate match."""
+        eng = self.match_engine
+        if eng is None or eng.plate_reader is None:
+            return None
+        try:
+            from match.anpr.normalize import normalize_plate
+            reads = sorted(eng.plate_reader(crop) or [], key=lambda r: -r[1])
+            for text, conf in reads:
+                p = normalize_plate(text, eng.plate_fold)
+                if p and conf >= 0.5:
+                    return p
+        except Exception:  # noqa: BLE001
+            pass
+        return None
 
     @staticmethod
-    def _hs_hist(bgr: Any) -> Any:
-        """HS colour histogram of a crop, normalised for comparison."""
-        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, (0, 30, 25), (180, 255, 255))
-        h = cv2.calcHist([hsv], [0, 1], mask, [30, 12], [0, 180, 0, 256])
-        cv2.normalize(h, h, 0, 1, cv2.NORM_MINMAX)
-        return h
+    def _hit_to_dict(h: Any) -> dict:
+        e = h.evidence
+        return {
+            "camId": str(h.source_id), "cam": h.source_name, "cls": h.cls,
+            "score": h.score, "confidence": h.confidence, "margin": h.margin,
+            "ambiguous": h.ambiguous, "plate": h.plate, "bbox": list(h.bbox_norm),
+            "evidence": {
+                "score": e.score, "margin": e.margin, "det_conf": e.det_conf,
+                "mask_coverage": e.mask_coverage, "temporal_support": e.temporal_support,
+                "model_id": e.model_id, "trust": e.trust, "plate": e.plate,
+                "plate_conf": e.plate_conf, "plate_match": e.plate_match,
+            },
+        }
 
-    def _appearance_sig(self, bgr: Any, split: bool = False) -> Any:
-        """Appearance signature of a crop, white-balanced first. For people (split=True)
-        the crop is cut into an upper (torso) and lower (legs) band, each with its own
-        histogram (catalog 15) — far more discriminative than one colour blob, e.g. a
-        red-top/black-jeans person no longer matches an all-red one."""
-        bgr = self._gray_world(bgr)
-        if split and bgr.shape[0] >= 24:
-            cut = int(bgr.shape[0] * 0.55)
-            return ("split", self._hs_hist(bgr[:cut]), self._hs_hist(bgr[cut:]))
-        return ("whole", self._hs_hist(bgr))
+    def visual_match(self, entity_bgr: Any, kind: str | None = None,
+                     thresh: float = 0.42) -> list[dict]:
+        """Find a watchlist entity across cameras by real appearance identity.
 
-    @staticmethod
-    def _compare_sig(a: Any, b: Any) -> float:
-        """Correlation similarity between two signatures. Split signatures compare
-        band-for-band (torso weighted 0.6, legs 0.4); falls back to whole-vs-whole."""
-        try:
-            if a[0] == "split" and b[0] == "split":
-                up = float(cv2.compareHist(a[1], b[1], cv2.HISTCMP_CORREL))
-                lo = float(cv2.compareHist(a[2], b[2], cv2.HISTCMP_CORREL))
-                return 0.6 * up + 0.4 * lo
-            return float(cv2.compareHist(a[-1], b[-1], cv2.HISTCMP_CORREL))
-        except Exception:  # noqa: BLE001
-            return -1.0
-
-    def visual_match(self, entity_bgr: Any, kind: str | None = None, thresh: float = 0.42) -> list[dict]:
-        """Find a watchlist entity across cameras by APPEARANCE. Crucially, it first
-        DETECTS the objects in each frame and only compares against detections of the
-        SAME class (car→car, person→person) — so it locks onto the real object, never
-        the sky or a wall that merely shares a colour. People are matched by a part-based
-        (torso/legs) signature after white balancing, and each camera's winner must beat
-        its runner-up by a margin — otherwise it is flagged ambiguous, not asserted."""
-        want = {"person": "person", "vehicle": "vehicle", "animal": "animal", "pet": "animal", "object": "object"}.get(kind or "", None)
-        split = want == "person"
-        try:
-            e_sig = self._appearance_sig(entity_bgr, split=split)
-        except Exception:  # noqa: BLE001
+        Detects same-class candidates in each source, encodes them with a ReID/embedding
+        model (masked to the subject), and scores by cosine — stabilised over the active
+        camera's last-N-seconds window. Vehicles also run ANPR: a plate matching the
+        query's plate is definitive. Every hit carries evidence (score parts, confidence,
+        margin, model) so the result explains itself; a near-tie is flagged, not asserted."""
+        if entity_bgr is None or getattr(entity_bgr, "size", 0) == 0:
             return []
-        out: list[dict] = []
+        eng = self._ensure_match_engine()
+        if eng is None:
+            return []
+        cls = {"person": "person", "vehicle": "vehicle", "animal": "animal",
+               "pet": "animal", "object": "object"}.get(kind or "", None)
+        if cls is None:
+            cls = self._infer_query_class(entity_bgr)
+        plate = self._query_plate(entity_bgr) if cls == "vehicle" else None
+        query = Query(cls=cls, crop=entity_bgr, plate=plate)
+
+        now = time.time()
+        sources: list[SourceFrames] = []
         for s in self.db.list_sources():
-            frame = self._source_frame(s)
-            if frame is None or frame.size == 0:
-                continue
-            fh, fw = frame.shape[:2]
-            dets = self._yolo.detect_crop(frame, conf=0.25) if self._yolo is not None else []
-            scored: list[tuple] = []
-            for d in dets:
-                cls = _CATEGORY_CLS.get(d.category, "object")
-                if want and cls != want:
-                    continue  # only same-class candidates — this kills the sky/wall matches
-                x1, y1, x2, y2 = (int(v) for v in d.bbox)
-                crop = frame[max(0, y1):y2, max(0, x1):x2]
-                if crop.size == 0:
-                    continue
-                sim = self._compare_sig(e_sig, self._appearance_sig(crop, split=split))
-                if sim > -1.0:
-                    scored.append((sim, cls, x1, y1, x2, y2))
-            if not scored:
-                continue
-            scored.sort(key=lambda t: -t[0])
-            best = scored[0]
-            if best[0] < thresh:
-                continue
-            # Confidence margin: a clear winner beats the next candidate; a near-tie
-            # (two similar-looking objects in frame) is honestly reported as ambiguous.
-            runner = scored[1][0] if len(scored) > 1 else -1.0
-            margin = round(best[0] - runner, 3) if runner > -1.0 else 1.0
-            sim, cls, x1, y1, x2, y2 = best
-            out.append({"camId": str(s.id), "cam": s.name, "score": round(sim, 3), "cls": cls,
-                        "margin": margin, "ambiguous": bool(runner > -1.0 and margin < 0.06),
-                        "bbox": [x1 / fw, y1 / fh, (x2 - x1) / fw, (y2 - y1) / fh]})
-        out.sort(key=lambda r: -r["score"])
-        return out
+            window = self.rolling.window(s.id, now) if s.id == self._source_id else []
+            if not window:
+                f = self._source_frame(s)
+                if f is not None and getattr(f, "size", 0) > 0:
+                    window = [f]
+            if window:
+                sources.append(SourceFrames(s.id, s.name, window))
+
+        res = eng.match(query, sources, accept_threshold=float(thresh))
+        return [self._hit_to_dict(h) for h in res.hits]
 
     def _on_event(self, ev: Event) -> None:
         type_en = ev.type.name.replace("_", " ")

@@ -55,6 +55,22 @@ def test_aggregate_percentile_is_reproducible() -> None:
     assert aggregate_window(scores, cfg) == aggregate_window(list(reversed(scores)), cfg)
 
 
+def test_single_frame_source_is_searchable() -> None:
+    # an inactive camera offering ONE frame must still qualify on that one frame
+    cfg = ScoringConfig(frame_floor=0.5, min_temporal_support=2)
+    score, support = aggregate_window([0.9], cfg)
+    assert support == 1
+    assert score == 0.9
+
+
+def test_one_lucky_frame_among_many_still_rejected() -> None:
+    cfg = ScoringConfig(frame_floor=0.5, min_temporal_support=2)
+    # five candidate frames, only one clears the floor -> still not asserted
+    score, support = aggregate_window([0.9, 0.1, 0.2, 0.3, 0.1], cfg)
+    assert score == -1.0
+    assert support == 1
+
+
 def test_margin_and_ambiguity() -> None:
     cfg = ScoringConfig(min_margin=0.06)
     assert margin(0.9, None) == 1.0
