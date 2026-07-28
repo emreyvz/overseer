@@ -27,7 +27,7 @@ def _resolve(config, key: str, size_key: str, models_dir: Path,
     if name:
         size = tuple(int(v) for v in config.get(f"match.{size_key}", [256, 128]))
         candidates.append(TorchScriptEncoder(
-            models_dir / name, key, trust=_TRUST.get(key, 0.85),
+            models_dir / name, Path(name).stem, trust=_TRUST.get(key, 0.85),
             input_size=size, mask_background=mask_bg,
         ))
     return best_available(candidates, baseline)
@@ -39,13 +39,16 @@ def build_engine(config, detect, *, models_dir: str | Path = "models",
     models_dir = Path(models_dir)
     baseline = DeterministicEncoder()
 
-    person, fb_p = _resolve(config, "person_reid", "reid_input", models_dir,
-                            baseline, mask_bg=True)
-    vehicle, fb_v = _resolve(config, "vehicle_reid", "vehicle_input", models_dir,
-                             baseline, mask_bg=True)
     # generic embedder (DINOv2/CLIP) reads whole-image semantics -> do not mask
-    generic, fb_g = _resolve(config, "generic", "generic_input", models_dir,
-                             baseline, mask_bg=False)
+    generic, _fb_g = _resolve(config, "generic", "generic_input", models_dir,
+                              baseline, mask_bg=False)
+    # When no dedicated ReID weights are present, fall back to the generic embedder if it
+    # loaded (far stronger than the colour-grid baseline) and only then to baseline.
+    reid_fallback = generic if generic.available() else baseline
+    person, _fb_p = _resolve(config, "person_reid", "reid_input", models_dir,
+                             reid_fallback, mask_bg=True)
+    vehicle, _fb_v = _resolve(config, "vehicle_reid", "vehicle_input", models_dir,
+                              reid_fallback, mask_bg=True)
 
     seg_name = str(config.get("match.models.seg", "") or "")
     seg_backend = YoloSegBackend(models_dir / seg_name) if seg_name else None
@@ -75,9 +78,9 @@ def build_engine(config, detect, *, models_dir: str | Path = "models",
         category_to_cls=category_to_cls,
     )
     info = {
-        "person": baseline.model_id if fb_p else person.model_id,
-        "vehicle": baseline.model_id if fb_v else vehicle.model_id,
-        "generic": baseline.model_id if fb_g else generic.model_id,
+        "person": person.model_id,
+        "vehicle": vehicle.model_id,
+        "generic": generic.model_id,
         "segmenter": "yolo-seg" if (seg_backend and seg_backend.available()) else "ellipse",
         "anpr": "on" if (plate_reader and plate_reader.available()) else "off",
     }

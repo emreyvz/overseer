@@ -22,6 +22,15 @@ dependencies = [
     "yt-dlp>=2026.7.4",
 ]
 
+[project.optional-dependencies]
+# Appearance-search model backends. Optional: the match engine runs without them
+# (deterministic baseline / DINOv2 fallback). Weights themselves are fetched by
+# `python -m match.tools.export_models`, not pip. ANPR needs easyocr; dedicated person
+# ReID needs torchreid (plus ReID-trained weights) — see that module's docstring.
+ai-extras = [
+    "easyocr>=1.7",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
