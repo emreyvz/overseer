@@ -174,6 +174,17 @@ speed:
   ema_alpha: 0.4           # exponential smoothing weight for the newest reading
   min_kmh: 3.0             # below this reads as 0 (stationary) instead of crawling jitter
   max_kmh: 300.0           # above this is treated as track-id reuse and ignored
+# Vehicle make/brand classification for roster profiles. Runs on CPU in the background
+# harvester (off the GPU hot path). Quiet until its weights are present under models/:
+#   uv run python -m match.tools.export_models --only carbrand
+# Confidence-gated (needs a high top score AND a clear margin) so it never asserts a
+# confident-but-wrong brand on buses/trucks/odd crops.
+vehicle:
+  make:
+    model: vehicle_make.torchscript
+    min_conf: 0.35          # top-1 probability floor
+    min_margin: 0.10        # required lead over the runner-up brand
+    min_area: 4096          # skip crops smaller than this (unreliable)
 pose:
   enabled: true
   buffer_size: 30

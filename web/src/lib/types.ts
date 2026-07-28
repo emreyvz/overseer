@@ -83,7 +83,7 @@ export interface RosterEntry {
   cls: 'person' | 'vehicle' | string
   snapshot: string | null      // /snapshots/... path, prefix with the API base
   plate: string | null
-  attrs: { upper_color?: string; lower_color?: string; height?: string; accessory?: string[]; subtype?: string }
+  attrs: { upper_color?: string; lower_color?: string; height?: string; accessory?: string[]; subtype?: string; make?: string }
   obs: number
   cam?: string | null           // camera the subject was last seen on
   first_ts: number

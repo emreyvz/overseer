@@ -12,6 +12,7 @@ Steps:
   dinov2  DINOv2 ViT-S/14 generic embedder (TS)     -> models/dinov2_vits14.torchscript
   osnet   OSNet-AIN person ReID (needs torchreid)   -> models/osnet_ain_x1_0.torchscript
   veri    fast-reid VeRi vehicle ReID (FASTREID_ROOT) -> models/veri_sbs_R50-ibn.torchscript
+  carbrand ViT car-make classifier (needs transformers) -> models/vehicle_make.torchscript
   easyocr trigger EasyOCR model download (ANPR)     -> ~/.EasyOCR cache
 
 Dedicated person/vehicle ReID (OSNet / a VeRi-trained model) give the best identity
@@ -136,6 +137,44 @@ def _export_veri() -> str:
     return f"veri: exported {ckpts[0].name} -> {dst} (raw [0,255] input, 2048-d)"
 
 
+def _export_carbrand() -> str:
+    """Export a car-BRAND classifier (dima806/car_brands_image_detection: a ViT fine-tuned to
+    55 makes, incl. Renault/Fiat/Peugeot/VW/Hyundai — not just US brands) to TorchScript, plus
+    a sidecar labels file. Make-level (not make+model+year) is the honest, generalizable target:
+    the specific model/year classifiers are US-market and date badly. Runtime needs only torch;
+    transformers is required just here. `uv pip install transformers safetensors` if missing."""
+    import json
+
+    dst = MODELS / "vehicle_make.torchscript"
+    labels_dst = MODELS / "vehicle_make.labels.json"
+    if dst.exists() and labels_dst.exists():
+        return f"carbrand: already present ({dst})"
+    try:
+        import torch
+        from torch import nn
+        from transformers import ViTForImageClassification
+    except Exception as exc:  # noqa: BLE001
+        return f"carbrand: SKIPPED - `uv pip install transformers safetensors` ({type(exc).__name__})"
+    repo = "dima806/car_brands_image_detection"
+    model = ViTForImageClassification.from_pretrained(repo).eval()
+    id2label = model.config.id2label
+    labels = [id2label[i] for i in range(len(id2label))]
+
+    class _Logits(nn.Module):
+        def __init__(self, m: nn.Module) -> None:
+            super().__init__()
+            self.m = m
+
+        def forward(self, x):  # return the raw class logits as a plain tensor (traceable)
+            return self.m(pixel_values=x).logits
+
+    wrapped = _Logits(model).eval()
+    with torch.no_grad():
+        torch.jit.trace(wrapped, torch.zeros(1, 3, 224, 224)).save(str(dst))
+    labels_dst.write_text(json.dumps(labels, ensure_ascii=False), encoding="utf-8")
+    return f"carbrand: exported {repo} -> {dst} ({len(labels)} makes)"
+
+
 def _export_easyocr() -> str:
     try:
         import easyocr
@@ -146,7 +185,7 @@ def _export_easyocr() -> str:
 
 
 _STEPS = {"seg": _export_seg, "dinov2": _export_dinov2, "osnet": _export_osnet,
-          "veri": _export_veri, "easyocr": _export_easyocr}
+          "veri": _export_veri, "carbrand": _export_carbrand, "easyocr": _export_easyocr}
 
 
 def main() -> None:
