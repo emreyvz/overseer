@@ -109,6 +109,31 @@ def test_unreliable_scale_keeps_last() -> None:
     assert v is not None and abs(v - 5.4) < 1.0
 
 
+def test_dashcam_pace_keeping_borrows_camera_speed() -> None:
+    # The real dashcam bug: a car directly ahead keeping pace sits at the focus of expansion,
+    # where there is no local parallax to measure, so ego compensation alone reads it STOPPED.
+    # A parked car off to the side DOES show parallax, teaching the camera's own speed; the
+    # pace-keeping car should then borrow that instead of reading 0.
+    est = SpeedEstimator(ema_alpha=1.0, window=2.0, min_kmh=3.0, scale_alpha=1.0,
+                         still_px=25.0, cam_alpha=1.0)
+    # track A — parked car off to the side: it slides across the frame at the camera's rate
+    # (apparent == ego), so its ground speed is ~0 but it reveals the camera's speed.
+    for i in range(11):
+        est.update(1, _box(100 + i * 20, 300, w=100, h=100), now=i * 0.1,
+                   ego_delta=(20.0, 0.0), scale_ref_m=1.5, cam_moving=True)
+    cam = est.camera_speed()
+    assert cam > 5.0                       # learned the camera is moving: 200 px/s * 0.015 * 3.6
+    # track B — car dead ahead, frozen in frame, no local parallax (ego ~0 at the FOE)
+    v = None
+    for i in range(11):
+        v = est.update(2, _box(500, 300, w=100, h=100), now=i * 0.1,
+                       ego_delta=(0.0, 0.0), scale_ref_m=1.5, cam_moving=True)
+    assert v is not None and abs(v - cam) < 1.0     # borrows the camera speed, not "stopped"
+    # track A itself (parked) still reads ~0 over the ground
+    a = est.get(1)
+    assert a is not None and a < 3.0
+
+
 def test_teleport_ignored() -> None:
     est = SpeedEstimator(meters_per_pixel=1.0, max_kmh=200.0, ema_alpha=1.0, min_kmh=0.0)
     est.update(1, _box(0, 200), now=0.0)

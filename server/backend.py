@@ -106,6 +106,7 @@ class Backend:
             ema_alpha=float(self.config.get("speed.ema_alpha", 0.4)),
             min_kmh=float(self.config.get("speed.min_kmh", 3.0)),
             max_kmh=float(self.config.get("speed.max_kmh", 300.0)),
+            still_px=float(self.config.get("speed.still_px", 25.0)),
         )  # rough per-vehicle km/h estimate for the live overlay
         # Camera ego-motion: a dashcam drags the whole scene, so vehicle speeds must be measured
         # relative to the ground, not the frame. EgoMotion supplies the per-frame global shift
@@ -685,7 +686,7 @@ class Backend:
                         reliable = y1 > 3 and y2 < h - 3
                         kmh = self.speed.update(d.track_id, (x1, y1, x2, y2), now,
                                                 ego_delta=ego_delta, scale_ref_m=real_h,
-                                                scale_reliable=reliable)
+                                                scale_reliable=reliable, cam_moving=self._cam_moving)
                         if kmh is not None:
                             det["speed"] = round(kmh)
                 dets.append(det)
