@@ -26,11 +26,20 @@ def _format_selector(max_h: int) -> str:
     return (f"bv*[height<={max_h}][ext=mp4]/bv*[height<={max_h}]/b[height<={max_h}]")
 
 
+_VIDEO_EXTS = {".mp4", ".webm", ".mkv", ".mov", ".m4v"}
+
+
+def youtube_id(url: str) -> str | None:
+    """The 11-char YouTube video id, or None if the URL isn't a recognizable YouTube URL."""
+    m = _YT_ID.search(url or "")
+    return m.group(1) if m else None
+
+
 def source_key(url: str) -> str:
     """Stable cache key: the YouTube video id when present, else a short hash of the URL."""
-    m = _YT_ID.search(url or "")
-    if m:
-        return m.group(1)
+    vid = youtube_id(url)
+    if vid:
+        return vid
     return "u" + hashlib.sha1((url or "").encode("utf-8")).hexdigest()[:16]
 
 
@@ -50,10 +59,48 @@ class MediaLibrary:
         self._lock = threading.Lock()
 
     def _cached_file(self, key: str) -> Path | None:
+        # only real video files — never a .part in progress or a .poster.jpg image
         for p in sorted(self._dir.glob(f"{key}.*")):
-            if p.suffix.lower() != ".part" and p.is_file() and p.stat().st_size > 0:
+            if p.suffix.lower() in _VIDEO_EXTS and p.is_file() and p.stat().st_size > 0:
                 return p
         return None
+
+    def cached_path(self, url: str) -> Path | None:
+        """The downloaded local file if present, WITHOUT triggering a download. Used by
+        previews so merely looking at the map never starts a multi-GB fetch."""
+        return self._cached_file(source_key(url))
+
+    def poster(self, url: str) -> bytes | None:
+        """A still poster (the video's YouTube thumbnail) to show before/while the video
+        downloads, so a YouTube camera has an image immediately instead of NO SIGNAL.
+        Fetched once in the background and cached; None until it lands."""
+        vid = youtube_id(url)
+        if not vid:
+            return None
+        pf = self._dir / f"{vid}.poster.jpg"
+        if pf.exists() and pf.stat().st_size > 0:
+            return pf.read_bytes()
+        with self._lock:
+            key = f"poster:{vid}"
+            th = self._threads.get(key)
+            if th is None or not th.is_alive():
+                th = threading.Thread(target=self._fetch_poster, args=(vid, pf),
+                                      name=f"Poster({vid})", daemon=True)
+                self._threads[key] = th
+                th.start()
+        return None
+
+    @staticmethod
+    def _fetch_poster(vid: str, dest: Path) -> None:
+        import requests
+        for quality in ("maxresdefault", "sddefault", "hqdefault"):
+            try:
+                r = requests.get(f"https://img.youtube.com/vi/{vid}/{quality}.jpg", timeout=6)
+                if r.status_code == 200 and len(r.content) > 1500 and r.content[:2] == b"\xff\xd8":
+                    dest.write_bytes(r.content)
+                    return
+            except Exception:  # noqa: BLE001
+                continue
 
     def local_path(self, url: str) -> Path | None:
         """Return the local file for this source if it is downloaded, else kick off a

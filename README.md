@@ -93,7 +93,42 @@ chmod +x overseer.sh
 ./overseer.sh
 ```
 
-The first run installs the Python toolchain on its own and pulls the dependencies, so give it a few minutes. If Node.js is installed it builds and opens the full desktop app. If it is not, it opens in your browser at `http://127.0.0.1:8787` instead. Either way you get the whole thing.
+The first run installs the Python toolchain on its own, pulls the dependencies, and fetches the vision models, so give it a few minutes. If Node.js is installed it builds and opens the full desktop app. If it is not, it opens in your browser at `http://127.0.0.1:8787` instead. Either way you get the whole thing.
+
+### Vision models
+
+On the first launch `overseer.cmd` / `overseer.sh` downloads the vision models for you. If a download is skipped or fails the app still runs, just at reduced accuracy, and it says so on each result, so a failed model fetch never crashes anything. You can re-run the fetch at any time:
+
+```bash
+uv run python -m match.tools.export_models
+```
+
+Most models are fully automatic. Two dedicated re-identification models give the best identity accuracy but are hosted behind Google Drive / release pages, so you download the checkpoint once by hand and the same command converts it. The app already works well without them because the general DINOv2 embedder stands in.
+
+| Model | What it does | How it arrives |
+|-------|--------------|----------------|
+| YOLO11 detector (`yolo11s.pt`) | Finds people, vehicles, animals, weapons | Automatic (first analysis) |
+| YOLO11-seg (`yolo11n-seg.pt`) | Foreground masks for cleaner matching | Automatic |
+| DINOv2 ViT-S/14 (`dinov2_vits14.torchscript`) | Generic appearance embedding; also the person/vehicle fallback | Automatic (torch.hub) |
+| EasyOCR | Plate reading (ANPR) for vehicle identity | Automatic with `uv sync --extra ai-extras` |
+| OSNet-AIN (`osnet_ain_x1_0.torchscript`) | Dedicated person re-identification | Manual checkpoint, see below |
+| VeRi R50-ibn (`veri_sbs_R50-ibn.torchscript`) | Dedicated vehicle re-identification | Manual checkpoint, see below |
+
+**Person re-identification (OSNet-AIN).** Download a cross-domain OSNet-AIN checkpoint from the torchreid model zoo, drop it into `models/`, then run the fetch command to convert it to `models/osnet_ain_x1_0.torchscript`.
+
+- Model zoo: https://github.com/KaiyangZhou/deep-person-reid/blob/master/docs/MODEL_ZOO.md
+- Recommended (multi-source, generalizes to unseen cameras): https://drive.google.com/file/d/1nIrszJVYSHf3Ej8-j6DTFdWz8EnO42PB/view
+
+**Vehicle re-identification (VeRi).** Download the fast-reid VeRi model, drop it into `models/`, and convert it. This one needs the fast-reid framework, so clone it and point `FASTREID_ROOT` at it before running the fetch.
+
+- Weights (direct download): https://github.com/JDAI-CV/fast-reid/releases/download/v0.1.1/veri_sbs_R50-ibn.pth
+- Framework: `git clone https://github.com/JDAI-CV/fast-reid` then `export FASTREID_ROOT=/path/to/fast-reid`
+
+Model files live under `models/` and are git ignored, so they never bloat the repo.
+
+### Using a YouTube video as a camera
+
+Add a YouTube watch URL as a source and overseer downloads that video once at up to 1080p and plays it start to finish on a loop, like a continuous live feed, running the same detection and tracking on it as on a real camera. It is downloaded a single time and reused, so it never re-streams and never expires. While the video is downloading the camera shows the video's poster and a progress badge.
 
 ### Optional AI setup
 

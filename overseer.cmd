@@ -30,6 +30,12 @@ echo   [1/3] Installing Python dependencies ^(first run downloads a lot, please 
 call uv sync
 if errorlevel 1 ( echo   ERROR: dependency install failed. & pause & exit /b 1 )
 
+REM ---- fetch AI models (best effort; never blocks launch, optional parts skip) ----
+echo   [setup] Enabling plate reading ^(ANPR^) — optional...
+call uv sync --extra ai-extras
+echo   [setup] Fetching AI models ^(one time; the app still runs if this is skipped^)...
+call uv run python -m match.tools.export_models
+
 REM ---- 2. Node present -> full desktop app; otherwise -> browser ----
 where npm >nul 2>nul
 if not errorlevel 1 (

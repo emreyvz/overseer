@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from server.media import MediaLibrary, source_key
+from server.media import MediaLibrary, source_key, youtube_id
 
 
 def test_source_key_from_youtube_forms() -> None:
@@ -55,6 +55,43 @@ def test_failed_download_sets_state(tmp_path: Path) -> None:
     st = lib.state(url)
     assert st["status"] == "failed"
     assert lib.local_path(url) is None
+
+
+def test_youtube_id() -> None:
+    assert youtube_id("https://youtu.be/dQw4w9WgXcQ?t=5") == "dQw4w9WgXcQ"
+    assert youtube_id("http://cam.local/stream") is None
+
+
+def test_cached_path_does_not_trigger_download(tmp_path: Path) -> None:
+    calls: list[str] = []
+    lib = MediaLibrary(tmp_path, downloader=_fake_downloader(calls))
+    assert lib.cached_path("https://youtu.be/dQw4w9WgXcQ") is None
+    assert calls == []                            # merely checking must NOT start a download
+
+
+def test_cached_path_returns_downloaded(tmp_path: Path) -> None:
+    lib = MediaLibrary(tmp_path)
+    key = source_key("https://youtu.be/dQw4w9WgXcQ")
+    (tmp_path / f"{key}.mp4").write_bytes(b"VIDEO")
+    assert lib.cached_path("https://youtu.be/dQw4w9WgXcQ") == tmp_path / f"{key}.mp4"
+
+
+def test_cached_file_ignores_poster_and_part(tmp_path: Path) -> None:
+    lib = MediaLibrary(tmp_path)
+    key = source_key("https://youtu.be/dQw4w9WgXcQ")
+    (tmp_path / f"{key}.poster.jpg").write_bytes(b"\xff\xd8IMG")
+    (tmp_path / f"{key}.mp4.part").write_bytes(b"PARTIAL")
+    assert lib.cached_path("https://youtu.be/dQw4w9WgXcQ") is None   # neither is a video
+    (tmp_path / f"{key}.mp4").write_bytes(b"VIDEO")
+    assert lib.cached_path("https://youtu.be/dQw4w9WgXcQ") is not None
+
+
+def test_poster_returns_cached_bytes(tmp_path: Path) -> None:
+    lib = MediaLibrary(tmp_path)
+    vid = "dQw4w9WgXcQ"
+    (tmp_path / f"{vid}.poster.jpg").write_bytes(b"\xff\xd8POSTER")
+    assert lib.poster(f"https://youtu.be/{vid}") == b"\xff\xd8POSTER"
+    assert lib.poster("http://cam.local/stream") is None    # non-youtube -> no poster
 
 
 def test_dedup_one_download(tmp_path: Path) -> None:
