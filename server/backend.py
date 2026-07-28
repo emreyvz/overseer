@@ -449,6 +449,7 @@ class Backend:
                     cat_to_cls=_CATEGORY_CLS,
                     plate_fn=self._roster_plate,
                     attrs_fn=self._roster_attrs,
+                    clip_fn=self._roster_clip if bool(self.config.get("roster.clips", True)) else None,
                     interval=float(self.config.get("roster.interval", 4.0)),
                 )
                 self._roster_harvester.start()
@@ -519,6 +520,76 @@ class Backend:
             return None
         finally:
             cap.release()
+
+    def _grab_burst(self, source: Any, n: int) -> list:
+        """Read up to n consecutive frames from a passive source (open, read a run, close) —
+        the raw material for a short sighting clip."""
+        from .ytstream import is_stream_url
+        url = getattr(source, "url", "") or ""
+        is_file = True
+        if is_stream_url(url):
+            local = self.media.cached_path(url)
+            if local is None:
+                return []
+            target = str(local)
+        elif url.lower().startswith(("rtsp://", "rtmp://")):
+            target, is_file = url, False
+        else:
+            target = url
+            is_file = not url.lower().startswith(("http://", "https://"))
+        cap = cv2.VideoCapture(target, cv2.CAP_FFMPEG)
+        frames: list = []
+        try:
+            if not cap.isOpened():
+                return []
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:  # noqa: BLE001
+                pass
+            if is_file:
+                off = self._roster_seek.get(getattr(source, "id", None), 0.0)
+                if off > 0.0:
+                    cap.set(cv2.CAP_PROP_POS_MSEC, off)
+            else:
+                for _ in range(2):
+                    cap.read()          # skip a couple of possibly-stale frames
+            for _ in range(int(n)):
+                ok, img = cap.read()
+                if not ok or img is None:
+                    break
+                frames.append(img)
+        except Exception:  # noqa: BLE001
+            return frames
+        finally:
+            cap.release()
+        return frames
+
+    def _roster_clip(self, source: Any, nbbox: tuple) -> str | None:
+        """A short, browser-playable clip of a roster sighting: a burst from the camera cropped
+        (with padding) to the subject. nbbox is normalized so it maps onto the burst's own
+        resolution. Best-effort — returns None if the burst can't be grabbed."""
+        frames = self._grab_burst(source, int(self.config.get("roster.clip_frames", 16)))
+        if len(frames) < 4:
+            return None
+        x1n, y1n, x2n, y2n = nbbox
+        crops = []
+        for f in frames:
+            h, w = f.shape[:2]
+            bw, bh = (x2n - x1n) * w, (y2n - y1n) * h
+            cx1 = max(0, int(x1n * w - bw * 0.4))
+            cy1 = max(0, int(y1n * h - bh * 0.4))
+            cx2 = min(w, int(x2n * w + bw * 0.4))
+            cy2 = min(h, int(y2n * h + bh * 0.4))
+            if cx2 - cx1 < 24 or cy2 - cy1 < 24:
+                return None
+            crop = f[cy1:cy2, cx1:cx2]
+            if crop.shape[1] > 380:      # bound the clip size
+                s = 380.0 / crop.shape[1]
+                crop = cv2.resize(crop, (380, max(1, int(crop.shape[0] * s))))
+            crops.append(crop)
+        h0, w0 = crops[0].shape[:2]      # writer needs a constant frame size
+        crops = [c if c.shape[:2] == (h0, w0) else cv2.resize(c, (w0, h0)) for c in crops]
+        return self._encode_clip(crops, fps=float(self.config.get("roster.clip_fps", 10.0)))
 
     def _roster_embed(self, crop: Any, cls: str) -> Any:
         """A ReID appearance embedding for a crop, for roster de-duplication. Serialized so

@@ -36,6 +36,9 @@ roster:
   fullres_interval: 25.0    # passive cameras: seconds between one-shot FULL-RES grabs (0 = off,
                             # thumbnail only). Catches distant subjects on cameras you're not
                             # actively viewing, without straining the system.
+  clips: true               # capture a short sighting clip (once per subject) for the dossier
+  clip_frames: 16           # frames grabbed for that clip
+  clip_fps: 10.0            # playback fps of the sighting clip
 
 detectors:
   motion:

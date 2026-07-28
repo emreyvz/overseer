@@ -82,7 +82,7 @@ class SessionRoster:
                 e = {"id": eid, "cls": cls, "first_ts": now, "last_ts": now, "obs": 0,
                      "snapshot": None, "snapshot_path": None, "best_area": 0.0,
                      "plate": None, "attrs": {}, "cam": cam, "first_cam": cam,
-                     "last_shot": 0.0, "embedding": embedding, "trail": {}}
+                     "last_shot": 0.0, "embedding": embedding, "trail": {}, "clip": None}
                 self._entries[eid] = e
             e["last_ts"] = now
             e["obs"] += 1
@@ -123,13 +123,25 @@ class SessionRoster:
                  for c, s in sorted(e.get("trail", {}).items(), key=lambda kv: kv[1]["first"])]
         return {"id": e["id"], "cls": e["cls"], "snapshot": e["snapshot"], "plate": e["plate"],
                 "attrs": e["attrs"], "obs": e["obs"], "cam": e.get("cam"),
-                "first_cam": e.get("first_cam"), "trail": trail,
+                "first_cam": e.get("first_cam"), "trail": trail, "clip": e.get("clip"),
                 "first_ts": e["first_ts"] * 1000, "last_ts": e["last_ts"] * 1000}
 
     def list(self) -> list[dict]:
         with self._lock:
             return sorted((self._public(e) for e in self._entries.values() if e["snapshot"]),
                           key=lambda x: -x["last_ts"])
+
+    def needs_clip(self, det_id: str) -> bool:
+        """A logged subject (has a photo) that hasn't got its short sighting clip yet."""
+        with self._lock:
+            e = self._entries.get(det_id)
+            return bool(e and e["snapshot"] and not e.get("clip"))
+
+    def set_clip(self, det_id: str, url: str | None) -> None:
+        with self._lock:
+            e = self._entries.get(det_id)
+            if e is not None and url:
+                e["clip"] = url
 
     def get(self, det_id: str) -> dict | None:
         with self._lock:
@@ -181,6 +193,7 @@ class RosterHarvester(threading.Thread):
                  detect_fn: Callable[[Any], list], embed_fn: Callable[[Any, str], Any],
                  cat_to_cls: dict[str, str], *, plate_fn: Callable[[Any], str | None] | None = None,
                  attrs_fn: Callable[[Any, str], dict] | None = None,
+                 clip_fn: Callable[[Any, tuple], str | None] | None = None,
                  interval: float = 4.0) -> None:
         super().__init__(daemon=True, name="RosterHarvester")
         self._roster = roster
@@ -191,6 +204,7 @@ class RosterHarvester(threading.Thread):
         self._cat2cls = cat_to_cls
         self._plate_fn = plate_fn
         self._attrs_fn = attrs_fn
+        self._clip_fn = clip_fn
         self._interval = float(interval)
         self._i = 0
         self._stopped = threading.Event()
@@ -201,6 +215,7 @@ class RosterHarvester(threading.Thread):
             return
         fh, fw = frame.shape[:2]
         cam = getattr(source, "name", None)
+        clipped = False   # at most one short sighting clip captured per scan (bounds the cost)
         for d in self._detect_fn(frame) or []:
             cls = self._cat2cls.get(getattr(d, "category", "object"), "object")
             if cls not in ("person", "vehicle"):
@@ -232,8 +247,19 @@ class RosterHarvester(threading.Thread):
                 subtype = getattr(d, "label", None)
                 if subtype:
                     attrs = {**(attrs or {}), "subtype": subtype}
-            self._roster.observe_reid(cls, crop, emb, time.time(), plate=plate,
-                                      attrs=attrs, cam=cam)
+            eid = self._roster.observe_reid(cls, crop, emb, time.time(), plate=plate,
+                                            attrs=attrs, cam=cam)
+            # once per subject, capture a short clip of the sighting (a padded burst around it).
+            # bbox is normalized so the clip burst can be a different resolution than this frame.
+            if (not clipped and self._clip_fn is not None and self._roster.needs_clip(eid)):
+                clipped = True
+                nbbox = (x1 / fw, y1 / fh, x2 / fw, y2 / fh)
+                try:
+                    url = self._clip_fn(source, nbbox)
+                except Exception:  # noqa: BLE001
+                    url = None
+                if url:
+                    self._roster.set_clip(eid, url)
 
     def run(self) -> None:
         while not self._stopped.is_set():

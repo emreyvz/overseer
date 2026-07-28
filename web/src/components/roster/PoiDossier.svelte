@@ -32,6 +32,8 @@
   const camByName = (name?: string | null) => $cameras.find((c) => c.name === name)
   const photo = $derived(entry.snapshot ? `${API}${entry.snapshot}?t=${entry.last_ts}` : '')
   const heroSrc = $derived(cutout ? `${API}/api/roster/${entry.id}/cutout?t=${entry.last_ts}` : photo)
+  const clipUrl = $derived(entry.clip ? `${API}${entry.clip}` : '')
+  const lastCamId = $derived(camByName(entry.cam)?.id)
 
   let trail = $derived(entry.trail ?? [])
   let geo = $derived(trail.length >= 2 && trail.every((t) => !!camByName(t.cam)?.coords))
@@ -178,9 +180,32 @@
       {#if focusNode}<button class="observe caps" onclick={() => observe(focusNode.name)}><span class="ico"></span>OBSERVE {focusNode.name}</button>{/if}
     </section>
 
-    <!-- MOVEMENT TRACE -->
+    <!-- LIVE + SIGHTING + MOVEMENT TRACE -->
     <section class="trace">
-      <div class="thead caps"><span class="tt">MOVEMENT TRACE</span><span class="th-sub">{nodes.length} CAMERA{nodes.length > 1 ? 'S' : ''} · DRAG PAN · WHEEL ZOOM</span></div>
+      <div class="livewall">
+        <figure class="wcell">
+          <figcaption class="wcap caps"><span class="wt">◈ SIGHTING</span><span class="wsub">{entry.first_cam ?? entry.cam ?? '—'} · {clock24(entry.first_ts)}</span></figcaption>
+          <div class="wbody">
+            {#if clipUrl}
+              <video src={clipUrl} autoplay loop muted playsinline></video>
+            {:else if photo}
+              <img src={photo} alt="" /><span class="scanline"></span>
+            {:else}<div class="noimg caps">NO SIGHTING</div>{/if}
+            <span class="brk tl"></span><span class="brk tr"></span><span class="brk bl"></span><span class="brk br"></span>
+          </div>
+        </figure>
+        <figure class="wcell">
+          <figcaption class="wcap caps"><span class="wt wlive" class:on={live}>{live ? '● LIVE FEED' : '○ FEED'}</span><span class="wsub">{entry.cam ?? '—'}</span></figcaption>
+          <div class="wbody">
+            {#if lastCamId}<LiveThumb id={lastCamId} fps={6} />{:else}<div class="noimg caps">NO FEED</div>{/if}
+            {#if live}<span class="livetag caps"><span class="d"></span>TRACKING</span>{/if}
+            <span class="brk tl"></span><span class="brk tr"></span><span class="brk bl"></span><span class="brk br"></span>
+          </div>
+        </figure>
+      </div>
+
+      <div class="mapwrap">
+      <div class="thead caps"><span class="tt">MOVEMENT TRACE</span><span class="th-sub">{nodes.length} CAMERA{nodes.length > 1 ? 'S' : ''} · DRAG · ZOOM</span></div>
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <svg bind:this={svg} class="net" viewBox={`0 0 ${VW} ${VH}`} onwheel={onWheel}
         onpointerdown={onDown} onpointermove={onMove} onpointerup={onUp}>
@@ -227,6 +252,7 @@
           {#if i < nodes.length - 1}<span class="sconn"></span>{/if}
         {/each}
       </div>
+      </div>
     </section>
   </div>
 </div>
@@ -272,10 +298,10 @@
   /* targeting reticle that locks in */
   .ret { position: absolute; width: 30px; height: 30px; border: 2px solid var(--ink); z-index: 2;
     animation: lockin 520ms cubic-bezier(0.2, 1.4, 0.3, 1) both; }
-  .tl { top: 12px; left: 12px; border-right: 0; border-bottom: 0; animation-delay: 340ms; }
-  .tr { top: 12px; right: 12px; border-left: 0; border-bottom: 0; animation-delay: 420ms; }
-  .bl { bottom: 12px; left: 12px; border-right: 0; border-top: 0; animation-delay: 500ms; }
-  .br { bottom: 12px; right: 12px; border-left: 0; border-top: 0; animation-delay: 580ms; }
+  .ret.tl { top: 12px; left: 12px; border-right: 0; border-bottom: 0; animation-delay: 340ms; }
+  .ret.tr { top: 12px; right: 12px; border-left: 0; border-bottom: 0; animation-delay: 420ms; }
+  .ret.bl { bottom: 12px; left: 12px; border-right: 0; border-top: 0; animation-delay: 500ms; }
+  .ret.br { bottom: 12px; right: 12px; border-left: 0; border-top: 0; animation-delay: 580ms; }
   @keyframes lockin { from { opacity: 0; transform: scale(2.2); } }
   .reticle { position: absolute; inset: 30% 34%; border: 1px solid rgba(56,208,227,0.5); border-radius: 50%; z-index: 2;
     opacity: 0; animation: reticleon 800ms 620ms ease both; }
@@ -330,7 +356,32 @@
     border: 1px solid var(--hairline); background: rgba(4,7,10,0.4); box-shadow: 0 30px 80px rgba(0,0,0,0.5);
     animation: traceIn 640ms 260ms cubic-bezier(0.16, 1, 0.3, 1) both; }
   @keyframes traceIn { from { opacity: 0; transform: translateX(20px); } }
-  .thead { flex: 0 0 auto; display: flex; align-items: baseline; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--hairline); }
+
+  /* big live wall: sighting clip + last-camera live feed */
+  .livewall { flex: 0 0 54%; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hairline);
+    border-bottom: 1px solid var(--hairline); min-height: 0; }
+  .wcell { display: flex; flex-direction: column; min-height: 0; background: #05080b;
+    animation: rise 520ms both cubic-bezier(0.16, 1, 0.3, 1); }
+  .wcell:nth-child(2) { animation-delay: 130ms; }
+  .wcap { flex: 0 0 auto; display: flex; justify-content: space-between; align-items: center; padding: 9px 12px;
+    border-bottom: 1px solid var(--hairline); font-size: 9px; letter-spacing: 0.16em; background: rgba(4,7,10,0.6); }
+  .wt { color: var(--ink-dim); } .wsub { color: var(--ink-ghost); font-size: 8px; }
+  .wlive { color: var(--ink-ghost); } .wlive.on { color: var(--cyan); animation: pulse 1.6s ease-in-out infinite; }
+  .wbody { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #04060a; }
+  .wbody video, .wbody img, .wbody :global(.img) { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .wbody img { filter: saturate(0.72) contrast(1.06); }
+  .scanline { position: absolute; left: 0; right: 0; height: 32%; pointer-events: none;
+    background: linear-gradient(transparent, rgba(56,208,227,0.16), transparent); animation: wscan 3.2s ease-in-out infinite; }
+  @keyframes wscan { 0% { transform: translateY(-32%); } 100% { transform: translateY(330%); } }
+  .brk { position: absolute; width: 13px; height: 13px; border: 2px solid rgba(236,236,236,0.55); z-index: 2; pointer-events: none; }
+  .brk.tl { top: 7px; left: 7px; border-right: 0; border-bottom: 0; } .brk.tr { top: 7px; right: 7px; border-left: 0; border-bottom: 0; }
+  .brk.bl { bottom: 7px; left: 7px; border-right: 0; border-top: 0; } .brk.br { bottom: 7px; right: 7px; border-left: 0; border-top: 0; }
+  .livetag { position: absolute; top: 9px; left: 9px; z-index: 3; display: flex; align-items: center; gap: 6px;
+    padding: 3px 9px; background: rgba(5,8,11,0.72); color: var(--cyan); font-size: 8px; letter-spacing: 0.16em; }
+  .livetag .d { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); animation: pulse 1.2s ease-in-out infinite; }
+
+  .mapwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .thead { flex: 0 0 auto; display: flex; align-items: baseline; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); }
   .tt { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.16em; color: var(--ink); }
   .th-sub { font-size: 8px; letter-spacing: 0.16em; color: var(--ink-ghost); }
   .net { flex: 1; min-height: 0; width: 100%; touch-action: none; cursor: grab; }
