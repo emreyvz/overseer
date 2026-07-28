@@ -21,6 +21,7 @@ class _Track:
     points: deque = field(default_factory=deque)   # (x, y, ex, ey, t): point + cumulative ego
     ema: float | None = None                        # smoothed km/h
     last_seen: float = 0.0
+    ego: tuple[float, float] = (0.0, 0.0)           # running camera shift at this track's path
 
 
 def _bottom_center(bbox: tuple[float, float, float, float]) -> tuple[float, float]:
@@ -56,20 +57,22 @@ class SpeedEstimator:
         self._tracks.clear()
 
     def update(self, track_id: int, bbox: tuple[float, float, float, float],
-               now: float, ego: tuple[float, float] = (0.0, 0.0)) -> float | None:
+               now: float, ego_delta: tuple[float, float] = (0.0, 0.0)) -> float | None:
         """Fold in one sighting; return the current smoothed km/h estimate (>= 0), or None
         until there is enough motion history to say anything.
 
-        ego is the camera's CUMULATIVE image shift (from EgoMotion). It is subtracted from the
-        object's displacement so the speed is measured relative to the ground, not the frame —
-        on a moving camera a parked car reads ~0 and a passing car reads its true motion.
-        Pass (0, 0) for a fixed camera."""
+        ego_delta is the camera's PER-FRAME image shift at this object's location (from
+        EgoMotion.flow_at), accumulated internally and subtracted from the object's displacement
+        so the speed is measured relative to the ground, not the frame — on a moving camera a
+        parked car reads ~0 and a car keeping pace reads the camera's speed. Pass (0, 0) for a
+        fixed camera."""
         tr = self._tracks.get(track_id)
         if tr is None:
             tr = _Track(points=deque(maxlen=self._buffer))
             self._tracks[track_id] = tr
         x, y = _bottom_center(bbox)
-        ex, ey = ego
+        tr.ego = (tr.ego[0] + ego_delta[0], tr.ego[1] + ego_delta[1])
+        ex, ey = tr.ego
         tr.points.append((x, y, ex, ey, now))
         tr.last_seen = now
         # drop anything older than the averaging window (keep one straddling sample)

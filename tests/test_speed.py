@@ -44,9 +44,20 @@ def test_ego_parked_car_reads_zero() -> None:
     v = None
     for i in range(11):
         cx = 100 + i * 10                 # car appears to move 10 px/frame...
-        ego = (i * 10.0, 0.0)             # ...exactly the camera's cumulative shift
-        v = est.update(1, _box(cx, 200), now=i * 0.1, ego=ego)
+        v = est.update(1, _box(cx, 200), now=i * 0.1, ego_delta=(10.0, 0.0))  # ...= the camera's own flow
     assert v is not None and v < 1.0      # ground-relative motion ~ 0
+
+
+def test_ego_pace_keeping_car_reads_camera_speed() -> None:
+    # the reported bug: a car keeping pace with a dashcam is STATIC in the image, but both do
+    # ~the same speed. Ego flow at its location is the camera's motion -> it must read that,
+    # not "stopped".
+    est = SpeedEstimator(meters_per_pixel=0.1, ema_alpha=1.0, window=2.0, min_kmh=3.0)
+    v = None
+    for i in range(11):
+        v = est.update(1, _box(100, 200), now=i * 0.1, ego_delta=(10.0, 0.0))  # car fixed in frame
+    # camera flow 10 px/frame @ 10 fps = 100 px/s; 0.1 m/px -> 36 km/h (not 0)
+    assert v is not None and abs(v - 36.0) < 1.0
 
 
 def test_ego_passing_car_true_speed() -> None:
@@ -55,8 +66,7 @@ def test_ego_passing_car_true_speed() -> None:
     v = None
     for i in range(11):
         cx = 100 + i * 20
-        ego = (i * 10.0, 0.0)
-        v = est.update(1, _box(cx, 200), now=i * 0.1, ego=ego)
+        v = est.update(1, _box(cx, 200), now=i * 0.1, ego_delta=(10.0, 0.0))
     # ground displacement 10 px/frame @ 10 fps = 100 px/s; 0.1 m/px -> 36 km/h
     assert v is not None and abs(v - 36.0) < 1.0
 
