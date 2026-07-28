@@ -59,6 +59,21 @@ def test_feeds_buffer(tmp_path: Path) -> None:
     assert buf.frames[0].image is not None
 
 
+def test_plays_at_real_time_not_fast(tmp_path: Path) -> None:
+    # With no fps override the reader paces to the video's real timing (PTS, or the
+    # container fps as fallback), so a 10 fps clip plays ~10 fps — NOT flat-out fast.
+    vid = tmp_path / "clip.mp4"
+    if not _make_video(vid, n=30, fps=10):
+        pytest.skip("no mp4 writer available")
+    buf = _Buf()
+    r = FileLoopReader(str(vid), buf)          # no fps override -> real-time pacing
+    r.start()
+    time.sleep(1.0)
+    r.stop(); r.join(timeout=2)
+    # real time ≈ 10 frames/s; allow slack, but it must be nowhere near unpaced (100s+/s)
+    assert 4 <= r.frames_received <= 22
+
+
 def test_missing_file_reconnects_then_stops(tmp_path: Path) -> None:
     buf = _Buf()
     statuses: list[str] = []
