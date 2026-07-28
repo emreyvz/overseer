@@ -118,6 +118,8 @@ class Backend:
         self._embed_lock = threading.Lock()   # serialize ReID encoder use (harvester vs search)
         self._roster_harvester = None
         self._roster_det = None
+        self._roster_fullres_last: dict[int, float] = {}  # per-source last full-res grab time
+        self._roster_seek: dict[int, float] = {}          # rotating sample point in looped files
         self._prewarm_thumbs()
         self.ooi = OOIManager()   # object-of-interest visual tracker
         self.pose_kp = PoseKP()   # keypoint pose behaviours (hand-raise)
@@ -374,7 +376,7 @@ class Backend:
             self._roster_harvester = RosterHarvester(
                 self.roster,
                 sources_fn=self.db.list_sources,
-                frame_fn=self._source_frame,
+                frame_fn=self._roster_frame,
                 detect_fn=lambda f: det.detect_crop(f, conf=conf),
                 embed_fn=self._roster_embed,
                 cat_to_cls=_CATEGORY_CLS,
@@ -386,6 +388,70 @@ class Backend:
             log.info("roster harvester online")
         except Exception:  # noqa: BLE001
             log.exception("roster harvester failed to start")
+
+    def _roster_frame(self, source: Any) -> Any:
+        """Frame the roster harvester should scan. The active camera gives its full-res
+        analysed frame for free. A passive camera gets a one-shot FULL-RESOLUTION grab every
+        `roster.fullres_interval` seconds (so distant subjects there are found too), and its
+        cheap thumbnail in between — light on the system."""
+        sid = getattr(source, "id", None)
+        if sid == self._source_id and self._latest_img is not None:
+            return self._latest_img
+        now = time.time()
+        interval = float(self.config.get("roster.fullres_interval", 25.0))
+        if interval > 0 and now - self._roster_fullres_last.get(sid, 0.0) >= interval:
+            self._roster_fullres_last[sid] = now
+            frame = self._grab_fullres(source)
+            if frame is not None and getattr(frame, "size", 0) > 0:
+                return frame
+        return self._source_frame(source)   # between grabs: the cheap warm thumbnail
+
+    def _grab_fullres(self, source: Any) -> Any:
+        """One-shot full-resolution frame from a passive source (open, read, close). For a
+        looped local video the sample point advances each time so different moments — and so
+        different subjects — get seen; a stream just yields its current live frame."""
+        from .ytstream import is_stream_url
+        url = getattr(source, "url", "") or ""
+        is_file = True
+        if is_stream_url(url):
+            local = self.media.cached_path(url)
+            if local is None:
+                return None                 # not downloaded yet; thumbnail covers it
+            target = str(local)
+        elif url.lower().startswith(("rtsp://", "rtmp://")):
+            target, is_file = url, False
+        else:
+            target = url
+            is_file = not url.lower().startswith(("http://", "https://"))
+        cap = cv2.VideoCapture(target, cv2.CAP_FFMPEG)
+        try:
+            if not cap.isOpened():
+                return None
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:  # noqa: BLE001
+                pass
+            if is_file:
+                fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+                nframes = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0
+                dur_ms = (nframes / fps) * 1000.0 if fps > 0 else 0.0
+                step = 3000.0
+                sid = getattr(source, "id", None)
+                off = self._roster_seek.get(sid, 0.0)
+                self._roster_seek[sid] = (off + step) % dur_ms if dur_ms > step else 0.0
+                if off > 0.0:
+                    cap.set(cv2.CAP_PROP_POS_MSEC, off)
+            ok, img = cap.read()
+            if not is_file:  # skip a couple to get past a possibly-stale first frame
+                for _ in range(2):
+                    ok2, img2 = cap.read()
+                    if ok2 and img2 is not None:
+                        ok, img = ok2, img2
+            return img if (ok and img is not None) else None
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            cap.release()
 
     def _roster_embed(self, crop: Any, cls: str) -> Any:
         """A ReID appearance embedding for a crop, for roster de-duplication. Serialized so
