@@ -56,7 +56,17 @@
   // BOLO / watchlist — optimistic toggle, reconciled by the 3s roster refresh
   let watchLocal = $state<boolean | null>(null)
   let watched = $derived(watchLocal ?? !!entry.watched)
-  $effect(() => { void entry.id; watchLocal = null })   // reset optimism when a new subject loads
+  // journey supercut — the subject's per-camera clips stitched into one video
+  let superUrl = $state<string | null>(null)
+  let superLoading = $state(false)
+  $effect(() => { void entry.id; watchLocal = null; superUrl = null })   // reset when a new subject loads
+  async function playJourney() {
+    if (superLoading) return
+    superLoading = true; sfx('sonar')
+    try { const r = await api.supercut(entry.id); superUrl = `${API}${r.url}` }
+    catch { flashBanner('NO JOURNEY CLIPS YET', false, 1400) }
+    superLoading = false
+  }
   async function toggleWatch() {
     const next = !watched
     watchLocal = next
@@ -201,9 +211,19 @@
     <section class="trace">
       <div class="livewall">
         <figure class="wcell">
-          <figcaption class="wcap caps"><span class="wt">◈ SIGHTING</span><span class="wsub">{entry.first_cam ?? entry.cam ?? '—'} · {clock24(entry.first_ts)}</span></figcaption>
+          <figcaption class="wcap caps">
+            <span class="wt">◈ {superUrl ? 'JOURNEY SUPERCUT' : 'SIGHTING'}</span>
+            {#if superUrl}
+              <button class="jbtn" onclick={() => (superUrl = null)}>× SIGHTING</button>
+            {:else}
+              <button class="jbtn" onclick={playJourney}>{superLoading ? 'BUILDING…' : '▶ PLAY JOURNEY'}</button>
+            {/if}
+          </figcaption>
           <div class="wbody">
-            {#if clipUrl}
+            {#if superUrl}
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video src={superUrl} autoplay loop controls></video>
+            {:else if clipUrl}
               <video src={clipUrl} autoplay loop muted playsinline></video>
             {:else if photo}
               <img src={photo} alt="" /><span class="scanline"></span>
@@ -389,6 +409,9 @@
   .wcap { flex: 0 0 auto; display: flex; justify-content: space-between; align-items: center; padding: 9px 12px;
     border-bottom: 1px solid var(--hairline); font-size: 9px; letter-spacing: 0.16em; background: rgba(4,7,10,0.6); }
   .wt { color: var(--ink-dim); } .wsub { color: var(--ink-ghost); font-size: 8px; }
+  .jbtn { background: none; border: 1px solid var(--hairline); color: var(--cyan); font-size: 8px; letter-spacing: 0.14em;
+    padding: 3px 8px; cursor: pointer; font-family: var(--font-mono); }
+  .jbtn:hover { border-color: var(--cyan); background: rgba(56,208,227,0.1); }
   .wlive { color: var(--ink-ghost); } .wlive.on { color: var(--cyan); animation: pulse 1.6s ease-in-out infinite; }
   .wbody { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #04060a; }
   .wbody video, .wbody img, .wbody :global(.img) { width: 100%; height: 100%; object-fit: cover; display: block; }

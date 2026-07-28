@@ -57,6 +57,7 @@ export const api = {
   roster: () => get<import('./types').RosterEntry[]>(`/api/roster`),
   watchRoster: (id: string, on: boolean) =>
     post<import('./types').RosterEntry>(`/api/roster/${id}/watch`, { on }),
+  supercut: (id: string) => get<{ url: string }>(`/api/roster/${id}/supercut`),
   aiStatus: () => get<AiStatus>(`/api/ai/status`),
   aiConfig: (cfg: { provider?: string; base_url?: string; api_key?: string; model?: string; vision_model?: string; features?: Record<string, boolean> }) =>
     post<AiStatus>(`/api/ai/config`, cfg),

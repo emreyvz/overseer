@@ -163,6 +163,7 @@ class Backend:
         self._roster_harvester = None
         self._roster_det = None
         self._roster_boot_lock = threading.Lock()  # guard boot-vs-connect harvester start race
+        self._supercut_cache: dict[str, tuple[int, str]] = {}   # det_id -> (n legs, url)
         self._roster_fullres_last: dict[int, float] = {}  # per-source last full-res grab time
         self._roster_seek: dict[int, float] = {}          # rotating sample point in looped files
         self._prewarm_thumbs()
@@ -604,6 +605,49 @@ class Backend:
             "snapshot": entry.get("snapshot"), "clip": entry.get("clip"),
             "reason": f"BOLO subject {entry['id']} seen again — {entry.get('obs', 0)} sightings total",
         }})
+
+    @staticmethod
+    def _supercut_title(cam: str, idx: int, total: int, w: int, h: int, n: int = 6) -> list:
+        """A short title card announcing the next leg of a subject's journey."""
+        frame = np.zeros((h, w, 3), np.uint8)
+        cv2.putText(frame, f"LEG {idx}/{total}", (16, 34), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6, (120, 120, 120), 1, cv2.LINE_AA)
+        cv2.putText(frame, str(cam or "-")[:22], (16, h // 2), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.95, (236, 236, 236), 2, cv2.LINE_AA)
+        cv2.line(frame, (16, h // 2 + 14), (w - 16, h // 2 + 14), (227, 208, 56), 1)  # cyan accent
+        return [frame.copy() for _ in range(n)]
+
+    def build_supercut(self, det_id: str) -> str | None:
+        """Stitch a subject's per-camera sighting clips into one chronological journey video,
+        each leg introduced by a camera title card. Cached until a new leg is captured."""
+        segs = self.roster.clip_paths(det_id)
+        if not segs:
+            return None
+        cached = self._supercut_cache.get(det_id)
+        if cached is not None and cached[0] == len(segs):
+            return cached[1]
+        w, h = 480, 270
+        frames: list = []
+        for i, s in enumerate(segs):
+            frames += self._supercut_title(s["cam"], i + 1, len(segs), w, h)
+            path = self._snap_dir / "clips" / str(s["clip"]).rsplit("/", 1)[-1]
+            if not path.exists():
+                continue
+            cap = cv2.VideoCapture(str(path))
+            try:
+                while True:
+                    ok, f = cap.read()
+                    if not ok or f is None:
+                        break
+                    frames.append(f if f.shape[:2] == (h, w) else cv2.resize(f, (w, h)))
+            finally:
+                cap.release()
+        if len(frames) < 4:
+            return None
+        url = self._encode_clip(frames, fps=float(self.config.get("roster.clip_fps", 10.0)))
+        if url:
+            self._supercut_cache[det_id] = (len(segs), url)
+        return url
 
     def _roster_embed(self, crop: Any, cls: str) -> Any:
         """A ReID appearance embedding for a crop, for roster de-duplication. Serialized so

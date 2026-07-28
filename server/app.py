@@ -472,6 +472,16 @@ async def api_roster_watch(det_id: str, body: dict) -> Any:
     return entry if entry else JSONResponse({"error": "not found"}, status_code=404)
 
 
+@app.get("/api/roster/{det_id}/supercut")
+async def api_roster_supercut(det_id: str) -> Any:
+    """Build (and cache) a subject's journey supercut — their per-camera clips stitched in
+    order — and return its URL. 404 until at least one leg has been clipped."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    url = await asyncio.to_thread(backend.build_supercut, det_id)
+    return {"url": url} if url else JSONResponse({"error": "no clips yet"}, status_code=404)
+
+
 @app.get("/api/roster/{det_id}/cutout")
 async def api_roster_cutout(det_id: str) -> Response:
     """The roster photo with its background removed (YOLO-seg), as a transparent PNG."""
