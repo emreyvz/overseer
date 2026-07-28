@@ -57,10 +57,11 @@
     <div class="grid">
       {#each shown as e (e.id)}
         {@const a = $annotations[e.id] ?? {}}
-        <button class="card" class:sel={selected?.id === e.id} onclick={() => open(e)}>
+        <button class="card" class:sel={selected?.id === e.id} class:watched={e.watched} onclick={() => open(e)}>
           <div class="ph">
             {#if photo(e)}<img src={photo(e)} alt="" />{:else}<div class="noimg caps">NO IMG</div>{/if}
             <span class="badge caps">{e.cls === 'vehicle' ? '🚗' : '👤'}</span>
+            {#if e.watched}<span class="bolo caps">◉ BOLO</span>{/if}
           </div>
           <div class="meta">
             <span class="nm caps">{a.alias || e.id}</span>
@@ -95,6 +96,9 @@
   .ph img { width: 100%; height: 100%; object-fit: cover; filter: saturate(0.6) contrast(1.05); }
   .noimg { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--ink-ghost); font-size: var(--fs-micro); }
   .badge { position: absolute; top: 4px; right: 4px; font-size: 12px; text-shadow: 0 0 4px #000; }
+  .card.watched { border-color: var(--scarlet); }
+  .bolo { position: absolute; top: 4px; left: 4px; padding: 2px 6px; background: var(--scarlet); color: #fff;
+    font-size: 7px; letter-spacing: 0.12em; box-shadow: 0 0 8px var(--scarlet-glow); }
   .meta { padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
   .nm { font-size: var(--fs-micro); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .plate { font-size: var(--fs-micro); color: var(--cyan); letter-spacing: 0.12em; font-weight: 700; }

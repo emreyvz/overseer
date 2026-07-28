@@ -450,6 +450,8 @@ class Backend:
                     plate_fn=self._roster_plate,
                     attrs_fn=self._roster_attrs,
                     clip_fn=self._roster_clip if bool(self.config.get("roster.clips", True)) else None,
+                    watch_hit_fn=self._roster_watch_hit,
+                    watch_cooldown=float(self.config.get("roster.watch_cooldown", 45.0)),
                     interval=float(self.config.get("roster.interval", 4.0)),
                 )
                 self._roster_harvester.start()
@@ -590,6 +592,18 @@ class Backend:
         h0, w0 = crops[0].shape[:2]      # writer needs a constant frame size
         crops = [c if c.shape[:2] == (h0, w0) else cv2.resize(c, (w0, h0)) for c in crops]
         return self._encode_clip(crops, fps=float(self.config.get("roster.clip_fps", 10.0)))
+
+    def _roster_watch_hit(self, entry: dict) -> None:
+        """A watched (BOLO) subject was re-identified — raise a critical alert on the WS channel
+        with its photo and the camera it turned up on."""
+        cam = entry.get("cam") or "—"
+        label = entry["id"] + (f" · {entry['plate']}" if entry.get("plate") else "")
+        self._emit({"t": "alert", "d": {
+            "ts": time.time() * 1000, "severity": "critical", "type": "WATCHLIST HIT",
+            "summary": f"{label} re-identified on {cam}", "cam": cam, "ack": False,
+            "snapshot": entry.get("snapshot"), "clip": entry.get("clip"),
+            "reason": f"BOLO subject {entry['id']} seen again — {entry.get('obs', 0)} sightings total",
+        }})
 
     def _roster_embed(self, crop: Any, cls: str) -> Any:
         """A ReID appearance embedding for a crop, for roster de-duplication. Serialized so

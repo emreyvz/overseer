@@ -8,6 +8,7 @@
   import { cubicOut } from 'svelte/easing'
   import { cameras, activeCam, mode, triggerGlitch, flashBanner } from '../../lib/stores'
   import { annotations, annotate } from '../../lib/annotations'
+  import { api } from '../../lib/api'
   import { trUpper } from '../../lib/lexicon'
   import { sfx } from '../../lib/audio'
   import { sendCommand } from '../../lib/ws'
@@ -51,6 +52,18 @@
   let pathD = $derived(nodes.map((nd, i) => `${i ? 'L' : 'M'}${nd.x.toFixed(1)} ${nd.y.toFixed(1)}`).join(' '))
   let focusNode = $derived(nodes[focusIdx] ?? nodes[nodes.length - 1] ?? null)
   let designation = $derived(a.alias || entry.id)
+
+  // BOLO / watchlist — optimistic toggle, reconciled by the 3s roster refresh
+  let watchLocal = $state<boolean | null>(null)
+  let watched = $derived(watchLocal ?? !!entry.watched)
+  $effect(() => { void entry.id; watchLocal = null })   // reset optimism when a new subject loads
+  async function toggleWatch() {
+    const next = !watched
+    watchLocal = next
+    sfx(next ? 'sonar' : 'click')
+    flashBanner(next ? `BOLO SET · ${entry.id}` : 'BOLO CLEARED', false, 1200)
+    try { await api.watchRoster(entry.id, next) } catch { watchLocal = null }
+  }
 
   const apprLine = $derived(
     [entry.attrs?.upper_color, entry.cls === 'person' ? entry.attrs?.height : undefined]
@@ -146,6 +159,7 @@
         <span class="ret tl"></span><span class="ret tr"></span><span class="ret bl"></span><span class="ret br"></span>
         <span class="reticle"></span>
         <span class="lock caps">LOCK</span>
+        {#if watched}<span class="bolo caps">◉ BOLO · WATCHED</span>{/if}
         {#if entry.snapshot}<button class="cut caps" onclick={() => (cutout = !cutout)}>{cutout ? 'RESTORE BG' : 'ISOLATE'}</button>{/if}
       </div>
 
@@ -177,7 +191,10 @@
 
       <textarea class="notes" placeholder="INTELLIGENCE NOTE…" value={a.notes ?? ''}
         oninput={(ev) => annotate(entry.id, { notes: (ev.target as HTMLTextAreaElement).value })}></textarea>
-      {#if focusNode}<button class="observe caps" onclick={() => observe(focusNode.name)}><span class="ico"></span>OBSERVE {focusNode.name}</button>{/if}
+      <div class="actions">
+        <button class="watch caps" class:on={watched} onclick={toggleWatch}>{watched ? '◉ WATCHING' : '◎ WATCHLIST'}</button>
+        {#if focusNode}<button class="observe caps" onclick={() => observe(focusNode.name)}><span class="ico"></span>OBSERVE</button>{/if}
+      </div>
     </section>
 
     <!-- LIVE + SIGHTING + MOVEMENT TRACE -->
@@ -345,11 +362,17 @@
     font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; padding: 8px; animation: fadeup 560ms 520ms both; }
   .notes:focus { outline: none; border-color: var(--cyan); }
   .notes::placeholder { color: var(--ink-ghost); letter-spacing: 0.16em; }
-  .observe { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px; cursor: pointer;
-    background: linear-gradient(90deg, rgba(225,6,0,0.14), transparent); border: 1px solid var(--scarlet); color: var(--ink);
-    font-family: var(--font-display); font-size: 12px; letter-spacing: 0.18em; animation: fadeup 560ms 580ms both; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; animation: fadeup 560ms 580ms both; }
+  .observe, .watch { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 12px; cursor: pointer;
+    font-family: var(--font-display); font-size: 11px; letter-spacing: 0.16em; }
+  .observe { background: linear-gradient(90deg, rgba(225,6,0,0.14), transparent); border: 1px solid var(--scarlet); color: var(--ink); }
   .observe:hover { background: var(--scarlet); color: #fff; }
   .observe .ico { width: 0; height: 0; border-left: 8px solid currentColor; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+  .watch { background: none; border: 1px solid var(--hairline); color: var(--ink-dim); }
+  .watch:hover { border-color: var(--cyan); color: var(--cyan); }
+  .watch.on { border-color: var(--cyan); color: #04070a; background: var(--cyan); }
+  .bolo { position: absolute; top: 46px; left: 12px; z-index: 3; padding: 3px 9px; background: var(--scarlet); color: #fff;
+    font-size: 8px; letter-spacing: 0.18em; box-shadow: 0 0 12px var(--scarlet-glow); animation: fadein 400ms 700ms both; }
 
   /* ── MOVEMENT TRACE ── */
   .trace { position: relative; display: flex; flex-direction: column; min-height: 0;

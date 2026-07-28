@@ -82,7 +82,8 @@ class SessionRoster:
                 e = {"id": eid, "cls": cls, "first_ts": now, "last_ts": now, "obs": 0,
                      "snapshot": None, "snapshot_path": None, "best_area": 0.0,
                      "plate": None, "attrs": {}, "cam": cam, "first_cam": cam,
-                     "last_shot": 0.0, "embedding": embedding, "trail": {}, "clip": None}
+                     "last_shot": 0.0, "embedding": embedding, "trail": {}, "clip": None,
+                     "watched": False, "last_watch_ts": 0.0, "last_watch_cam": None}
                 self._entries[eid] = e
             e["last_ts"] = now
             e["obs"] += 1
@@ -124,6 +125,7 @@ class SessionRoster:
         return {"id": e["id"], "cls": e["cls"], "snapshot": e["snapshot"], "plate": e["plate"],
                 "attrs": e["attrs"], "obs": e["obs"], "cam": e.get("cam"),
                 "first_cam": e.get("first_cam"), "trail": trail, "clip": e.get("clip"),
+                "watched": bool(e.get("watched")),
                 "first_ts": e["first_ts"] * 1000, "last_ts": e["last_ts"] * 1000}
 
     def list(self) -> list[dict]:
@@ -142,6 +144,33 @@ class SessionRoster:
             e = self._entries.get(det_id)
             if e is not None and url:
                 e["clip"] = url
+
+    def watch(self, det_id: str, on: bool = True) -> dict | None:
+        """Flag/unflag a subject as watched (BOLO). A watched subject fires an alert whenever
+        it is re-identified on a camera. Returns the updated public entry, or None."""
+        with self._lock:
+            e = self._entries.get(det_id)
+            if e is None:
+                return None
+            e["watched"] = bool(on)
+            if not on:
+                e["last_watch_ts"] = 0.0
+                e["last_watch_cam"] = None
+            return self._public(e)
+
+    def take_watch_hit(self, det_id: str, cam: str | None, now: float,
+                       cooldown: float) -> dict | None:
+        """If det_id is a watched subject seen again — on a new camera, or after the cooldown
+        on the same one — record and return its public entry for a BOLO alert, else None."""
+        with self._lock:
+            e = self._entries.get(det_id)
+            if e is None or not e.get("watched"):
+                return None
+            if now - e.get("last_watch_ts", 0.0) < cooldown and cam == e.get("last_watch_cam"):
+                return None
+            e["last_watch_ts"] = now
+            e["last_watch_cam"] = cam
+            return self._public(e)
 
     def get(self, det_id: str) -> dict | None:
         with self._lock:
@@ -194,6 +223,8 @@ class RosterHarvester(threading.Thread):
                  cat_to_cls: dict[str, str], *, plate_fn: Callable[[Any], str | None] | None = None,
                  attrs_fn: Callable[[Any, str], dict] | None = None,
                  clip_fn: Callable[[Any, tuple], str | None] | None = None,
+                 watch_hit_fn: Callable[[dict], None] | None = None,
+                 watch_cooldown: float = 45.0,
                  interval: float = 4.0) -> None:
         super().__init__(daemon=True, name="RosterHarvester")
         self._roster = roster
@@ -205,6 +236,8 @@ class RosterHarvester(threading.Thread):
         self._plate_fn = plate_fn
         self._attrs_fn = attrs_fn
         self._clip_fn = clip_fn
+        self._watch_hit_fn = watch_hit_fn
+        self._watch_cooldown = float(watch_cooldown)
         self._interval = float(interval)
         self._i = 0
         self._stopped = threading.Event()
@@ -249,6 +282,14 @@ class RosterHarvester(threading.Thread):
                     attrs = {**(attrs or {}), "subtype": subtype}
             eid = self._roster.observe_reid(cls, crop, emb, time.time(), plate=plate,
                                             attrs=attrs, cam=cam)
+            # BOLO: a watched subject re-identified here fires an alert (cooldown-gated)
+            if self._watch_hit_fn is not None:
+                hit = self._roster.take_watch_hit(eid, cam, time.time(), self._watch_cooldown)
+                if hit is not None:
+                    try:
+                        self._watch_hit_fn(hit)
+                    except Exception:  # noqa: BLE001
+                        pass
             # once per subject, capture a short clip of the sighting (a padded burst around it).
             # bbox is normalized so the clip burst can be a different resolution than this frame.
             if (not clipped and self._clip_fn is not None and self._roster.needs_clip(eid)):

@@ -39,6 +39,7 @@ roster:
   clips: true               # capture a short sighting clip (once per subject) for the dossier
   clip_frames: 16           # frames grabbed for that clip
   clip_fps: 10.0            # playback fps of the sighting clip
+  watch_cooldown: 45.0      # BOLO: seconds between repeat alerts for the same watched subject
 
 detectors:
   motion:
