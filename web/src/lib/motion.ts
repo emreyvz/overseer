@@ -1,29 +1,33 @@
-// Client-side dead-reckoning so detection boxes track the object in real time instead of
-// lagging a frame behind. The server pushes boxes at the analysis rate (with latency), and
-// the old code snapped to the last position and CSS-tweened toward it — so a box always
-// chased where the object WAS. Here each track's velocity is estimated from successive
-// server positions (EMA-smoothed) and the box is extrapolated forward every animation
-// frame, with a small lead to counter push latency and a hard cap so a stopped or
-// swapped track never drifts away.
+// Smooth, real-time box motion. The server pushes detection boxes at the analysis rate
+// (sparse, with latency); rendered raw they either lag behind or jump a step per update.
+//
+// Every animation frame each box's rendered position is eased toward the latest measured
+// position with a critically-damped low-pass filter (exponential smoothing), plus a small
+// velocity feed-forward so the box sits ON the object (centred) instead of trailing it.
+// Because the filter always glides toward a moving target, motion is continuous and
+// sub-pixel — no per-measurement steps — while a hard jump (track-id reuse) snaps instead
+// of sliding a box across the frame.
 import { get, writable } from 'svelte/store'
 
 import { detections } from './stores'
 import type { Detection } from './types'
 
 type Box = [number, number, number, number]
-type Track = { bbox: Box; vx: number; vy: number; t: number; seen: number }
+type Track = { render: Box; target: Box; vx: number; vy: number; t: number; seen: number }
 
 const tracks = new Map<string, Track>()
 
-/** Detections with boxes extrapolated to "now", refreshed every animation frame. */
+/** Detections with smoothed, latency-compensated boxes, refreshed every animation frame. */
 export const predictedDetections = writable<Detection[]>([])
 
-const LEAD_MS = 80         // predict slightly ahead to cancel push latency
-const MAX_EXTRAP_MS = 300  // never dead-reckon further than this past the last real fix
-const VEL_EMA = 0.45       // velocity smoothing (higher = snappier, lower = steadier)
-const MAX_SPEED = 0.004    // per-ms normalized speed clamp — rejects id-reuse / detector jumps
+const TAU_MS = 80        // smoothing time constant (smaller = snappier, larger = smoother)
+const LEAD_MS = 100      // velocity feed-forward to cancel push latency (keeps box centred)
+const VEL_EMA = 0.35     // velocity smoothing
+const MAX_SPEED = 0.004  // per-ms normalized speed clamp — rejects id-reuse / detector jumps
+const SNAP_DIST = 0.25   // centre jump beyond this => teleport (don't glide across the frame)
 
 let started = false
+let lastFrame = 0
 
 function nowMs(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now()
@@ -32,7 +36,7 @@ function nowMs(): number {
 const center = (b: Box): [number, number] => [b[0] + b[2] / 2, b[1] + b[3] / 2]
 const clamp01 = (n: number): number => (n < 0 ? 0 : n > 1 ? 1 : n)
 
-/** Fold a fresh server frame into the velocity model. */
+/** Fold a fresh server frame into the motion model (updates targets + velocities). */
 function ingest(dets: Detection[]): void {
   const t = nowMs()
   const alive = new Set<string>()
@@ -42,17 +46,17 @@ function ingest(dets: Detection[]): void {
     if (prev) {
       const dt = Math.max(16, t - prev.t)
       const [cx, cy] = center(d.bbox)
-      const [pcx, pcy] = center(prev.bbox)
+      const [pcx, pcy] = center(prev.target)
       let vx = (cx - pcx) / dt
       let vy = (cy - pcy) / dt
-      if (Math.hypot(vx, vy) > MAX_SPEED) { vx = 0; vy = 0 } // implausible jump -> don't fling
+      if (Math.hypot(vx, vy) > MAX_SPEED) { vx = 0; vy = 0 } // implausible jump -> no fling
       prev.vx = prev.vx * (1 - VEL_EMA) + vx * VEL_EMA
       prev.vy = prev.vy * (1 - VEL_EMA) + vy * VEL_EMA
-      prev.bbox = d.bbox
+      prev.target = d.bbox
       prev.t = t
       prev.seen = t
     } else {
-      tracks.set(d.id, { bbox: d.bbox, vx: 0, vy: 0, t, seen: t })
+      tracks.set(d.id, { render: d.bbox, target: d.bbox, vx: 0, vy: 0, t, seen: t })
     }
   }
   for (const [id, tr] of tracks) {
@@ -60,22 +64,45 @@ function ingest(dets: Detection[]): void {
   }
 }
 
-/** Extrapolated box for a track id, or the fallback if we have no motion model for it. */
+/** Current smoothed box for a track id (or the fallback if unknown). */
 export function predictedBox(id: string, fallback: Box): Box {
   const tr = tracks.get(id)
-  if (!tr) return fallback
-  const dt = Math.min(MAX_EXTRAP_MS, nowMs() - tr.t + LEAD_MS)
-  const [x, y, w, h] = tr.bbox
-  return [clamp01(x + tr.vx * dt), clamp01(y + tr.vy * dt), w, h]
+  return tr ? ([tr.render[0], tr.render[1], tr.render[2], tr.render[3]] as Box) : fallback
 }
 
-function step(): void {
+function step(now: number): void {
+  const dtFrame = lastFrame ? Math.min(64, now - lastFrame) : 16
+  lastFrame = now
+  const alpha = 1 - Math.exp(-dtFrame / TAU_MS)
+  for (const tr of tracks.values()) {
+    const tx = clamp01(tr.target[0] + tr.vx * LEAD_MS)
+    const ty = clamp01(tr.target[1] + tr.vy * LEAD_MS)
+    const tw = tr.target[2]
+    const th = tr.target[3]
+    const jump = Math.hypot(
+      tr.render[0] + tr.render[2] / 2 - (tx + tw / 2),
+      tr.render[1] + tr.render[3] / 2 - (ty + th / 2),
+    )
+    if (jump > SNAP_DIST) {
+      tr.render = [tx, ty, tw, th]
+    } else {
+      tr.render = [
+        tr.render[0] + (tx - tr.render[0]) * alpha,
+        tr.render[1] + (ty - tr.render[1]) * alpha,
+        tr.render[2] + (tw - tr.render[2]) * alpha,
+        tr.render[3] + (th - tr.render[3]) * alpha,
+      ]
+    }
+  }
   const base = get(detections)
-  predictedDetections.set(base.map((d) => ({ ...d, bbox: predictedBox(d.id, d.bbox) })))
+  predictedDetections.set(base.map((d) => {
+    const tr = tracks.get(d.id)
+    return tr ? { ...d, bbox: [tr.render[0], tr.render[1], tr.render[2], tr.render[3]] as Box } : d
+  }))
   requestAnimationFrame(step)
 }
 
-/** Start the model: update velocities on every server push, extrapolate every frame. */
+/** Start the model: update targets on every server push, smooth+publish every frame. */
 export function startMotion(): void {
   if (started || typeof window === 'undefined') return
   started = true

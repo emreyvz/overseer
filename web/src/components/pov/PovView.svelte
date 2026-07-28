@@ -8,6 +8,7 @@
   import type { Detection } from '../../lib/types'
   import { initFeedGL, type FeedGL } from '../../lib/hud/feedgl'
   import DetectionLayer from './DetectionLayer.svelte'
+  import MatchHighlight from './MatchHighlight.svelte'
   import PtzPad from './PtzPad.svelte'
   import LiveThumb from '../LiveThumb.svelte'
   import NoSignal from '../NoSignal.svelte'
@@ -104,6 +105,7 @@
 
     <div class="grid-overlay"></div>
     <DetectionLayer />
+    <MatchHighlight />
   </div>
 
   {#if connecting}

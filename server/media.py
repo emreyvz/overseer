@@ -49,7 +49,7 @@ Downloader = Callable[[str, Path, str, int, Callable[[float], None]], Path]
 
 class MediaLibrary:
     def __init__(self, media_dir: Path, downloader: Downloader | None = None,
-                 max_height: int = 1080) -> None:
+                 max_height: int = 1080, max_concurrent: int = 1) -> None:
         self._dir = Path(media_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._max_h = int(max_height)
@@ -57,6 +57,10 @@ class MediaLibrary:
         self._state: dict[str, dict] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._lock = threading.Lock()
+        # Serialize downloads so navigating several cameras doesn't kick off a storm of
+        # concurrent multi-hundred-MB fetches that saturate the box and starve the map's
+        # preview workers (which is what made all thumbnails drop after a few connections).
+        self._dl_sem = threading.Semaphore(max(1, int(max_concurrent)))
 
     def _cached_file(self, key: str) -> Path | None:
         # only real video files — never a .part in progress or a .poster.jpg image
@@ -126,7 +130,8 @@ class MediaLibrary:
             if st is not None:
                 st["progress"] = round(max(0.0, min(100.0, float(pct))), 1)
         try:
-            path = self._download(url, self._dir, key, self._max_h, progress)
+            with self._dl_sem:                       # one download at a time (default)
+                path = self._download(url, self._dir, key, self._max_h, progress)
             self._state[key] = {"status": "ready", "progress": 100.0}
             log.info("media ready: %s -> %s", url, path)
             return path

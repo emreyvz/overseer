@@ -171,15 +171,21 @@ async def thumb(source_id: int) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 
+async def _thumb_jpeg(source_id: int) -> bytes | None:
+    # off the event loop: thumb_jpeg touches the filesystem / decode workers, and with many
+    # cameras polling at once a synchronous call could stall every other request.
+    return await asyncio.to_thread(backend.thumb_jpeg, source_id) if backend else None
+
+
 @app.get("/snap/{source_id}")
 async def snap(source_id: int) -> Response:
     """Single latest JPEG for a camera preview (robust polled thumbnail)."""
-    jpeg = backend.thumb_jpeg(source_id) if backend else None
+    jpeg = await _thumb_jpeg(source_id)
     for _ in range(16):  # give the relay worker up to ~2.5s to produce the first frame
         if jpeg:
             break
         await asyncio.sleep(0.15)
-        jpeg = backend.thumb_jpeg(source_id) if backend else None
+        jpeg = await _thumb_jpeg(source_id)
     if not jpeg:
         return Response(status_code=503)
     return Response(content=jpeg, media_type="image/jpeg",

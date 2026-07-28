@@ -99,6 +99,7 @@ class Backend:
         self.media = MediaLibrary(
             self.data_dir / "media",
             max_height=int(self.config.get("media.max_height", 1080)),
+            max_concurrent=int(self.config.get("media.max_concurrent_downloads", 1)),
         )
         self._prewarm_thumbs()
         self.ooi = OOIManager()   # object-of-interest visual tracker

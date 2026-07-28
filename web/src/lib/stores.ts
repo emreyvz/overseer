@@ -67,6 +67,9 @@ export const commandOpen = writable(false)
 export const zoneEditor = writable(false)   // POV line/area drawing overlay (items 6,7)
 export const alertRules = writable(false)    // alert-rule creator overlay (item 13)
 export const selectedDetection = writable<Detection | null>(null)
+// A located search/watchlist hit to spotlight on its camera: green pointer brackets so the
+// operator immediately sees WHERE on the frame the match is when the camera opens.
+export const matchHighlight = writable<{ camId: string; bbox: [number, number, number, number]; ts: number } | null>(null)
 export const enrollOpen = writable<Detection | null>(null)  // detection being enrolled to the watchlist
 export const watchlistOpen = writable(false)                 // watchlist browser screen
 export const aiOpen = writable(false)                        // AI assistant console
