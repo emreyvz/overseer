@@ -21,14 +21,15 @@ _TRUST = {"person_reid": 0.92, "vehicle_reid": 0.90, "generic": 0.80}
 
 
 def _resolve(config, key: str, size_key: str, models_dir: Path,
-             baseline: Encoder, *, mask_bg: bool) -> tuple[Encoder, bool]:
+             baseline: Encoder, *, mask_bg: bool,
+             builtin_norm: bool = False) -> tuple[Encoder, bool]:
     name = str(config.get(f"match.models.{key}", "") or "")
     candidates: list[Encoder] = []
     if name:
         size = tuple(int(v) for v in config.get(f"match.{size_key}", [256, 128]))
         candidates.append(TorchScriptEncoder(
             models_dir / name, Path(name).stem, trust=_TRUST.get(key, 0.85),
-            input_size=size, mask_background=mask_bg,
+            input_size=size, mask_background=mask_bg, builtin_norm=builtin_norm,
         ))
     return best_available(candidates, baseline)
 
@@ -39,16 +40,22 @@ def build_engine(config, detect, *, models_dir: str | Path = "models",
     models_dir = Path(models_dir)
     baseline = DeterministicEncoder()
 
-    # generic embedder (DINOv2/CLIP) reads whole-image semantics -> do not mask
+    # Learned ReID/embedding models are trained on unmasked detection crops, so hard
+    # background masking is out-of-distribution and off by default (the mask is still
+    # computed as an evidence/confidence signal). Enable via match.mask_reid_input.
+    mask_reid = bool(config.get("match.mask_reid_input", False))
+    # generic embedder (DINOv2/CLIP) reads whole-image semantics -> never mask
     generic, _fb_g = _resolve(config, "generic", "generic_input", models_dir,
                               baseline, mask_bg=False)
     # When no dedicated ReID weights are present, fall back to the generic embedder if it
     # loaded (far stronger than the colour-grid baseline) and only then to baseline.
     reid_fallback = generic if generic.available() else baseline
     person, _fb_p = _resolve(config, "person_reid", "reid_input", models_dir,
-                             reid_fallback, mask_bg=True)
+                             reid_fallback, mask_bg=mask_reid)
+    # fast-reid vehicle models normalize internally (raw [0,255] RGB input)
     vehicle, _fb_v = _resolve(config, "vehicle_reid", "vehicle_input", models_dir,
-                              reid_fallback, mask_bg=True)
+                              reid_fallback, mask_bg=mask_reid,
+                              builtin_norm=bool(config.get("match.vehicle_builtin_norm", True)))
 
     seg_name = str(config.get("match.models.seg", "") or "")
     seg_backend = YoloSegBackend(models_dir / seg_name) if seg_name else None

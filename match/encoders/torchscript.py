@@ -27,7 +27,8 @@ class TorchScriptEncoder(Encoder):
         trust: float = 0.9,
         input_size: tuple[int, int] = (256, 128),   # (h, w) — ReID default
         device: str | None = None,
-        mask_background: bool = True,
+        mask_background: bool = False,
+        builtin_norm: bool = False,
         mean: tuple[float, float, float] = _IMAGENET_MEAN,
         std: tuple[float, float, float] = _IMAGENET_STD,
     ) -> None:
@@ -37,6 +38,9 @@ class TorchScriptEncoder(Encoder):
         self._size = input_size
         self._device = device
         self._mask_bg = mask_background
+        # builtin_norm=True: the scripted model normalizes internally (e.g. fast-reid,
+        # which expects raw [0,255] RGB). We then skip our own /255 + mean/std.
+        self._builtin_norm = bool(builtin_norm)
         self._mean = np.array(mean, dtype=np.float32).reshape(1, 1, 3)
         self._std = np.array(std, dtype=np.float32).reshape(1, 1, 3)
         self._model = None
@@ -82,8 +86,11 @@ class TorchScriptEncoder(Encoder):
         for i, crop in enumerate(crops):
             c = apply_mask(crop, masks[i]) if (self._mask_bg and masks) else crop
             resized = cv2.resize(c, (w, h))
-            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-            rgb = (rgb - self._mean) / self._std
+            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32)
+            if self._builtin_norm:
+                pass                              # model normalizes internally; keep [0,255]
+            else:
+                rgb = (rgb / 255.0 - self._mean) / self._std
             batch.append(rgb.transpose(2, 0, 1))
         return np.stack(batch)
 

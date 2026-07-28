@@ -10,7 +10,8 @@ skipped — the engine still runs (baseline / DINOv2 fallback), just with less c
 Steps:
   seg     YOLO-seg foreground model                 -> models/yolo11n-seg.pt
   dinov2  DINOv2 ViT-S/14 generic embedder (TS)     -> models/dinov2_vits14.torchscript
-  osnet   OSNet person ReID (needs torchreid)       -> models/osnet_x1_0.torchscript
+  osnet   OSNet-AIN person ReID (needs torchreid)   -> models/osnet_ain_x1_0.torchscript
+  veri    fast-reid VeRi vehicle ReID (FASTREID_ROOT) -> models/veri_sbs_R50-ibn.torchscript
   easyocr trigger EasyOCR model download (ANPR)     -> ~/.EasyOCR cache
 
 Dedicated person/vehicle ReID (OSNet / a VeRi-trained model) give the best identity
@@ -92,6 +93,49 @@ def _export_osnet() -> str:
     return f"osnet: exported {ckpts[0].name} -> {dst} (missing keys: {len(missing)})"
 
 
+def _export_veri() -> str:
+    """Convert a fast-reid VeRi vehicle-ReID checkpoint to TorchScript. Unlike OSNet,
+    fast-reid models are built by their own framework, so this needs the fast-reid repo
+    (set FASTREID_ROOT to a clone) and the checkpoint in models/. The model normalizes
+    internally (raw [0,255] RGB) — the engine feeds it accordingly (match.vehicle_builtin_norm)."""
+    import os
+    dst = MODELS / "veri_sbs_R50-ibn.torchscript"
+    if dst.exists():
+        return f"veri: already present ({dst})"
+    ckpts = sorted(MODELS.glob("*veri*.pth")) + sorted(MODELS.glob("*veri*.pth.tar"))
+    if not ckpts:
+        return ("veri: SKIPPED - download veri_sbs_R50-ibn.pth (fast-reid releases) into "
+                "models/, then re-run")
+    root = os.environ.get("FASTREID_ROOT")
+    if not root or not Path(root, "fastreid").exists():
+        return ("veri: SKIPPED - set FASTREID_ROOT to a fast-reid clone "
+                "(git clone https://github.com/JDAI-CV/fast-reid) and re-run")
+    import sys
+
+    import torch
+    sys.path.insert(0, root)
+    from fastreid.config import get_cfg
+    from fastreid.modeling.meta_arch import build_model
+    from fastreid.utils.checkpoint import Checkpointer
+    cfg = get_cfg()
+    cfg.merge_from_file(str(Path(root, "configs/VeRi/sbs_R50-ibn.yml")))
+    cfg.MODEL.WEIGHTS = str(ckpts[0])
+    cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    cfg.MODEL.BACKBONE.PRETRAIN = False
+    if cfg.MODEL.HEADS.POOL_LAYER == "FastGlobalAvgPool":
+        cfg.MODEL.HEADS.POOL_LAYER = "GlobalAvgPool"
+    cfg.freeze()
+    model = build_model(cfg)
+    Checkpointer(model).load(cfg.MODEL.WEIGHTS)
+    if hasattr(model.backbone, "deploy"):
+        model.backbone.deploy(True)
+    model.eval()
+    h, w = cfg.INPUT.SIZE_TEST
+    dummy = torch.randn(1, 3, h, w).to(model.device)
+    torch.jit.trace(model, dummy).save(str(dst))
+    return f"veri: exported {ckpts[0].name} -> {dst} (raw [0,255] input, 2048-d)"
+
+
 def _export_easyocr() -> str:
     try:
         import easyocr
@@ -101,8 +145,8 @@ def _export_easyocr() -> str:
         return f"easyocr: SKIPPED - `uv pip install easyocr` ({type(exc).__name__})"
 
 
-_STEPS = {"seg": _export_seg, "dinov2": _export_dinov2,
-          "osnet": _export_osnet, "easyocr": _export_easyocr}
+_STEPS = {"seg": _export_seg, "dinov2": _export_dinov2, "osnet": _export_osnet,
+          "veri": _export_veri, "easyocr": _export_easyocr}
 
 
 def main() -> None:

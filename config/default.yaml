@@ -210,13 +210,15 @@ match:
     accept_threshold: 0.6
     min_margin: 0.06
   models:
-    person_reid: osnet_ain_x1_0.torchscript  # person ReID (OSNet-AIN, cross-domain); missing => DINOv2
-    vehicle_reid: veri_reid.torchscript      # vehicle ReID
-    generic: dinov2_vits14.torchscript       # generic object/animal embedding
-    seg: yolo11n-seg.pt                       # foreground segmentation (ultralytics)
+    person_reid: osnet_ain_x1_0.torchscript      # person ReID (OSNet-AIN, cross-domain); missing => DINOv2
+    vehicle_reid: veri_sbs_R50-ibn.torchscript    # vehicle ReID (fast-reid VeRi, R50-ibn); missing => DINOv2
+    generic: dinov2_vits14.torchscript            # generic object/animal embedding
+    seg: yolo11n-seg.pt                            # foreground segmentation (ultralytics)
   reid_input: [256, 128]
   vehicle_input: [256, 256]
   generic_input: [224, 224]
+  mask_reid_input: false        # learned ReID trained on unmasked crops; masking is OOD (mask still used for evidence)
+  vehicle_builtin_norm: true    # fast-reid models normalize internally (raw [0,255] input); false for torchreid-style
   anpr:
     enabled: true
     langs: [en]
