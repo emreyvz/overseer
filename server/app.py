@@ -472,6 +472,15 @@ async def api_roster_watch(det_id: str, body: dict) -> Any:
     return entry if entry else JSONResponse({"error": "not found"}, status_code=404)
 
 
+@app.post("/api/roster/{det_id}/find")
+async def api_roster_find(det_id: str) -> Any:
+    """Find this roster subject across all cameras by appearance (ReID) — returns scored hits."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    matches = await asyncio.to_thread(backend.find_across, det_id)
+    return {"matches": matches}
+
+
 @app.get("/api/roster/{det_id}/supercut")
 async def api_roster_supercut(det_id: str) -> Any:
     """Build (and cache) a subject's journey supercut — their per-camera clips stitched in

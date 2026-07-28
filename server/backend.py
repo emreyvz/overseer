@@ -1111,6 +1111,15 @@ class Backend:
         res = eng.match(query, sources, accept_threshold=float(thresh))
         return [self._hit_to_dict(h) for h in res.hits]
 
+    def find_across(self, det_id: str) -> list[dict]:
+        """Find a roster subject across all cameras by appearance identity — its stored photo
+        becomes the ReID query. Works for vehicles and people (vehicles also match on plate)."""
+        got = self.roster.snapshot_bgr(det_id)
+        if got is None:
+            return []
+        img, cls = got
+        return self.visual_match(img, cls)
+
     def plate_match(self, plate: str) -> list[dict]:
         """Find a vehicle across live cameras whose plate matches the query. Runs ANPR on
         the vehicles in each source's current frame and compares (confusable-tolerant) to

@@ -59,7 +59,17 @@
   // journey supercut — the subject's per-camera clips stitched into one video
   let superUrl = $state<string | null>(null)
   let superLoading = $state(false)
-  $effect(() => { void entry.id; watchLocal = null; superUrl = null })   // reset when a new subject loads
+  // cross-camera ReID search — find this subject on other cameras
+  let matches = $state<{ cam: string; score: number; ambiguous?: boolean }[] | null>(null)
+  let finding = $state(false)
+  $effect(() => { void entry.id; watchLocal = null; superUrl = null; matches = null })  // reset per subject
+  async function findAcross() {
+    if (finding) return
+    finding = true; sfx('sonar')
+    try { const r = await api.findAcross(entry.id); matches = r.matches ?? [] }
+    catch { matches = [] }
+    finding = false
+  }
   async function playJourney() {
     if (superLoading) return
     superLoading = true; sfx('sonar')
@@ -205,6 +215,20 @@
         <button class="watch caps" class:on={watched} onclick={toggleWatch}>{watched ? '◉ WATCHING' : '◎ WATCHLIST'}</button>
         {#if focusNode}<button class="observe caps" onclick={() => observe(focusNode.name)}><span class="ico"></span>OBSERVE</button>{/if}
       </div>
+      <button class="find caps" onclick={findAcross}>{finding ? 'SEARCHING ALL CAMERAS…' : '⌖ FIND ACROSS CAMERAS'}</button>
+      {#if matches}
+        <div class="matches">
+          <div class="mh caps">CROSS-CAMERA HITS · {matches.length}</div>
+          {#if matches.length === 0}<div class="mnone caps">NO MATCH ON OTHER CAMERAS</div>{/if}
+          {#each matches as m (m.cam)}
+            <button class="mrow caps" onclick={() => observe(m.cam)} ondblclick={() => observe(m.cam)}>
+              <span class="mcam">{m.cam}</span>
+              <span class="mscore" class:amb={m.ambiguous}>{Math.round(m.score * 100)}%{#if m.ambiguous} ?{/if}</span>
+              <span class="mgo">▶</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
     </section>
 
     <!-- LIVE + SIGHTING + MOVEMENT TRACE -->
@@ -391,6 +415,18 @@
   .watch { background: none; border: 1px solid var(--hairline); color: var(--ink-dim); }
   .watch:hover { border-color: var(--cyan); color: var(--cyan); }
   .watch.on { border-color: var(--cyan); color: #04070a; background: var(--cyan); }
+  .find { padding: 10px; cursor: pointer; background: none; border: 1px solid var(--cyan); color: var(--cyan);
+    font-family: var(--font-display); font-size: 11px; letter-spacing: 0.16em; animation: fadeup 560ms 620ms both; }
+  .find:hover { background: var(--cyan); color: #04070a; }
+  .matches { display: flex; flex-direction: column; border: 1px solid var(--hairline); animation: fadeup 320ms both; }
+  .mh { padding: 7px 10px; font-size: 8px; letter-spacing: 0.18em; color: var(--ink-dim); border-bottom: 1px solid var(--hairline); background: rgba(4,7,10,0.6); }
+  .mnone { padding: 10px; font-size: 9px; color: var(--ink-ghost); text-align: center; }
+  .mrow { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px; padding: 7px 10px;
+    background: none; border: 0; border-bottom: 1px solid var(--hairline); cursor: pointer; text-align: left; }
+  .mrow:last-child { border-bottom: 0; } .mrow:hover { background: rgba(56,208,227,0.07); }
+  .mcam { color: var(--ink); font-size: 10px; letter-spacing: 0.06em; }
+  .mscore { color: var(--cyan); font-size: 10px; font-variant-numeric: tabular-nums; } .mscore.amb { color: var(--amber, #d8a200); }
+  .mgo { color: var(--ink-dim); font-size: 8px; }
   .bolo { position: absolute; top: 46px; left: 12px; z-index: 3; padding: 3px 9px; background: var(--scarlet); color: #fff;
     font-size: 8px; letter-spacing: 0.18em; box-shadow: 0 0 12px var(--scarlet-glow); animation: fadein 400ms 700ms both; }
 
