@@ -38,6 +38,29 @@ def test_kmh_matches_calibration() -> None:
     assert v is not None and abs(v - 36.0) < 1.0
 
 
+def test_ego_parked_car_reads_zero() -> None:
+    # camera pans so a PARKED car slides across the frame at the camera's own rate -> ground 0
+    est = SpeedEstimator(meters_per_pixel=0.1, ema_alpha=1.0, window=2.0, min_kmh=0.0)
+    v = None
+    for i in range(11):
+        cx = 100 + i * 10                 # car appears to move 10 px/frame...
+        ego = (i * 10.0, 0.0)             # ...exactly the camera's cumulative shift
+        v = est.update(1, _box(cx, 200), now=i * 0.1, ego=ego)
+    assert v is not None and v < 1.0      # ground-relative motion ~ 0
+
+
+def test_ego_passing_car_true_speed() -> None:
+    # camera moves 10 px/frame; a car moves 20 px/frame in the image -> 10 px/frame over ground
+    est = SpeedEstimator(meters_per_pixel=0.1, ema_alpha=1.0, window=2.0, min_kmh=0.0)
+    v = None
+    for i in range(11):
+        cx = 100 + i * 20
+        ego = (i * 10.0, 0.0)
+        v = est.update(1, _box(cx, 200), now=i * 0.1, ego=ego)
+    # ground displacement 10 px/frame @ 10 fps = 100 px/s; 0.1 m/px -> 36 km/h
+    assert v is not None and abs(v - 36.0) < 1.0
+
+
 def test_teleport_ignored() -> None:
     est = SpeedEstimator(meters_per_pixel=1.0, max_kmh=200.0, ema_alpha=1.0, min_kmh=0.0)
     est.update(1, _box(0, 200), now=0.0)

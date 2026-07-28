@@ -178,6 +178,13 @@ speed:
   ema_alpha: 0.4           # exponential smoothing weight for the newest reading
   min_kmh: 3.0             # below this reads as 0 (stationary) instead of crawling jitter
   max_kmh: 300.0           # above this is treated as track-id reuse and ignored
+# Camera ego-motion: a moving/dashcam feed drags the whole scene, so vehicle speeds are
+# measured relative to the ground by subtracting the camera's own image shift. A fixed camera
+# contributes nothing. moving_flow is the median grid-flow (downscaled px) above which the
+# camera itself is judged to be moving.
+egomotion:
+  width: 320               # downscaled width the flow runs on (speed vs sensitivity)
+  moving_flow: 1.3
 # Vehicle make/brand classification for roster profiles. Runs on CPU in the background
 # harvester (off the GPU hot path). Quiet until its weights are present under models/:
 #   uv run python -m match.tools.export_models --only carbrand

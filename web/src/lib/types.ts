@@ -33,6 +33,7 @@ export interface FrameMeta {
   inferenceMs: number
   brightness: number
   motionPct: number
+  movingCam?: boolean   // camera itself is in motion (dashcam) — speeds are ego-compensated
 }
 
 export interface Alert {
