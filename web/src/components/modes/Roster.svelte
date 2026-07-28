@@ -80,6 +80,7 @@
       <div class="prow caps"><span class="kk">CLASS</span><span class="vv">{trUpper(selected.cls)}</span></div>
       {#if selected.plate}<div class="prow caps"><span class="kk">PLATE</span><span class="vv plate">{selected.plate}</span></div>{/if}
       {#if attrLine(selected)}<div class="prow caps"><span class="kk">ATTR</span><span class="vv">{attrLine(selected)}</span></div>{/if}
+      {#if selected.cam}<div class="prow caps"><span class="kk">CAMERA</span><span class="vv">{selected.cam}</span></div>{/if}
       <div class="prow caps"><span class="kk">SEEN</span><span class="vv">{hhmm(selected.first_ts)}–{hhmm(selected.last_ts)} · {selected.obs}×</span></div>
       <div class="psep"></div>
       <div class="nl caps">NOTES</div>

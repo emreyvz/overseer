@@ -112,7 +112,12 @@ class Backend:
         from .roster import SessionRoster
         _seg_name = str(self.config.get("match.models.seg", "") or "")
         _roster_seg = YoloSegBackend(Path("models") / _seg_name) if _seg_name else None
-        self.roster = SessionRoster(self.snapshots, self._snap_dir, _roster_seg)
+        self.roster = SessionRoster(
+            self.snapshots, self._snap_dir, _roster_seg,
+            dedup_threshold=float(self.config.get("roster.dedup_threshold", 0.82)))
+        self._embed_lock = threading.Lock()   # serialize ReID encoder use (harvester vs search)
+        self._roster_harvester = None
+        self._roster_det = None
         self._prewarm_thumbs()
         self.ooi = OOIManager()   # object-of-interest visual tracker
         self.pose_kp = PoseKP()   # keypoint pose behaviours (hand-raise)
@@ -345,8 +350,74 @@ class Backend:
                 plugins.register(det)
             self._yolo = backend  # handle for one-shot 'look closer' inference
             log.info("YOLO detectors online")
+            self._start_roster_harvester(mm)
         except Exception as exc:  # noqa: BLE001 - degrade gracefully
             log.warning("YOLO unavailable, motion-only: %s", exc)
+
+    def _start_roster_harvester(self, mm: Any) -> None:
+        """Start the background thread that fills the roster from ALL cameras. Uses its own
+        (lightweight) detector so it never races the live analysis YOLO."""
+        if self._roster_harvester is not None or not bool(self.config.get("roster.enabled", True)):
+            return
+        try:
+            from ai.yolo import YoloBackend
+            from .roster import RosterHarvester
+            det_path = mm.ensure_model(str(self.config.get("roster.detector", "yolo11n.pt")))
+            det = YoloBackend(
+                det_path, mm.select_device(),
+                confidence=float(self.config.get("roster.confidence", 0.3)),
+                imgsz=int(self.config.get("roster.imgsz", 960)),
+                person_confidence=float(self.config.get("detectors.yolo.person_confidence", 0.18)),
+            )
+            self._roster_det = det
+            conf = float(self.config.get("roster.confidence", 0.3))
+            self._roster_harvester = RosterHarvester(
+                self.roster,
+                sources_fn=self.db.list_sources,
+                frame_fn=self._source_frame,
+                detect_fn=lambda f: det.detect_crop(f, conf=conf),
+                embed_fn=self._roster_embed,
+                cat_to_cls=_CATEGORY_CLS,
+                plate_fn=self._roster_plate,
+                attrs_fn=self._roster_attrs,
+                interval=float(self.config.get("roster.interval", 4.0)),
+            )
+            self._roster_harvester.start()
+            log.info("roster harvester online")
+        except Exception:  # noqa: BLE001
+            log.exception("roster harvester failed to start")
+
+    def _roster_embed(self, crop: Any, cls: str) -> Any:
+        """A ReID appearance embedding for a crop, for roster de-duplication. Serialized so
+        the harvester thread doesn't race a concurrent visual search on the same encoder."""
+        eng = self._ensure_match_engine()
+        if eng is None:
+            return None
+        enc = eng.encoders.get(cls) or eng.encoders.get("object")
+        if enc is None or not enc.available():
+            return None
+        with self._embed_lock:
+            try:
+                m = enc.encode([crop])
+                return m[0] if getattr(m, "shape", (0,))[0] else None
+            except Exception:  # noqa: BLE001
+                return None
+
+    def _roster_plate(self, crop: Any) -> str | None:
+        from match.anpr.normalize import normalize_plate
+        reads = sorted(self.plates.read(crop), key=lambda r: -r[1])
+        if reads and reads[0][1] >= 0.5:
+            p = normalize_plate(reads[0][0])
+            return p or None
+        return None
+
+    def _roster_attrs(self, crop: Any, cls: str) -> dict:
+        try:
+            band = crop[: max(1, crop.shape[0] // 2)] if cls == "person" else crop
+            col = dominant_color_name(band)
+            return {"upper_color": col} if col and col != "unknown" else {}
+        except Exception:  # noqa: BLE001
+            return {}
 
     # ---- commands -----------------------------------------------------
     def record_toggle(self) -> None:
@@ -459,12 +530,6 @@ class Backend:
                     plate = self.plates.plate_for(det["id"])
                     if plate:
                         det["plate"] = plate[0]
-                # session roster: keep a deduped photo + metadata for each person/vehicle
-                if cls in ("person", "vehicle") and d.track_id is not None:
-                    rx1, ry1, rx2, ry2 = max(0, int(x1)), max(0, int(y1)), int(x2), int(y2)
-                    if rx2 > rx1 and ry2 > ry1:
-                        self.roster.observe(det["id"], cls, img[ry1:ry2, rx1:rx2], now,
-                                            plate=det.get("plate"), attrs=det.get("attrs"))
                 dets.append(det)
                 idx += 1
         self.plates.prune({d["id"] for d in dets})
@@ -876,6 +941,9 @@ class Backend:
 
     def shutdown(self) -> None:
         self.disconnect()
+        if self._roster_harvester is not None:
+            self._roster_harvester.stop()
+        self.plates.stop()
         self.thumbs.stop_all()
         try:
             self._unsub()

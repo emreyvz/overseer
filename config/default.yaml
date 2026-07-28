@@ -20,6 +20,16 @@ media:
 thumbs:
   max_workers: 24           # raise if you run more cameras than this on the map at once
 
+# Background roster: fills the ROSTER page from ALL cameras (not just the active one),
+# deduplicated by appearance embedding, using its own lightweight detector.
+roster:
+  enabled: true
+  detector: yolo11n.pt      # separate from the analysis model so it never races it
+  confidence: 0.3
+  imgsz: 960
+  interval: 4.0             # seconds to cycle through every camera once
+  dedup_threshold: 0.82     # ReID cosine above which two sightings are the same identity
+
 detectors:
   motion:
     enabled: true
