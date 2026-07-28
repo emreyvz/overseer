@@ -45,6 +45,7 @@ from vehicle.make import MakeClassifier
 from vision.egomotion import EgoMotion
 from vision.motion import MotionDetector
 from zones.monitor import ZoneMonitor
+from .clipenc import encode_clip
 from .media import MediaLibrary
 from .ooi import OOIManager
 from .pose_kp import PoseKP
@@ -832,27 +833,15 @@ class Backend:
             })
         return out
 
+    def _encode_clip(self, frames: list, fps: float = 10.0) -> str | None:
+        """Write frames to a browser-playable clip under snapshots/clips and return its URL."""
+        path = encode_clip(frames, self._snap_dir / "clips", f"clip_{int(time.time() * 1000)}", fps)
+        return f"/snapshots/clips/{path.name}" if path is not None else None
+
     def _save_clip(self) -> str | None:
-        """Write the rolling frame window to a short MP4 — the moment an incident
-        happened — so it can be replayed from the alert even after it's over."""
+        """The rolling window around an incident, as a short browser-playable clip."""
         frames = list(self._clip_ring)
-        if len(frames) < 5:
-            return None
-        try:
-            h, w = frames[0].shape[:2]
-            clips_dir = self._snap_dir / "clips"
-            clips_dir.mkdir(parents=True, exist_ok=True)
-            name = f"clip_{int(time.time() * 1000)}.mp4"
-            # avc1 (H.264) so the clip plays in the in-app <video>; mp4v does not.
-            vw = cv2.VideoWriter(str(clips_dir / name), cv2.VideoWriter_fourcc(*"avc1"), 10.0, (w, h))
-            if not vw.isOpened():  # fall back if this build lacks the H.264 encoder
-                vw = cv2.VideoWriter(str(clips_dir / name), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (w, h))
-            for f in frames:
-                vw.write(f if f.shape[:2] == (h, w) else cv2.resize(f, (w, h)))
-            vw.release()
-            return f"/snapshots/clips/{name}"
-        except Exception:  # noqa: BLE001
-            return None
+        return self._encode_clip(frames, fps=10.0) if len(frames) >= 5 else None
 
     def _alert_snapshot_crop(self, img: Any, box: Any) -> str | None:
         """Save a padded crop around a detection (e.g. the weapon) as the alert image."""
