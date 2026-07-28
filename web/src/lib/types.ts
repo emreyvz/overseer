@@ -83,6 +83,7 @@ export interface RosterEntry {
   plate: string | null
   attrs: { upper_color?: string; lower_color?: string; height?: string; accessory?: string[] }
   obs: number
+  cam?: string | null           // camera the subject was last seen on
   first_ts: number
   last_ts: number
 }
