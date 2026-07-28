@@ -165,6 +165,15 @@ trajectory:
   stopped_eps: 15.0
   uturn_window: 12
   uturn_angle: 150.0
+# Rough per-vehicle speed estimate shown on the live overlay. Absolute km/h needs a scene
+# scale; without a per-camera calibration meters_per_pixel is a rough default, so the number
+# is an ESTIMATE (marked as such in the UI) but stays comparable within one camera.
+speed:
+  meters_per_pixel: 0.05   # scene scale: metres one pixel spans on the ground plane
+  window_seconds: 1.2      # averaging window that smooths frame-to-frame jitter
+  ema_alpha: 0.4           # exponential smoothing weight for the newest reading
+  min_kmh: 3.0             # below this reads as 0 (stationary) instead of crawling jitter
+  max_kmh: 300.0           # above this is treated as track-id reuse and ignored
 pose:
   enabled: true
   buffer_size: 30

@@ -22,6 +22,8 @@ export interface Detection {
   }
   caseAlias?: string    // analyst-assigned only, case-scoped
   plate?: string        // vehicles: estimated licence plate from live ANPR
+  subtype?: string      // vehicles: fine COCO type — car / truck / bus / motorcycle / bicycle
+  speed?: number        // vehicles: rough km/h estimate (uncalibrated → comparable, not exact)
 }
 
 export interface FrameMeta {
@@ -81,7 +83,7 @@ export interface RosterEntry {
   cls: 'person' | 'vehicle' | string
   snapshot: string | null      // /snapshots/... path, prefix with the API base
   plate: string | null
-  attrs: { upper_color?: string; lower_color?: string; height?: string; accessory?: string[] }
+  attrs: { upper_color?: string; lower_color?: string; height?: string; accessory?: string[]; subtype?: string }
   obs: number
   cam?: string | null           // camera the subject was last seen on
   first_ts: number

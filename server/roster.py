@@ -216,6 +216,10 @@ class RosterHarvester(threading.Thread):
                     attrs = self._attrs_fn(crop, cls)
                 except Exception:  # noqa: BLE001
                     attrs = None
+            if cls == "vehicle":  # keep the fine COCO subtype (car/truck/bus/...) on the card
+                subtype = getattr(d, "label", None)
+                if subtype:
+                    attrs = {**(attrs or {}), "subtype": subtype}
             self._roster.observe_reid(cls, crop, emb, time.time(), plate=plate,
                                       attrs=attrs, cam=cam)
 
