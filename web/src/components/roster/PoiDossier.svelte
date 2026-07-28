@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Cinematic "person of interest" dossier. Full-screen, dark and glassy: a subject hero with
+  // Cinematic subject profile screen. Full-screen, dark and glassy: a subject hero with
   // a targeting reticle that locks onto the portrait and a large display designation, animated
   // count-up stats, and an interactive movement trace (pan/zoom map with live feeds at every
   // camera the subject was seen on). Rich, composed, animated — not a terminal read-out.
@@ -30,7 +30,7 @@
 
   let a = $derived($annotations[entry.id] ?? {})
   let live = $derived(now - entry.last_ts < LIVE_MS)
-  let kind = $derived(entry.cls === 'vehicle' ? 'VEHICLE DOSSIER' : 'SUBJECT DOSSIER')
+  let kind = $derived(entry.cls === 'vehicle' ? 'VEHICLE PROFILE' : 'PERSON PROFILE')
   const camByName = (name?: string | null) => $cameras.find((c) => c.name === name)
   const photo = $derived(entry.snapshot ? `${API}${entry.snapshot}?t=${entry.last_ts}` : '')
   const heroSrc = $derived(cutout ? `${API}/api/roster/${entry.id}/cutout?t=${entry.last_ts}` : photo)
