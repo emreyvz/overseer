@@ -420,6 +420,18 @@ async def api_visualmatch(payload: dict[str, Any]) -> Any:
     return {"matches": matches}
 
 
+@app.post("/api/platematch")
+async def api_platematch(payload: dict[str, Any]) -> Any:
+    """Find a vehicle across live cameras by licence plate (ANPR)."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    plate = str(payload.get("plate", "")).strip()
+    if not plate:
+        return {"matches": []}
+    matches = await asyncio.to_thread(backend.plate_match, plate)
+    return {"matches": matches}
+
+
 @app.post("/api/inspect/{source_id}")
 async def api_inspect(source_id: int, payload: dict[str, float]) -> Any:
     """'Look closer' at a clicked point — returns any objects found there."""

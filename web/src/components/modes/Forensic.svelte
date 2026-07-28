@@ -33,7 +33,34 @@
   let more = $state(false)   // camera/time filters tucked away by default
   let phase = $state<'idle' | 'scan' | 'match'>('idle')
   let matchId = $state<string | null>(null)
+  let plateQ = $state('')
   const timers: ReturnType<typeof setTimeout>[] = []
+
+  // Search live cameras for a vehicle by licence plate (ANPR). On a hit, jump to that
+  // camera and drop the green located-match brackets so the operator sees it at once.
+  async function searchByPlate() {
+    const p = plateQ.trim()
+    if (!p) { sfx('error'); flashBanner('ENTER A PLATE', true, 1400); return }
+    if (SIM) { flashBanner('PLATE SEARCH NEEDS LIVE CAMERAS', true, 1600); return }
+    sfx('sonar'); phase = 'scan'; matchId = null
+    try {
+      const res = await api.plateMatch(p)
+      const best = res.matches?.[0]
+      if (!best) { phase = 'idle'; sfx('error'); flashBanner('PLATE NOT FOUND IN ANY LIVE FEED', true, 1800); return }
+      matchId = best.camId; phase = 'match'; sfx('ping', { critical: true, volume: 0.5 })
+      activeCam.set(best.camId)
+      const cam = $cameras.find((c) => c.id === best.camId)
+      if (!SIM && cam) sendCommand(`connect:${cam.name}`)
+      timers.push(setTimeout(() => {
+        triggerGlitch(200)
+        selectedDetection.set({ id: 'PLATE.MATCH', cls: 'vehicle', bbox: best.bbox, conf: best.score,
+          severity: 'info', klass: 'TARGET', caseAlias: `PLATE ${best.plate}`, plate: best.plate })
+        matchHighlight.set({ camId: best.camId, bbox: best.bbox, ts: Date.now() })
+        phase = 'idle'; mode.set('pov')
+        flashBanner(`PLATE ${best.plate} · ${best.cam}`, false, 1700)
+      }, 900))
+    } catch { phase = 'idle'; flashBanner('PLATE SEARCH FAILED', true, 1400) }
+  }
 
   const sel = (cur: string, v: string) => { sfx('click', { volume: 0.25 }); return cur === v ? '' : v }
   const query = () => [q, kind, color, height].filter(Boolean).join(' ').trim()
@@ -188,6 +215,9 @@
       onkeydown={(e) => e.key === 'Enter' && search()} spellcheck="false" />
     <label class="go caps img">⬆ IMAGE<input type="file" accept="image/*" onchange={searchByImage} hidden /></label>
     <button class="go caps" onclick={search}>◎ SEARCH</button>
+    <input bind:value={plateQ} class="type plateq" placeholder="PLATE #"
+      onkeydown={(e) => e.key === 'Enter' && searchByPlate()} spellcheck="false" />
+    <button class="go caps" onclick={searchByPlate}>▤ PLATE</button>
   </div>
 
   <button class="morebtn caps" onclick={() => (more = !more)}>{more ? '▾' : '▸'} CAMERA / TIME FILTERS</button>
@@ -237,6 +267,7 @@
   input { flex: 1; background: none; border: none; outline: none; color: var(--ink); font-family: var(--font-type);
     font-size: var(--fs-banner); letter-spacing: var(--tracking); text-transform: uppercase; caret-color: var(--scarlet); }
   input::placeholder { color: var(--ink-ghost); }
+  .plateq { max-width: 150px; letter-spacing: 0.14em; }
   .go { padding: 4px 14px; border: 1px solid var(--ink); font-size: var(--fs-label); letter-spacing: var(--tracking); }
   .go:hover { background: var(--scarlet); border-color: var(--scarlet); color: #fff; }
   .go.img { cursor: crosshair; }

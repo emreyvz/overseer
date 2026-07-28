@@ -234,3 +234,4 @@ match:
     gpu: true
     min_agreement: 3
     fold_confusable: true
+    live_interval: 2.5          # seconds between plate reads per tracked vehicle (live card)

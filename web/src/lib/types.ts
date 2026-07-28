@@ -21,6 +21,7 @@ export interface Detection {
     accessory?: string[]
   }
   caseAlias?: string    // analyst-assigned only, case-scoped
+  plate?: string        // vehicles: estimated licence plate from live ANPR
 }
 
 export interface FrameMeta {

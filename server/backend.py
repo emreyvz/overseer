@@ -101,6 +101,11 @@ class Backend:
             max_height=int(self.config.get("media.max_height", 1080)),
             max_concurrent=int(self.config.get("media.max_concurrent_downloads", 1)),
         )
+        # Live per-track plate reading (ANPR) for the vehicle tracking card. Runs off the
+        # analysis thread, throttled per track; needs EasyOCR (ai-extras) or stays idle.
+        from .plates import LivePlateReader
+        self.plates = LivePlateReader(
+            interval=float(self.config.get("match.anpr.live_interval", 2.5)))
         self._prewarm_thumbs()
         self.ooi = OOIManager()   # object-of-interest visual tracker
         self.pose_kp = PoseKP()   # keypoint pose behaviours (hand-raise)
@@ -435,8 +440,18 @@ class Backend:
                 attrs = self._appearance(img, int(x1), int(y1), int(x2), int(y2), cls, h)
                 if attrs:
                     det["attrs"] = attrs
+                # vehicles: offer the crop for background plate reading and show the voted
+                # plate (an estimate) on the card once ANPR agrees across frames
+                if cls == "vehicle" and d.track_id is not None:
+                    cx1, cy1, cx2, cy2 = max(0, int(x1)), max(0, int(y1)), int(x2), int(y2)
+                    if cx2 > cx1 and cy2 > cy1:
+                        self.plates.offer(det["id"], img[cy1:cy2, cx1:cx2], now)
+                    plate = self.plates.plate_for(det["id"])
+                    if plate:
+                        det["plate"] = plate[0]
                 dets.append(det)
                 idx += 1
+        self.plates.prune({d["id"] for d in dets})
         self._emit({"t": "detections", "d": dets})
 
         # weapon alert with a cropped image of the weapon itself (throttled)
@@ -729,6 +744,42 @@ class Backend:
 
         res = eng.match(query, sources, accept_threshold=float(thresh))
         return [self._hit_to_dict(h) for h in res.hits]
+
+    def plate_match(self, plate: str) -> list[dict]:
+        """Find a vehicle across live cameras whose plate matches the query. Runs ANPR on
+        the vehicles in each source's current frame and compares (confusable-tolerant) to
+        the query; returns the best hit per camera with a normalized plate + bbox."""
+        if not plate or self._yolo is None or not self.plates.available():
+            return []
+        from match.anpr.normalize import normalize_plate, plate_similarity
+        q = normalize_plate(plate, fold_confusable=True)  # tolerant match
+        if not q:
+            return []
+        out: list[dict] = []
+        for s in self.db.list_sources():
+            frame = self._source_frame(s)
+            if frame is None or getattr(frame, "size", 0) == 0:
+                continue
+            fh, fw = frame.shape[:2]
+            best: tuple | None = None
+            for d in self._yolo.detect_crop(frame, conf=0.25):
+                if _CATEGORY_CLS.get(d.category, "object") != "vehicle":
+                    continue
+                x1, y1, x2, y2 = (int(v) for v in d.bbox)
+                x1, y1, x2, y2 = max(0, x1), max(0, y1), min(fw, x2), min(fh, y2)
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                for text, _conf in self.plates.read(frame[y1:y2, x1:x2]):
+                    sim = plate_similarity(q, text, fold_confusable=True)
+                    if sim >= 0.7 and (best is None or sim > best[0]):
+                        best = (sim, normalize_plate(text, fold_confusable=False), (x1, y1, x2, y2))
+            if best:
+                sim, pl, (x1, y1, x2, y2) = best
+                out.append({"camId": str(s.id), "cam": s.name, "plate": pl,
+                            "score": round(float(sim), 3),
+                            "bbox": [x1 / fw, y1 / fh, (x2 - x1) / fw, (y2 - y1) / fh]})
+        out.sort(key=lambda m: -m["score"])
+        return out
 
     def _on_event(self, ev: Event) -> None:
         type_en = ev.type.name.replace("_", " ")
