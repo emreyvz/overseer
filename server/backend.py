@@ -39,6 +39,7 @@ from storage.database import Database
 from storage.recorder import Recorder
 from storage.snapshots import SnapshotService
 from trajectory.monitor import TrajectoryMonitor
+from trajectory.speed import SpeedEstimator
 from vision.motion import MotionDetector
 from zones.monitor import ZoneMonitor
 from .media import MediaLibrary
@@ -90,6 +91,13 @@ class Backend:
         self.trajectory = TrajectoryMonitor(self.config)
         self.pose = PoseMonitor(self.config)
         self.objects = ObjectMonitor(self.config)
+        self.speed = SpeedEstimator(
+            meters_per_pixel=float(self.config.get("speed.meters_per_pixel", 0.05)),
+            window=float(self.config.get("speed.window_seconds", 1.2)),
+            ema_alpha=float(self.config.get("speed.ema_alpha", 0.4)),
+            min_kmh=float(self.config.get("speed.min_kmh", 3.0)),
+            max_kmh=float(self.config.get("speed.max_kmh", 300.0)),
+        )  # rough per-vehicle km/h estimate for the live overlay
         self.thumbs = ThumbHub(
             max_workers=int(self.config.get("thumbs.max_workers", 24)),
             cache_dir=self.data_dir / "thumbs",
@@ -250,6 +258,7 @@ class Backend:
 
             self.zones.set_zones(self.db.list_zones(source_id))
             self.trajectory.reset(); self.pose.reset(); self.objects.reset(); self.ooi.clear()
+            self.speed.reset()
             self.alert_engine.reset(); self.alert_engine.set_rules(self.db.list_alert_rules())
 
             self._buffer = FrameBuffer(maxsize=int(self.config.get("camera.buffer_size", 5)))
@@ -596,18 +605,24 @@ class Backend:
                 attrs = self._appearance(img, int(x1), int(y1), int(x2), int(y2), cls, h)
                 if attrs:
                     det["attrs"] = attrs
-                # vehicles: offer the crop for background plate reading and show the voted
-                # plate (an estimate) on the card once ANPR agrees across frames
-                if cls == "vehicle" and d.track_id is not None:
-                    cx1, cy1, cx2, cy2 = max(0, int(x1)), max(0, int(y1)), int(x2), int(y2)
-                    if cx2 > cx1 and cy2 > cy1:
-                        self.plates.offer(det["id"], img[cy1:cy2, cx1:cx2], now)
-                    plate = self.plates.plate_for(det["id"])
-                    if plate:
-                        det["plate"] = plate[0]
+                # vehicles: surface the fine COCO subtype (car / truck / bus / motorcycle),
+                # a rough km/h estimate, and — once ANPR agrees across frames — the voted plate
+                if cls == "vehicle":
+                    det["subtype"] = d.label
+                    if d.track_id is not None:
+                        cx1, cy1, cx2, cy2 = max(0, int(x1)), max(0, int(y1)), int(x2), int(y2)
+                        if cx2 > cx1 and cy2 > cy1:
+                            self.plates.offer(det["id"], img[cy1:cy2, cx1:cx2], now)
+                        plate = self.plates.plate_for(det["id"])
+                        if plate:
+                            det["plate"] = plate[0]
+                        kmh = self.speed.update(d.track_id, (x1, y1, x2, y2), now)
+                        if kmh is not None:
+                            det["speed"] = round(kmh)
                 dets.append(det)
                 idx += 1
         self.plates.prune({d["id"] for d in dets})
+        self.speed.prune(now)
         self._emit({"t": "detections", "d": dets})
 
         # weapon alert with a cropped image of the weapon itself (throttled)

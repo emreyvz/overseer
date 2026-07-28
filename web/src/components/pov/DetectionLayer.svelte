@@ -189,6 +189,8 @@
           {#if t.d.klass === 'TARGET'}{@const v = matchVerdict(t.d.conf)}<span class="cf vc vc-{v.tone}">{v.label} {v.bars}</span>
           {:else}<span class="cf">{Math.round(t.d.conf * 100)}%</span>{/if}</div>
         <div class="trow caps"><span class="kk">CLASS</span><span class="vv">{trUpper(t.d.cls)}</span></div>
+        {#if t.d.subtype}<div class="trow caps"><span class="kk">TYPE</span><span class="vv">{trUpper(t.d.subtype)}</span></div>{/if}
+        {#if t.d.speed !== undefined}<div class="trow caps"><span class="kk">SPEED</span><span class="vv">{t.d.speed === 0 ? 'STOPPED' : `${t.d.speed} KM/H`}{#if t.d.speed !== 0}<span class="est"> ~est</span>{/if}</span></div>{/if}
         {#if t.d.plate}<div class="trow caps"><span class="kk">PLATE</span><span class="vv plate">{t.d.plate}<span class="est"> ~est</span></span></div>{/if}
         {#if attrLine(t.d)}<div class="trow caps"><span class="kk">ATTR</span><span class="vv">{attrLine(t.d)}</span></div>{/if}
         {#if a.owner}<div class="trow caps"><span class="kk">OWNER</span><span class="vv">{trUpper(a.owner)}</span></div>{/if}
