@@ -147,6 +147,7 @@ class Backend:
         self._embed_lock = threading.Lock()   # serialize ReID encoder use (harvester vs search)
         self._roster_harvester = None
         self._roster_det = None
+        self._roster_boot_lock = threading.Lock()  # guard boot-vs-connect harvester start race
         self._roster_fullres_last: dict[int, float] = {}  # per-source last full-res grab time
         self._roster_seek: dict[int, float] = {}          # rotating sample point in looped files
         self._prewarm_thumbs()
@@ -193,6 +194,10 @@ class Backend:
     def bind(self, loop: Any, broadcast: Broadcaster) -> None:
         self._loop = loop
         self._broadcast = broadcast
+        # Fill the roster from ALL cameras in the background starting at boot — the operator
+        # should see people/vehicles appear without having to open a camera first. The detector
+        # load happens off the event loop so startup isn't blocked.
+        threading.Thread(target=self._start_roster_harvester, name="RosterBoot", daemon=True).start()
 
     def _emit(self, msg: dict[str, Any]) -> None:
         if self._loop is None or self._broadcast is None:
@@ -396,38 +401,44 @@ class Backend:
         except Exception as exc:  # noqa: BLE001 - degrade gracefully
             log.warning("YOLO unavailable, motion-only: %s", exc)
 
-    def _start_roster_harvester(self, mm: Any) -> None:
+    def _start_roster_harvester(self, mm: Any = None) -> None:
         """Start the background thread that fills the roster from ALL cameras. Uses its own
-        (lightweight) detector so it never races the live analysis YOLO."""
-        if self._roster_harvester is not None or not bool(self.config.get("roster.enabled", True)):
-            return
-        try:
-            from ai.yolo import YoloBackend
-            from .roster import RosterHarvester
-            det_path = mm.ensure_model(str(self.config.get("roster.detector", "yolo11n.pt")))
-            det = YoloBackend(
-                det_path, mm.select_device(),
-                confidence=float(self.config.get("roster.confidence", 0.3)),
-                imgsz=int(self.config.get("roster.imgsz", 960)),
-                person_confidence=float(self.config.get("detectors.yolo.person_confidence", 0.18)),
-            )
-            self._roster_det = det
-            conf = float(self.config.get("roster.confidence", 0.3))
-            self._roster_harvester = RosterHarvester(
-                self.roster,
-                sources_fn=self.db.list_sources,
-                frame_fn=self._roster_frame,
-                detect_fn=lambda f: det.detect_crop(f, conf=conf),
-                embed_fn=self._roster_embed,
-                cat_to_cls=_CATEGORY_CLS,
-                plate_fn=self._roster_plate,
-                attrs_fn=self._roster_attrs,
-                interval=float(self.config.get("roster.interval", 4.0)),
-            )
-            self._roster_harvester.start()
-            log.info("roster harvester online")
-        except Exception:  # noqa: BLE001
-            log.exception("roster harvester failed to start")
+        (lightweight) detector so it never races the live analysis YOLO. Runs from boot — it
+        does NOT need an actively-analysed camera; passive cameras are scanned via their warm
+        thumbnail and a periodic full-res grab."""
+        with self._roster_boot_lock:
+            if self._roster_harvester is not None or not bool(self.config.get("roster.enabled", True)):
+                return
+            try:
+                from ai.model_manager import ModelManager
+                from ai.yolo import YoloBackend
+                from .roster import RosterHarvester
+                if mm is None:
+                    mm = ModelManager(Path("models"))
+                det_path = mm.ensure_model(str(self.config.get("roster.detector", "yolo11n.pt")))
+                det = YoloBackend(
+                    det_path, mm.select_device(),
+                    confidence=float(self.config.get("roster.confidence", 0.3)),
+                    imgsz=int(self.config.get("roster.imgsz", 960)),
+                    person_confidence=float(self.config.get("detectors.yolo.person_confidence", 0.18)),
+                )
+                self._roster_det = det
+                conf = float(self.config.get("roster.confidence", 0.3))
+                self._roster_harvester = RosterHarvester(
+                    self.roster,
+                    sources_fn=self.db.list_sources,
+                    frame_fn=self._roster_frame,
+                    detect_fn=lambda f: det.detect_crop(f, conf=conf),
+                    embed_fn=self._roster_embed,
+                    cat_to_cls=_CATEGORY_CLS,
+                    plate_fn=self._roster_plate,
+                    attrs_fn=self._roster_attrs,
+                    interval=float(self.config.get("roster.interval", 4.0)),
+                )
+                self._roster_harvester.start()
+                log.info("roster harvester online")
+            except Exception:  # noqa: BLE001
+                log.exception("roster harvester failed to start")
 
     def _roster_frame(self, source: Any) -> Any:
         """Frame the roster harvester should scan. The active camera gives its full-res
@@ -851,13 +862,17 @@ class Backend:
         else the deterministic baseline is used and reported in self.match_info."""
         if self.match_engine is not None:
             return self.match_engine
-        if self._yolo is None:
+        # Prefer the live analysis detector; fall back to the roster harvester's own detector
+        # so ReID embeddings (and thus roster de-duplication) work from boot, before any camera
+        # is actively analysed.
+        det_backend = self._yolo or self._roster_det
+        if det_backend is None:
             return None
         from match.factory import build_engine
         conf = float(self.config.get("match.detect_conf", 0.25))
 
         def detect(frame: Any) -> Any:
-            return self._yolo.detect_crop(frame, conf=conf)
+            return (self._yolo or self._roster_det).detect_crop(frame, conf=conf)
 
         try:
             self.match_engine, self.match_info = build_engine(

@@ -167,7 +167,7 @@
         {/if}
       </span>
       {#if $selectedDetection?.id !== d.id}
-        <span class="tag caps" class:hot={isAlarm(d)}>{a.alias || d.klass}</span>
+        <span class="tag caps" class:hot={isAlarm(d)}>{a.alias || d.klass}{#if d.speed !== undefined} · {d.speed === 0 ? 'STOPPED' : `${d.speed} KM/H`}{/if}</span>
       {/if}
     </div>
   {/each}
