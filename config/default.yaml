@@ -13,7 +13,8 @@ camera:
 
 # YouTube (yt-dlp) sources are downloaded once and looped like a live camera.
 media:
-  max_height: 1080          # cap downloaded video resolution (quality vs size/decode)
+  max_height: 1080              # cap downloaded video resolution (quality vs size/decode)
+  max_concurrent_downloads: 1   # serialize downloads so navigating cameras doesn't storm the box
 
 # Per-camera map preview relays kept warm in parallel.
 thumbs:

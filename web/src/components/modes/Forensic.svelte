@@ -3,7 +3,7 @@
   // all feeds → match found → that camera expands to POV with the target card.
   import { onDestroy, onMount } from 'svelte'
   import { get } from 'svelte/store'
-  import { cameras, activeCam, mode, selectedDetection, triggerGlitch, forensicSeed, flashBanner } from '../../lib/stores'
+  import { cameras, activeCam, mode, selectedDetection, triggerGlitch, forensicSeed, flashBanner, matchHighlight } from '../../lib/stores'
   import { sfx } from '../../lib/audio'
   import { sendCommand } from '../../lib/ws'
   import { SIM } from '../../lib/sim'
@@ -58,7 +58,7 @@
     if (hits.length === 0) { phase = 'idle'; sfx('error'); flashBanner('NO MATCH FOUND', true, 1700); return }
     const src = (hits[0] as any).source || camFilter
     matchId = ($cameras.find((c) => c.id === src)?.id) ?? (camFilter || ($cameras.find((c) => c.health === 'online')?.id ?? $cameras[0]?.id ?? null))
-    phase = 'match'; sfx('ping')
+    phase = 'match'; sfx('ping', { critical: true, volume: 0.5 })   // found cue (bypass the 2-sound cap)
     timers.push(setTimeout(reveal, 800))
   }
 
@@ -75,6 +75,7 @@
       attrs: { upper_color: color.toLowerCase() || 'navy', height: (height.toLowerCase() as any) || 'medium' },
     }
     selectedDetection.set(det)
+    if (matchId) matchHighlight.set({ camId: matchId, bbox: det.bbox, ts: Date.now() })
     phase = 'idle'; mode.set('pov')
   }
   // Search-by-image: real visual matching. The uploaded photo is matched against
@@ -91,13 +92,14 @@
       const [res] = await Promise.all([api.visualMatch(dataUrl, kind || undefined, matchMinScore(kind)), minWait])
       const best = res.matches?.[0]
       if (best) {
-        matchId = best.camId; phase = 'match'; sfx('ping')
+        matchId = best.camId; phase = 'match'; sfx('ping', { critical: true, volume: 0.5 })
         activeCam.set(best.camId)
         const cam = $cameras.find((c) => c.id === best.camId)
         if (!SIM && cam) sendCommand(`connect:${cam.name}`)
         timers.push(setTimeout(() => {
           triggerGlitch(200)
           selectedDetection.set({ id: 'IMG.MATCH', cls: (kind || 'person') as any, bbox: best.bbox, conf: best.score, severity: 'info', klass: 'TARGET', caseAlias: 'IMAGE MATCH' })
+          matchHighlight.set({ camId: best.camId, bbox: best.bbox, ts: Date.now() })
           phase = 'idle'; mode.set('pov')
           flashBanner(matchBanner(best.cam, best.score, best.ambiguous), false, 1700)
         }, 900))
@@ -114,7 +116,7 @@
       const res = await api.visualMatch(e.image, e.kind, matchMinScore(e.kind))
       const best = res.matches?.[0]
       if (best) {
-        matchId = best.camId; phase = 'match'; sfx('ping')
+        matchId = best.camId; phase = 'match'; sfx('ping', { critical: true, volume: 0.5 })
         activeCam.set(best.camId)
         const cam = $cameras.find((c) => c.id === best.camId)
         if (!SIM && cam) sendCommand(`connect:${cam.name}`)
@@ -122,6 +124,7 @@
           triggerGlitch(200)
           selectedDetection.set({ id: `WL.${e.id}`, cls: (e.kind === 'pet' ? 'animal' : e.kind) as any, bbox: best.bbox,
             conf: best.score, severity: e.threat === 'threat' ? 'critical' : 'info', klass: 'TARGET', caseAlias: e.name })
+          matchHighlight.set({ camId: best.camId, bbox: best.bbox, ts: Date.now() })
           phase = 'idle'; mode.set('pov')
           flashBanner(matchBanner(best.cam, best.score, best.ambiguous), false, 1600)
         }, 900)

@@ -2,7 +2,7 @@
   // Watchlist browser — find enrolled entities later. Filter by kind / threat,
   // jump to a forensic search for one, re-classify its threat, or remove it.
   import { watchlist, removeEntity, setThreat, type EntityKind, type ThreatLevel } from '../lib/watchlist'
-  import { watchlistOpen, forensicSeed, mode, stage, selectedDetection, activeCam, cameras, flashBanner } from '../lib/stores'
+  import { watchlistOpen, forensicSeed, mode, stage, selectedDetection, activeCam, cameras, flashBanner, matchHighlight } from '../lib/stores'
   import { sendCommand } from '../lib/ws'
   import { SIM } from '../lib/sim'
   import { api } from '../lib/api'
@@ -42,6 +42,8 @@
           conf: best.score, severity: e.threat === 'threat' ? 'critical' : 'info',
           klass: 'TARGET', caseAlias: e.name,
         })
+        matchHighlight.set({ camId: best.camId, bbox: best.bbox, ts: Date.now() })
+        sfx('ping', { critical: true, volume: 0.5 })   // "found" cue (bypasses the 2-sound cap)
         watchlistOpen.set(false); mode.set('pov'); stage.set('live')
         flashBanner(matchBanner(best.cam, best.score, best.ambiguous), false, 1600)
       } else {

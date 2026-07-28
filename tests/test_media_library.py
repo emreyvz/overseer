@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 from server.media import MediaLibrary, source_key, youtube_id
@@ -92,6 +93,35 @@ def test_poster_returns_cached_bytes(tmp_path: Path) -> None:
     (tmp_path / f"{vid}.poster.jpg").write_bytes(b"\xff\xd8POSTER")
     assert lib.poster(f"https://youtu.be/{vid}") == b"\xff\xd8POSTER"
     assert lib.poster("http://cam.local/stream") is None    # non-youtube -> no poster
+
+
+def test_downloads_are_serialized(tmp_path: Path) -> None:
+    import threading
+    counts = {"now": 0, "max": 0}
+    clock = threading.Lock()
+    gate = threading.Event()
+
+    def slow(url, out_dir, key, max_h, cb):
+        with clock:
+            counts["now"] += 1
+            counts["max"] = max(counts["max"], counts["now"])
+        gate.wait(1.5)                    # hold so a second download would overlap if allowed
+        with clock:
+            counts["now"] -= 1
+        p = Path(out_dir) / f"{key}.mp4"
+        p.write_bytes(b"X")
+        return p
+
+    lib = MediaLibrary(tmp_path, downloader=slow, max_concurrent=1)
+    lib.local_path("https://youtu.be/aaaaaaaaaaa")
+    lib.local_path("https://youtu.be/bbbbbbbbbbb")
+    time.sleep(0.25)                      # both threads live; the semaphore lets only one in
+    gate.set()
+    for k in ("aaaaaaaaaaa", "bbbbbbbbbbb"):
+        th = lib._threads.get(k)
+        if th:
+            th.join(timeout=3)
+    assert counts["max"] == 1             # never two downloads at once
 
 
 def test_dedup_one_download(tmp_path: Path) -> None:
