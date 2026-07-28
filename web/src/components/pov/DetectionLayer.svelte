@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { untrack } from 'svelte'
+  import { untrack, onMount, onDestroy } from 'svelte'
   import { detections, selectedDetection, dossierOpen, flashBanner, forensicSeed, mode, cameras, activeCam, enrollOpen } from '../../lib/stores'
+  import { predictedDetections } from '../../lib/motion'
   import { sfx } from '../../lib/audio'
   import { trUpper } from '../../lib/lexicon'
   import { annotations } from '../../lib/annotations'
@@ -43,27 +44,52 @@
   // detection matching by class + appearance + proximity, keeping one identity.
   type Tgt = { key: string; id: string; bbox: [number, number, number, number]; d: Detection; lost: boolean; lostSince: number }
   let target = $state<Tgt | null>(null)
+  let hovering = $state(false)     // pointer over the tracking card → keep it open
+  let dismissing = $state(false)   // playing the elegant fade-out before removal
+  const REACQUIRE_MS = 3000        // only try to re-id within this window after a loss
+  const LOST_DISMISS_MS = 2600     // lost this long AND not hovered → the card fades away
   const center = (b: [number, number, number, number]): [number, number] => [b[0] + b[2] / 2, b[1] + b[3] / 2]
 
-  // Score candidates for re-identifying a lost target; return the best over threshold.
-  // Works for people (appearance colour cues) AND vehicles/animals (class + proximity
-  // when no colour attrs are available), so any lost target can be re-acquired.
+  // Reaper: once a target has been genuinely lost for a moment and the operator is not
+  // hovering the card, retire it with a graceful fade instead of leaving a stale card that
+  // could otherwise drift onto someone else.
+  let reaper: ReturnType<typeof setInterval> | undefined
+  onMount(() => {
+    reaper = setInterval(() => {
+      const t = target
+      if (!t || !t.lost || hovering || dismissing) return
+      if (Date.now() - (t.lostSince || Date.now()) > LOST_DISMISS_MS) {
+        dismissing = true
+        setTimeout(() => {
+          if (target?.lost && !hovering) { target = null; selectedDetection.set(null); dossierOpen.set(false) }
+          dismissing = false
+        }, 420)
+      }
+    }, 300)
+  })
+  onDestroy(() => { if (reaper) clearInterval(reaper) })
+
+  // Re-identify a briefly-lost target — CONSERVATIVELY, so the card never latches onto a
+  // different person. A candidate must be the same class, reappear near the loss point, and
+  // MATCH on appearance (colour). Proximity alone is never enough (that is how the old code
+  // grabbed a passing stranger), and a wrong colour disqualifies outright.
   function reacquire(t: Tgt, dets: Detection[]): Detection | null {
     const [cx, cy] = center(t.bbox)
     const ta = t.d.attrs ?? {}
+    if (!ta.upper_color) return null // no appearance cue on the target → don't guess a re-id
     let best: Detection | null = null
-    let bestScore = 0.55 // minimum confidence to accept a match (avoids false re-ids)
+    let bestScore = 0.7 // strict acceptance threshold
     for (const d of dets) {
-      if (d.id === t.id || d.cls !== t.d.cls) continue // same object-class is required
+      if (d.id === t.id || d.cls !== t.d.cls) continue
       const da = d.attrs ?? {}
+      if (!da.upper_color) continue // candidate must also carry an appearance cue
       const [dx, dy] = center(d.bbox)
       const dist = Math.hypot(dx - cx, dy - cy)
-      const haveColor = !!(ta.upper_color && da.upper_color)
-      if (!haveColor && dist > 0.2) continue // no appearance cue → only re-grab near the loss point
-      let score = 0
-      if (haveColor) score += ta.upper_color === da.upper_color ? 0.6 : -0.5
-      if (ta.height && da.height && ta.height === da.height) score += 0.2
-      score += Math.max(0, 0.6 * (1 - dist / 0.45)) // proximity: full when near, fades by ~45% away
+      if (dist > 0.28) continue // must reappear near where it was lost
+      let score = ta.upper_color === da.upper_color ? 0.55 : -1.0 // wrong colour disqualifies
+      if (ta.lower_color && da.lower_color) score += ta.lower_color === da.lower_color ? 0.2 : -0.3
+      if (ta.height && da.height && ta.height === da.height) score += 0.15
+      score += Math.max(0, 0.35 * (1 - dist / 0.28)) // proximity bonus, near the loss point only
       if (score > bestScore) { bestScore = score; best = d }
     }
     return best
@@ -82,14 +108,17 @@
         return
       }
       const live = dets.find((x) => x.id === cur.id)
-      if (live) { target = { ...cur, id: live.id, bbox: live.bbox, d: live, lost: false, lostSince: 0 }; return }
-      const cand = reacquire(cur, dets) // lost → try to re-identify a re-entering object
+      if (live) { dismissing = false; target = { ...cur, id: live.id, bbox: live.bbox, d: live, lost: false, lostSince: 0 }; return }
+      const lostSince = cur.lostSince || Date.now()
+      // only attempt a re-id briefly after the loss; after that let the card retire
+      const cand = (Date.now() - lostSince < REACQUIRE_MS) ? reacquire(cur, dets) : null
       if (cand) {
         if (cur.lost) { sfx('ping', { volume: 0.35 }); flashBanner('TARGET RE-ACQUIRED', false, 900) }
+        dismissing = false
         target = { ...cur, id: cand.id, bbox: cand.bbox, d: cand, lost: false, lostSince: 0 }
         return
       }
-      target = { ...cur, lost: true, lostSince: cur.lostSince || Date.now() } // hold last position
+      target = { ...cur, lost: true, lostSince } // hold last position (until the reaper retires it)
     })
   })
 
@@ -101,7 +130,7 @@
     target = null; selectedDetection.set(null); dossierOpen.set(false); mode.set('forensic')
   }
   // Close the tracking panel; clears both local state and the selection so it stays closed.
-  function deselect() { sfx('click'); target = null; selectedDetection.set(null); dossierOpen.set(false) }
+  function deselect() { sfx('click'); target = null; dismissing = false; hovering = false; selectedDetection.set(null); dossierOpen.set(false) }
   // Operator says this located target is not the right match (catalog 12/13). The rejection
   // is remembered per class and quietly tightens future searches for that class.
   function rejectMatch(d: Detection) {
@@ -113,7 +142,7 @@
 </script>
 
 <div class="layer">
-  {#each $detections as d (d.id)}
+  {#each $predictedDetections as d (d.id)}
     {@const m = markerOf(d)}
     {@const a = $annotations[d.id] ?? {}}
     <div
@@ -145,14 +174,16 @@
 
   {#if target}
     {@const t = target}
+    {@const tb = $predictedDetections.find((x) => x.id === t.id)?.bbox ?? t.bbox}
     {@const a = $annotations[t.key] ?? {}}
     {@const alarm = isAlarm(t.d) || a.threat === 'high'}
     {@const asx = assess(t.d, a.threat)}
-    {@const nxt = predictNext(t.bbox[0] + t.bbox[2] / 2)}
-    <div class="tgt" class:lost={t.lost}
-      style={`left:${pc(t.bbox[0])};top:${pc(t.bbox[1])};width:${pc(t.bbox[2])};height:${pc(t.bbox[3])}`}>
+    {@const nxt = predictNext(tb[0] + tb[2] / 2)}
+    <div class="tgt" class:lost={t.lost} class:dismissing
+      style={`left:${pc(tb[0])};top:${pc(tb[1])};width:${pc(tb[2])};height:${pc(tb[3])}`}>
       <span class="lock"></span>
-      <div class="track panel" class:alarm class:flip={t.bbox[0] + t.bbox[2] / 2 > 0.62}>
+      <div class="track panel" class:alarm class:flip={tb[0] + tb[2] / 2 > 0.62}
+        role="group" onmouseenter={() => (hovering = true)} onmouseleave={() => (hovering = false)}>
         <div class="ttab caps"><span>/// {a.alias || t.d.klass}{#if t.lost} · LOST{/if}</span><button class="tx" onpointerdown={(e) => { e.stopPropagation(); deselect() }} aria-label="close">×</button></div>
         <div class="trow caps"><span class="tk">{t.key}</span>
           {#if t.d.klass === 'TARGET'}{@const v = matchVerdict(t.d.conf)}<span class="cf vc vc-{v.tone}">{v.label} {v.bars}</span>
@@ -178,8 +209,12 @@
 
 <style>
   .layer { position: absolute; inset: 0; z-index: var(--z-overlay); pointer-events: none; }
+  /* No CSS position transition: boxes are dead-reckoned every animation frame (lib/motion),
+     so they track the object in real time instead of tweening in from where it just was.
+     A one-shot fade-in (fires only when a new track first appears) softens the pop-in. */
   .det { position: absolute; pointer-events: auto; cursor: crosshair; background: none;
-    transition: left 140ms linear, top 140ms linear, width 140ms linear, height 140ms linear; }
+    animation: detIn 160ms ease; }
+  @keyframes detIn { from { opacity: 0; } }
 
   .cnr { position: absolute; width: 9px; height: 9px; border: 1.5px solid var(--ink); opacity: 0.85; }
   .a { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
@@ -203,10 +238,12 @@
   .tag { position: absolute; top: -16px; left: 0; font-size: var(--fs-micro); letter-spacing: 0.12em; color: var(--ink); text-shadow: 0 0 4px #000; }
   .tag.hot { color: var(--scarlet); }
 
-  /* persistent tracked-target overlay — follows the object smoothly, holds on gaps */
-  .tgt { position: absolute; z-index: 6; pointer-events: none;
-    transition: left 160ms linear, top 160ms linear, width 160ms linear, height 160ms linear; }
+  /* persistent tracked-target overlay — dead-reckoned every frame (real-time), holds on gaps */
+  .tgt { position: absolute; z-index: 6; pointer-events: none; }
   .tgt.lost { opacity: 0.7; }
+  /* elegant fade-out when a genuinely lost target is retired (and not being hovered) */
+  .tgt.dismissing { opacity: 0; transform: scale(1.03);
+    transition: opacity 400ms ease, transform 400ms ease; }
   .lock { position: absolute; inset: -6px; border: 1.5px solid #fff; box-shadow: 0 0 10px rgba(255,255,255,0.4); animation: lockpulse 1.6s ease-in-out infinite; }
   @keyframes lockpulse { 50% { box-shadow: 0 0 16px rgba(255,255,255,0.7); } }
 

@@ -794,10 +794,13 @@ class Backend:
             return None
         from .ytstream import is_stream_url
         if is_stream_url(src.url):
-            local = self.media.local_path(src.url)   # first preview kicks off the download
-            if local is None:
-                return self.thumbs.last(source_id)   # downloading: frozen frame, no live open
-            return self.thumbs.get_jpeg(source_id, str(local))
+            # Previews NEVER trigger a download (merely viewing the map must not start a
+            # multi-GB fetch). The download happens on connect(); until the file is local,
+            # show the video's YouTube poster so the camera has an image immediately.
+            local = self.media.cached_path(src.url)
+            if local is not None:
+                return self.thumbs.get_jpeg(source_id, str(local))
+            return self.media.poster(src.url) or self.thumbs.last(source_id)
         return self.thumbs.get_jpeg(source_id, src.url)
 
     def reap_thumbs(self) -> None:
