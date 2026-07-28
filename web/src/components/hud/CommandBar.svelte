@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { commandOpen, mode, stage, zoneEditor, alertRules, objectRegister, storageScreen, watchlistOpen, aiOpen, shuttingDown, flashBanner, triggerGlitch, type Mode } from '../../lib/stores'
+  import { commandOpen, mode, stage, pickerView, zoneEditor, alertRules, objectRegister, storageScreen, watchlistOpen, aiOpen, shuttingDown, flashBanner, triggerGlitch, type Mode } from '../../lib/stores'
   import { sfx, keyTick } from '../../lib/audio'
   import { sendCommand } from '../../lib/ws'
   import { LEX } from '../../lib/lexicon'
@@ -11,13 +11,13 @@
   $effect(() => { if ($commandOpen) { value = ''; sel = 0; queueMicrotask(() => el?.focus()) } })
 
   const MODE_WORDS: Record<string, Mode> = {
-    topology: 'topology', forensic: 'forensic', archive: 'archive', pov: 'pov', roster: 'roster',
+    forensic: 'forensic', archive: 'archive', pov: 'pov', roster: 'roster',
   }
 
   interface Sug { v: string; d: string }
   const BASE: Sug[] = [
     { v: 'sources', d: 'SOURCE PICKER' },
-    { v: 'topology', d: 'TOPOLOGY MAP' },
+    { v: 'map', d: 'CAMERA MAP' },
     { v: 'forensic', d: 'FORENSIC SEARCH' },
     { v: 'watchlist', d: 'WATCHLIST · TARGETS' },
     { v: 'roster', d: 'ROSTER · PEOPLE & VEHICLES' },
@@ -49,7 +49,8 @@
     const head = cmd.split(/\s+/)[0]
 
     if (head in MODE_WORDS) { triggerGlitch(160); sfx('whoosh'); stage.set('live'); mode.set(MODE_WORDS[head]); close(); return }
-    if (head === 'sources' || head === 'cameras') { sfx('whoosh'); triggerGlitch(180); stage.set('select'); close(); return }
+    if (head === 'sources' || head === 'cameras') { sfx('whoosh'); triggerGlitch(180); pickerView.set('grid'); stage.set('select'); close(); return }
+    if (head === 'map') { sfx('whoosh'); triggerGlitch(180); pickerView.set('map'); stage.set('select'); close(); return }
     if (head === 'zones' || head === 'zone' || head === 'line') { sfx('click'); mode.set('pov'); zoneEditor.set(true); close(); return }
     if (head === 'object' || head === 'ooi') { sfx('click'); mode.set('pov'); objectRegister.set(true); close(); return }
     if (head === 'alerts' || head === 'alert') { sfx('click'); alertRules.set(true); close(); return }
