@@ -71,6 +71,44 @@ def test_ego_passing_car_true_speed() -> None:
     assert v is not None and abs(v - 36.0) < 1.0
 
 
+def test_height_scale_consistent_across_depth() -> None:
+    # a car at a fixed real speed reads the SAME km/h whether near (tall box, many px/s) or far
+    # (short box, few px/s). This is the fix for the fixed-mpp bug (near read too fast, far too
+    # slow). V = 10 m/s; px/s = V * box_h / real_h, so px/frame @10fps = that / 10.
+    def run(box_h: float, px_per_frame: float) -> float:
+        est = SpeedEstimator(ema_alpha=1.0, window=2.0, min_kmh=0.0, scale_alpha=1.0)
+        v = None
+        for i in range(11):
+            cx = 100 + i * px_per_frame
+            v = est.update(1, _box(cx, 300, w=box_h, h=box_h), now=i * 0.1, scale_ref_m=1.5)
+        return v
+    near = run(200, 10 * 200 / 1.5 / 10)   # tall box, fast pixels
+    far = run(40, 10 * 40 / 1.5 / 10)      # short box, slow pixels
+    assert abs(near - far) < 2.0           # depth no longer skews the reading
+    assert abs(near - 36.0) < 2.0          # ~36 km/h (10 m/s), roughly metric
+
+
+def test_no_scale_ref_uses_fixed_mpp() -> None:
+    est = SpeedEstimator(meters_per_pixel=0.1, ema_alpha=1.0, window=2.0, min_kmh=0.0)
+    v = None
+    for i in range(11):
+        v = est.update(1, _box(100 + i * 10, 200), now=i * 0.1)   # no size ref -> fallback mpp
+    assert v is not None and abs(v - 36.0) < 1.0
+
+
+def test_unreliable_scale_keeps_last() -> None:
+    # a box clipped by the frame edge has a wrong (too-short) height; marked unreliable it must
+    # NOT recalibrate the scale to a bogus value.
+    est = SpeedEstimator(ema_alpha=1.0, window=2.0, min_kmh=0.0, scale_alpha=1.0)
+    est.update(1, _box(100, 300, w=100, h=100), now=0.0, scale_ref_m=1.5)   # good scale: mpp=0.015
+    v = None
+    for i in range(1, 11):
+        v = est.update(1, _box(100 + i * 10, 300, w=100, h=20), now=i * 0.1,
+                       scale_ref_m=1.5, scale_reliable=False)      # clipped box, ignored for scale
+    # 100 px/s * 0.015 * 3.6 = 5.4 km/h; a bogus recalibration (1.5/20) would give ~27
+    assert v is not None and abs(v - 5.4) < 1.0
+
+
 def test_teleport_ignored() -> None:
     est = SpeedEstimator(meters_per_pixel=1.0, max_kmh=200.0, ema_alpha=1.0, min_kmh=0.0)
     est.update(1, _box(0, 200), now=0.0)

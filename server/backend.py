@@ -114,6 +114,11 @@ class Backend:
             width=int(self.config.get("egomotion.width", 320)),
             moving_flow=float(self.config.get("egomotion.moving_flow", 1.3)))
         self._cam_moving = False   # camera itself in motion (dashcam) — surfaced to the HUD
+        # real-world heights (m) per vehicle subtype — the size reference that lets speed
+        # auto-calibrate to depth (see SpeedEstimator). Keys are COCO labels.
+        _ch = self.config.get("speed.class_heights", {}) or {}
+        self._class_heights = {str(k): float(v) for k, v in _ch.items()}
+        self._default_height = float(self.config.get("speed.default_height", 1.6))
         self.thumbs = ThumbHub(
             max_workers=int(self.config.get("thumbs.max_workers", 24)),
             cache_dir=self.data_dir / "thumbs",
@@ -674,7 +679,13 @@ class Backend:
                         # the camera's own flow AT THIS VEHICLE'S ground point — so a car keeping
                         # pace on a dashcam reads the camera's speed, not "stopped".
                         ego_delta = self.ego.flow_at((x1 + x2) / 2.0, y2)
-                        kmh = self.speed.update(d.track_id, (x1, y1, x2, y2), now, ego_delta=ego_delta)
+                        # scale from apparent size: real height ÷ box height => metres-per-pixel
+                        # at this vehicle's depth. Unreliable when the box is clipped top/bottom.
+                        real_h = self._class_heights.get(d.label, self._default_height)
+                        reliable = y1 > 3 and y2 < h - 3
+                        kmh = self.speed.update(d.track_id, (x1, y1, x2, y2), now,
+                                                ego_delta=ego_delta, scale_ref_m=real_h,
+                                                scale_reliable=reliable)
                         if kmh is not None:
                             det["speed"] = round(kmh)
                 dets.append(det)

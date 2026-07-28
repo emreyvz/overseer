@@ -178,6 +178,16 @@ speed:
   ema_alpha: 0.4           # exponential smoothing weight for the newest reading
   min_kmh: 3.0             # below this reads as 0 (stationary) instead of crawling jitter
   max_kmh: 300.0           # above this is treated as track-id reuse and ignored
+  # Per-object scale from apparent size: a vehicle's real height (m) ÷ its box height (px)
+  # gives metres-per-pixel AT ITS DEPTH, so speed is perspective-correct and roughly metric
+  # without any manual per-camera calibration. meters_per_pixel above is only the fallback.
+  class_heights:            # real-world heights in metres, by COCO subtype
+    car: 1.5
+    motorcycle: 1.5
+    bus: 3.2
+    truck: 3.3
+    bicycle: 1.6
+  default_height: 1.6
 # Camera ego-motion: a moving/dashcam feed drags the whole scene, so vehicle speeds are
 # measured relative to the ground by subtracting the camera's own image shift. A fixed camera
 # contributes nothing. moving_flow is the median grid-flow (downscaled px) above which the
