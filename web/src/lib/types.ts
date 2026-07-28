@@ -101,6 +101,7 @@ export interface RosterSighting {
   first: number                 // ms epoch of first sighting on this camera
   last: number                  // ms epoch of most recent sighting on this camera
   count: number
+  clip?: string | null          // this leg's sighting clip (used to build the journey supercut)
 }
 
 export type ConnState = 'connecting' | 'online' | 'reconnecting' | 'offline'

@@ -92,7 +92,7 @@ class SessionRoster:
                 # per-camera sighting record: builds the subject's movement trail across cameras
                 seg = e["trail"].get(cam)
                 if seg is None:
-                    e["trail"][cam] = {"first": now, "last": now, "count": 1}
+                    e["trail"][cam] = {"first": now, "last": now, "count": 1, "clip": None}
                 else:
                     seg["last"] = now
                     seg["count"] += 1
@@ -120,7 +120,7 @@ class SessionRoster:
     def _public(e: dict) -> dict:
         # the movement trail: cameras this subject was seen on, earliest sighting first
         trail = [{"cam": c, "first": s["first"] * 1000, "last": s["last"] * 1000,
-                  "count": s["count"]}
+                  "count": s["count"], "clip": s.get("clip")}
                  for c, s in sorted(e.get("trail", {}).items(), key=lambda kv: kv[1]["first"])]
         return {"id": e["id"], "cls": e["cls"], "snapshot": e["snapshot"], "plate": e["plate"],
                 "attrs": e["attrs"], "obs": e["obs"], "cam": e.get("cam"),
@@ -133,17 +133,37 @@ class SessionRoster:
             return sorted((self._public(e) for e in self._entries.values() if e["snapshot"]),
                           key=lambda x: -x["last_ts"])
 
-    def needs_clip(self, det_id: str) -> bool:
-        """A logged subject (has a photo) that hasn't got its short sighting clip yet."""
+    def needs_clip(self, det_id: str, cam: str | None = None) -> bool:
+        """A logged subject that still needs a short sighting clip — the primary one when cam is
+        None, else the clip for that camera's leg of the journey (feeds the journey supercut)."""
         with self._lock:
             e = self._entries.get(det_id)
-            return bool(e and e["snapshot"] and not e.get("clip"))
+            if not e or not e["snapshot"]:
+                return False
+            if cam is None:
+                return not e.get("clip")
+            seg = e["trail"].get(cam)
+            return bool(seg and not seg.get("clip"))
 
-    def set_clip(self, det_id: str, url: str | None) -> None:
+    def set_clip(self, det_id: str, url: str | None, cam: str | None = None) -> None:
         with self._lock:
             e = self._entries.get(det_id)
-            if e is not None and url:
-                e["clip"] = url
+            if e is None or not url:
+                return
+            if not e.get("clip"):
+                e["clip"] = url                       # primary clip for the live wall
+            if cam is not None and cam in e["trail"]:
+                e["trail"][cam]["clip"] = url          # this camera's leg (for the supercut)
+
+    def clip_paths(self, det_id: str) -> list[dict]:
+        """Ordered per-camera clip URLs for a subject's journey supercut."""
+        with self._lock:
+            e = self._entries.get(det_id)
+            if e is None:
+                return []
+            segs = sorted(e.get("trail", {}).items(), key=lambda kv: kv[1]["first"])
+            return [{"cam": c, "clip": s["clip"], "first": s["first"] * 1000}
+                    for c, s in segs if s.get("clip")]
 
     def watch(self, det_id: str, on: bool = True) -> dict | None:
         """Flag/unflag a subject as watched (BOLO). A watched subject fires an alert whenever
@@ -290,9 +310,10 @@ class RosterHarvester(threading.Thread):
                         self._watch_hit_fn(hit)
                     except Exception:  # noqa: BLE001
                         pass
-            # once per subject, capture a short clip of the sighting (a padded burst around it).
+            # capture a short clip for this subject on THIS camera the first time — one per scan,
+            # so a subject's journey across cameras builds up a clip per leg (for the supercut).
             # bbox is normalized so the clip burst can be a different resolution than this frame.
-            if (not clipped and self._clip_fn is not None and self._roster.needs_clip(eid)):
+            if (not clipped and self._clip_fn is not None and self._roster.needs_clip(eid, cam)):
                 clipped = True
                 nbbox = (x1 / fw, y1 / fh, x2 / fw, y2 / fh)
                 try:
@@ -300,7 +321,7 @@ class RosterHarvester(threading.Thread):
                 except Exception:  # noqa: BLE001
                     url = None
                 if url:
-                    self._roster.set_clip(eid, url)
+                    self._roster.set_clip(eid, url, cam=cam)
 
     def run(self) -> None:
         while not self._stopped.is_set():
