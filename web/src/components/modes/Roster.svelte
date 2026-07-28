@@ -30,9 +30,28 @@
   })
   onDestroy(() => { if (timer) clearInterval(timer); if (clock) clearInterval(clock) })
 
-  let shown = $derived(filter === 'all' ? entries : entries.filter((e) => e.cls === filter))
+  let query = $state('')
+  let sort = $state<'recent' | 'seen'>('recent')
+  let bolo = $state(false)
+  let shown = $derived.by(() => {
+    const q = query.trim().toLowerCase()
+    const anns = $annotations
+    return entries
+      .filter((e) => filter === 'all' || e.cls === filter)
+      .filter((e) => !bolo || e.watched)
+      .filter((e) => {
+        if (!q) return true
+        const a = anns[e.id] ?? {}
+        const hay = [e.id, a.alias, e.plate, e.attrs?.make, e.attrs?.subtype, e.attrs?.upper_color, e.cam, e.first_cam]
+          .filter(Boolean).join(' ').toLowerCase()
+        return hay.includes(q)
+      })
+      .slice()
+      .sort((a, b) => (sort === 'seen' ? b.obs - a.obs : b.last_ts - a.last_ts))
+  })
   let nPeople = $derived(entries.filter((e) => e.cls === 'person').length)
   let nVehicles = $derived(entries.filter((e) => e.cls === 'vehicle').length)
+  let nWatched = $derived(entries.filter((e) => e.watched).length)
 
   const photo = (e: RosterEntry) => (e.snapshot ? API + e.snapshot : '')
   // compact combined line for the small gallery cards
@@ -45,10 +64,22 @@
 
 <section class="roster">
   <div class="hdr caps"><span class="hot">///</span> ROSTER · {nPeople} PEOPLE · {nVehicles} VEHICLES <span class="hint">ESC</span></div>
-  <div class="filters">
-    {#each FILTERS as [k, label]}
-      <button class="chip caps" class:on={filter === k} onclick={() => (filter = k)}>{label}</button>
-    {/each}
+  <div class="toolbar">
+    <div class="filters">
+      {#each FILTERS as [k, label]}
+        <button class="chip caps" class:on={filter === k} onclick={() => (filter = k)}>{label}</button>
+      {/each}
+      {#if nWatched > 0}<button class="chip caps bolo" class:on={bolo} onclick={() => (bolo = !bolo)}>◉ BOLO {nWatched}</button>{/if}
+    </div>
+    <div class="search">
+      <span class="mag caps">⌕</span>
+      <input class="q caps" bind:value={query} placeholder="SEARCH ID · PLATE · MAKE · COLOR · CAMERA" spellcheck="false" />
+      {#if query}<button class="clr" onclick={() => (query = '')} aria-label="clear">×</button>{/if}
+    </div>
+    <div class="sort caps">
+      <button class="schip" class:on={sort === 'recent'} onclick={() => (sort = 'recent')}>RECENT</button>
+      <button class="schip" class:on={sort === 'seen'} onclick={() => (sort = 'seen')}>MOST SEEN</button>
+    </div>
   </div>
 
   {#if shown.length === 0}
@@ -83,10 +114,24 @@
     overflow: auto; padding: 22px 30px; }
   .hdr { font-size: var(--fs-banner); letter-spacing: var(--tracking); border-bottom: 1px solid var(--hairline); padding-bottom: 10px; }
   .hdr .hot { color: var(--scarlet); } .hdr .hint { float: right; color: var(--ink-dim); font-size: var(--fs-micro); }
-  .filters { display: flex; gap: 8px; margin: 14px 0; }
+  .toolbar { display: flex; align-items: center; gap: 12px; margin: 14px 0; flex-wrap: wrap; }
+  .filters { display: flex; gap: 8px; }
   .chip { padding: 4px 12px; border: 1px solid var(--ink-dim); background: none; color: var(--ink-dim);
     font-size: var(--fs-label); letter-spacing: var(--tracking); cursor: pointer; }
   .chip.on { border-color: var(--ink); color: var(--ink); }
+  .chip.bolo { color: var(--scarlet); border-color: color-mix(in srgb, var(--scarlet) 45%, transparent); }
+  .chip.bolo.on { background: var(--scarlet); color: #fff; border-color: var(--scarlet); }
+  .search { flex: 1; min-width: 200px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--hairline);
+    background: #0a0d10; padding: 5px 10px; }
+  .search .mag { color: var(--ink-dim); font-size: 13px; }
+  .q { flex: 1; background: none; border: 0; outline: none; color: var(--ink); font-family: var(--font-mono);
+    font-size: var(--fs-label); letter-spacing: 0.1em; }
+  .q::placeholder { color: var(--ink-ghost); }
+  .clr { background: none; border: 0; color: var(--ink-dim); font-size: 15px; cursor: pointer; padding: 0 2px; }
+  .clr:hover { color: var(--scarlet); }
+  .sort { display: flex; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); }
+  .schip { padding: 5px 12px; background: #0a0d10; color: var(--ink-dim); border: 0; font-size: 9px; letter-spacing: var(--tracking); cursor: pointer; }
+  .schip.on { background: #14161a; color: var(--ink); }
   .empty { color: var(--ink-dim); padding: 40px 0; text-align: center; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding-bottom: 40px; }
   .card { background: #0a0d10; border: 1px solid var(--hairline); padding: 0; cursor: pointer; text-align: left;
