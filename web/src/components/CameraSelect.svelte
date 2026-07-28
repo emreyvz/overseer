@@ -99,7 +99,7 @@
             <button class="card panel" class:off={online[cam.id] === false}
               style={`animation-delay:${i * 60}ms`} onclick={() => choose(cam)}>
               <div class="thumb">
-                <LiveThumb id={cam.id} fps={4} onstatus={(o) => (online[cam.id] = o)} />
+                <LiveThumb id={cam.id} fps={4} download={cam.download} onstatus={(o) => (online[cam.id] = o)} />
                 <span class="ret"></span>
                 <span class="hb caps" class:on={online[cam.id]}>{online[cam.id] ? '● ONLINE' : '○ OFFLINE'}</span>
               </div>

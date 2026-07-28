@@ -11,6 +11,14 @@ camera:
   buffer_size: 5
   freeze_timeout: 10.0
 
+# YouTube (yt-dlp) sources are downloaded once and looped like a live camera.
+media:
+  max_height: 1080          # cap downloaded video resolution (quality vs size/decode)
+
+# Per-camera map preview relays kept warm in parallel.
+thumbs:
+  max_workers: 24           # raise if you run more cameras than this on the map at once
+
 detectors:
   motion:
     enabled: true

@@ -24,7 +24,7 @@
   <div class="grid">
     {#each $cameras as c (c.id)}
       <button class="cell" class:active={c.id === $activeCam} onclick={() => observe(c)}>
-        <div class="feed"><LiveThumb id={c.id} fps={4} /><span class="livedot caps">● LIVE</span></div>
+        <div class="feed"><LiveThumb id={c.id} fps={4} download={c.download} /><span class="livedot caps">● LIVE</span></div>
         <div class="meta caps"><span class="nm">/// {c.name}</span><span class="id">CAM {c.id}</span></div>
       </button>
     {/each}

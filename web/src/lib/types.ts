@@ -71,6 +71,8 @@ export interface Camera {
   health: 'online' | 'offline'
   coords?: [number, number]
   fps: number
+  // download progress for looped YouTube sources (absent for live cameras)
+  download?: { status: 'idle' | 'downloading' | 'ready' | 'failed'; progress: number }
 }
 
 export type ConnState = 'connecting' | 'online' | 'reconnecting' | 'offline'

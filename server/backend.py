@@ -20,6 +20,7 @@ import numpy as np
 
 from alerts.engine import AlertEngine
 from alerts.summary import EventSummarizer
+from camera.file_reader import FileLoopReader
 from camera.frame_buffer import FrameBuffer
 from camera.health import HealthMonitor
 from camera.stream_reader import StreamReader
@@ -40,6 +41,7 @@ from storage.snapshots import SnapshotService
 from trajectory.monitor import TrajectoryMonitor
 from vision.motion import MotionDetector
 from zones.monitor import ZoneMonitor
+from .media import MediaLibrary
 from .ooi import OOIManager
 from .pose_kp import PoseKP
 from .ptz import PTZController
@@ -88,7 +90,16 @@ class Backend:
         self.trajectory = TrajectoryMonitor(self.config)
         self.pose = PoseMonitor(self.config)
         self.objects = ObjectMonitor(self.config)
-        self.thumbs = ThumbHub(cache_dir=self.data_dir / "thumbs")  # per-camera preview relay + persistent cache
+        self.thumbs = ThumbHub(
+            max_workers=int(self.config.get("thumbs.max_workers", 24)),
+            cache_dir=self.data_dir / "thumbs",
+        )  # per-camera preview relay + persistent cache
+        # YouTube (and yt-dlp) sources are downloaded once and played on a loop like a
+        # live camera, so the feed never expires the way a signed HLS URL does.
+        self.media = MediaLibrary(
+            self.data_dir / "media",
+            max_height=int(self.config.get("media.max_height", 1080)),
+        )
         self._prewarm_thumbs()
         self.ooi = OOIManager()   # object-of-interest visual tracker
         self.pose_kp = PoseKP()   # keypoint pose behaviours (hand-raise)
@@ -169,14 +180,18 @@ class Backend:
 
     # ---- sources / status --------------------------------------------
     def sources_payload(self) -> list[dict[str, Any]]:
+        from .ytstream import is_stream_url
         out = []
         for s in self.db.list_sources():
-            out.append({
+            item: dict[str, Any] = {
                 "id": str(s.id), "name": s.name, "url": s.url,
                 "health": "online" if s.id == self._source_id else "offline",
                 "coords": [s.map_x, s.map_y] if s.map_x is not None and s.map_y is not None else None,
                 "fps": 0.0,
-            })
+            }
+            if is_stream_url(s.url):  # download progress for looped YouTube sources
+                item["download"] = self.media.state(s.url)
+            out.append(item)
         return out
 
     def rec_state(self) -> dict[str, Any]:
@@ -226,21 +241,25 @@ class Backend:
             self._worker.source_id = source_id
             self._worker.start()
 
-            from .ytstream import is_stream_url, resolve_stream
+            from .ytstream import is_stream_url
             if is_stream_url(source.url):
-                # YouTube live → resolve to a direct HLS URL, read via FFMPEG (VideoCapture).
-                from .rtsp import RtspReader
-                media = resolve_stream(source.url)
-                if media is None:
-                    log.warning("connect: could not resolve YouTube source %s", source.url)
-                    self.set_conn("offline")
-                    self._emit({"t": "alert", "d": {
-                        "ts": time.time() * 1000, "severity": "warning", "type": "YOUTUBE BLOCKED",
-                        "summary": "YouTube bot-check — add config/youtube_cookies.txt (see README)",
-                        "cam": source.name, "ack": False, "snapshot": None, "clip": None,
-                    }})
+                # YouTube → download once and play the local file on a loop (never expires).
+                local = self.media.local_path(source.url)
+                if local is None:
+                    st = self.media.state(source.url)
+                    if st.get("status") == "failed":
+                        self.set_conn("offline")
+                        self._emit({"t": "alert", "d": {
+                            "ts": time.time() * 1000, "severity": "warning", "type": "YOUTUBE BLOCKED",
+                            "summary": "YouTube download failed — add config/youtube_cookies.txt (see README)",
+                            "cam": source.name, "ack": False, "snapshot": None, "clip": None,
+                        }})
+                        return
+                    # still downloading: keep 'connecting' and start playback when ready
+                    self._emit({"t": "cameras", "d": self.sources_payload()})
+                    self._start_media_waiter(source_id, source.url, source.name)
                     return
-                self._reader = RtspReader(media, self._buffer, on_status=self._on_status)
+                self._reader = FileLoopReader(str(local), self._buffer, on_status=self._on_status)
             elif source.url.lower().startswith(("rtsp://", "rtmp://")):
                 from .rtsp import RtspReader
                 self._reader = RtspReader(source.url, self._buffer, on_status=self._on_status)
@@ -254,6 +273,30 @@ class Backend:
                 )
             self._reader.start()
             self._emit({"t": "cameras", "d": self.sources_payload()})
+
+    def _start_media_waiter(self, source_id: int, url: str, name: str) -> None:
+        """Wait for a downloading YouTube source, then start looping playback — but only
+        while it is still the active camera (the operator may switch away mid-download)."""
+        def wait_and_start() -> None:
+            for _ in range(1200):  # up to ~20 min
+                if self._source_id != source_id:
+                    return
+                local = self.media.local_path(url)
+                if local is not None:
+                    with self._lock:
+                        if self._source_id != source_id or self._reader is not None:
+                            return
+                        self._reader = FileLoopReader(
+                            str(local), self._buffer, on_status=self._on_status)
+                        self._reader.start()
+                    self._emit({"t": "cameras", "d": self.sources_payload()})
+                    return
+                if self.media.state(url).get("status") == "failed":
+                    if self._source_id == source_id:
+                        self.set_conn("offline")
+                    return
+                time.sleep(1.0)
+        threading.Thread(target=wait_and_start, name="MediaWaiter", daemon=True).start()
 
     def disconnect(self) -> None:
         with self._lock:
@@ -728,7 +771,7 @@ class Backend:
             return self._latest_jpeg
         src = next((s for s in self.db.list_sources() if str(s.id) == str(source_id)), None)
         if src is not None:
-            j = self.thumbs.get_jpeg(src.id, src.url)  # spins up / keeps the relay warm
+            j = self.thumb_jpeg(src.id)  # spins up / keeps the relay warm (YouTube -> local file)
             if j:
                 return j
         return self._latest_jpeg
@@ -738,15 +781,23 @@ class Backend:
         thumbnails ready (and refreshes the persistent cache) without waiting."""
         try:
             for s in self.db.list_sources():
-                self.thumbs.get_jpeg(s.id, s.url)
+                self.thumb_jpeg(s.id)  # YouTube -> begins the one-time download + local preview
         except Exception:  # noqa: BLE001
             pass
 
     def thumb_jpeg(self, source_id: int) -> bytes | None:
-        """Latest raw JPEG for a camera's lightweight preview (item 4)."""
+        """Latest raw JPEG for a camera's lightweight preview (item 4). YouTube sources
+        preview from their downloaded local file (which never expires); while a source is
+        still downloading, its last-known frame is served rather than opening a live stream."""
         src = next((s for s in self.db.list_sources() if s.id == source_id), None)
         if src is None:
             return None
+        from .ytstream import is_stream_url
+        if is_stream_url(src.url):
+            local = self.media.local_path(src.url)   # first preview kicks off the download
+            if local is None:
+                return self.thumbs.last(source_id)   # downloading: frozen frame, no live open
+            return self.thumbs.get_jpeg(source_id, str(local))
         return self.thumbs.get_jpeg(source_id, src.url)
 
     def reap_thumbs(self) -> None:

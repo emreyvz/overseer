@@ -4,9 +4,11 @@
   import { onMount, onDestroy } from 'svelte'
   import NoSignal from './NoSignal.svelte'
 
-  let { id, fps = 3, effect = true, onstatus }:
-    { id: string; fps?: number; effect?: boolean; onstatus?: (ok: boolean) => void } = $props()
+  let { id, fps = 3, effect = true, onstatus, download }:
+    { id: string; fps?: number; effect?: boolean; onstatus?: (ok: boolean) => void
+      download?: { status: string; progress: number } } = $props()
   const SNAP = (import.meta.env.VITE_SNAP_BASE as string | undefined) ?? 'http://127.0.0.1:8787/snap'
+  let downloading = $derived(download?.status === 'downloading')
 
   let src = $state('')
   let ok = $state(false)
@@ -27,8 +29,14 @@
 </script>
 
 <div class="lt">
-  {#if !ok}<NoSignal />{/if}
+  {#if !ok && !downloading}<NoSignal />{/if}
   {#if src}<img class="img" {src} alt="" style:opacity={ok ? 1 : 0} />{/if}
+  {#if downloading && !ok}
+    <div class="dl">
+      <span class="spin"></span>
+      <span class="caps">DOWNLOADING {Math.round(download?.progress ?? 0)}%</span>
+    </div>
+  {/if}
   {#if effect}<div class="fx"></div>{/if}
 </div>
 
@@ -41,4 +49,10 @@
       repeating-linear-gradient(0deg, rgba(0,0,0,0.28) 0 1px, transparent 1px 3px),
       radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.6) 100%),
       linear-gradient(rgba(56,208,227,0.04), rgba(56,208,227,0.04)); }
+  .dl { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px;
+    align-items: center; justify-content: center; color: #7fe3ef; background: #05070a;
+    font-size: 11px; letter-spacing: 0.12em; }
+  .spin { width: 18px; height: 18px; border: 2px solid rgba(127,227,239,0.25);
+    border-top-color: #7fe3ef; border-radius: 50%; animation: sp 0.8s linear infinite; }
+  @keyframes sp { to { transform: rotate(360deg); } }
 </style>
