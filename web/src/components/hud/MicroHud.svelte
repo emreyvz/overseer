@@ -33,6 +33,7 @@
   <span class="sep">·</span>
   <span class="dim">OCC</span><span class="occ occ-{occBand}" title="OCCUPANCY · ANONYMOUS HEADCOUNT">{$occupancy}{#if $occupancyPeak > $occupancy}<span class="pk">/{$occupancyPeak}</span>{/if}</span>
   {#if spark}<svg class="spark" width="34" height="10" viewBox="0 0 34 10" aria-hidden="true"><polyline points={spark} /></svg>{/if}
+  {#if $frame.movingCam}<span class="sep">·</span><span class="moving" title="Camera in motion (dashcam) — vehicle speeds are ego-compensated">◈ MOVING CAM</span>{/if}
   <span class="sep">·</span>
   <span class="conn" class:off={$conn === 'offline'}>{LEX.conn[$conn]}</span>
   {#if $system.recActive}<span class="rec">{LEX.rec}</span>{/if}
@@ -46,6 +47,7 @@
   .conn { color: var(--ink); }
   .conn.off { color: var(--scarlet); }
   .rec { color: var(--scarlet); text-shadow: 0 0 6px var(--scarlet-glow); }
+  .moving { color: var(--amber, #d8a200); letter-spacing: 0.12em; }
   /* Neutral by DNA — red stays alarm-only. Density reads via weight/brightness. */
   .occ { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
   .occ-busy { color: var(--ink); }
