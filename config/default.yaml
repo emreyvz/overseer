@@ -30,6 +30,11 @@ detectors:
     confidence: 0.25
     frame_interval: 2
     imgsz: 1280
+    # Sliced inference for distant/low-quality footage (hotel-lobby style scenes where
+    # half the people are tiny). 0/1 = off. 2 = 2x2 tiles, 3 = 3x3 — recovers small-object
+    # recall WITHOUT lowering confidence, at the cost of slice^2 extra inferences/frame.
+    slice: 0
+    slice_overlap: 0.2
   person:
     enabled: true
   vehicle:

@@ -73,12 +73,18 @@ class YoloBackend:
         confidence: float = 0.35,
         imgsz: int = 960,
         frame_interval: int = 2,
+        slice_grid: int = 0,
+        slice_overlap: float = 0.2,
     ) -> None:
         self._model = YOLO(str(model_path))
         self._device = device
         self._confidence = confidence
         self._imgsz = imgsz
         self._frame_interval = max(1, frame_interval)
+        # Sliced inference (SAHI-style) for small/distant object recall — off (0/1) by
+        # default; 2 => 2x2 tiles, 3 => 3x3. Costs slice_grid^2 extra inferences per frame.
+        self._slice_grid = int(slice_grid)
+        self._slice_overlap = float(slice_overlap)
         self._lowlight = True  # auto-enhance dark frames before inference
         self._cache_seq = -1
         self._cache: list[Detection] = []
@@ -132,8 +138,48 @@ class YoloBackend:
                     bbox=(x1, y1, x2, y2), category=category, track_id=track_id,
                 ))
         self._cache_seq = frame.seq
+        if self._slice_grid > 1:
+            detections = detections + self._sliced_supplement(src, detections)
         self._cache = detections
         return detections
+
+    def _sliced_supplement(self, src: np.ndarray,
+                           existing_dets: list[Detection]) -> list[Detection]:
+        """Run detection on overlapping tiles and return the small objects the full-frame
+        pass missed (deduplicated against what's already tracked). No track_id — these are
+        recall extras; the full-frame pass keeps carrying the tracked identities."""
+        from ai.tiling import select_supplements, tiles
+        h, w = src.shape[:2]
+        existing = [d.bbox for d in existing_dets]
+        cands: list[tuple[tuple[int, int, int, int], float, str, str]] = []
+        tile_imgsz = max(self._imgsz, 1280)
+        for (x0, y0, x1, y1) in tiles(h, w, self._slice_grid, self._slice_overlap):
+            crop = src[y0:y1, x0:x1]
+            if crop.size == 0:
+                continue
+            try:
+                res = self._model(
+                    source=crop, conf=self._confidence, imgsz=tile_imgsz,
+                    device=self._device,
+                    quantize="fp16" if self._device.startswith("cuda") else None,
+                    classes=list(COCO_CLASS_MAP.keys()), verbose=False,
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            boxes = res[0].boxes
+            if boxes is None:
+                continue
+            for i in range(len(boxes)):
+                mapped = COCO_CLASS_MAP.get(int(boxes.cls[i]))
+                if mapped is None:
+                    continue
+                category, label = mapped
+                bx1, by1, bx2, by2 = (int(v) for v in boxes.xyxy[i].tolist())
+                cands.append(((bx1 + x0, by1 + y0, bx2 + x0, by2 + y0),
+                              float(boxes.conf[i]), category, label))
+        keep = select_supplements(existing, [(c[0], c[1]) for c in cands])
+        return [Detection(label=cands[i][3], confidence=cands[i][1], bbox=cands[i][0],
+                          category=cands[i][2], track_id=None) for i in keep]
 
     def detect_crop(self, img: np.ndarray, conf: float = 0.12) -> list[Detection]:
         """One-shot detection on an arbitrary (e.g. upscaled/enhanced) crop at a low
