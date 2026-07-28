@@ -22,17 +22,40 @@ _COOKIE_CANDIDATES = [
 ]
 
 
+def _valid_cookie_file(p: str) -> bool:
+    """A usable Netscape cookies.txt: exists, non-empty, and actually looks like one. An
+    EMPTY placeholder file (a very common footgun — the app ships one, or the operator
+    `touch`es it) makes yt-dlp abort every request with 'does not look like a Netscape
+    format cookies file', so we must skip it and fall through to the browser-cookie and
+    no-cookie attempts instead."""
+    try:
+        if not os.path.isfile(p) or os.path.getsize(p) == 0:
+            return False
+        with open(p, encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                s = line.strip()
+                if not s:
+                    continue
+                if s.startswith("# Netscape") or s.startswith("# HTTP Cookie"):
+                    return True          # the canonical header
+                if not s.startswith("#") and "\t" in line:
+                    return True          # a real tab-delimited cookie row
+        return False                     # only blanks/comments -> not a real cookie file
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _cookie_file() -> str | None:
     for p in _COOKIE_CANDIDATES:
-        if p and os.path.exists(p):
+        if p and _valid_cookie_file(p):
             return p
     # Be forgiving about the exact name (e.g. Windows "youtube_cookies.txt.txt").
     root = Path(__file__).resolve().parent.parent
     for base in (root / "config", root):
         try:
-            hits = sorted(base.glob("*cookies*.txt*"))
+            hits = sorted(str(h) for h in base.glob("*cookies*.txt*") if _valid_cookie_file(str(h)))
             if hits:
-                return str(hits[0])
+                return hits[0]
         except Exception:  # noqa: BLE001
             pass
     return None
