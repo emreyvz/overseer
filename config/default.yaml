@@ -210,7 +210,7 @@ match:
     accept_threshold: 0.6
     min_margin: 0.06
   models:
-    person_reid: osnet_x1_0.torchscript     # person ReID; empty/missing => baseline
+    person_reid: osnet_ain_x1_0.torchscript  # person ReID (OSNet-AIN, cross-domain); missing => DINOv2
     vehicle_reid: veri_reid.torchscript      # vehicle ReID
     generic: dinov2_vits14.torchscript       # generic object/animal embedding
     seg: yolo11n-seg.pt                       # foreground segmentation (ultralytics)

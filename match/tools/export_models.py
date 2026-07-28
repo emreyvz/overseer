@@ -48,24 +48,48 @@ def _export_dinov2() -> str:
     return f"dinov2: exported -> {dst}"
 
 
+def _find_osnet_ain_def() -> Path | None:
+    """Locate torchreid's self-contained osnet_ain.py in site-packages. It only imports
+    torch, so we load it in isolation and never trigger torchreid's heavy package init
+    (which pulls tensorboard/gdown/etc.)."""
+    import site
+    roots = list(site.getsitepackages()) + [site.getusersitepackages()]
+    for root in roots:
+        for rel in ("torchreid/reid/models/osnet_ain.py", "torchreid/models/osnet_ain.py"):
+            p = Path(root) / rel
+            if p.exists():
+                return p
+    return None
+
+
 def _export_osnet() -> str:
-    dst = MODELS / "osnet_x1_0.torchscript"
+    """Convert an OSNet-AIN ReID checkpoint (.pth.tar, e.g. osnet_ain_ms_d_c from the
+    torchreid MODEL_ZOO) that the operator dropped in models/ into a TorchScript embedder.
+    Best for surveillance: OSNet-AIN is domain-generalizable to unseen cameras."""
+    dst = MODELS / "osnet_ain_x1_0.torchscript"
     if dst.exists():
         return f"osnet: already present ({dst})"
-    try:
-        import torch
-        import torchreid
-    except Exception:
-        return ("osnet: SKIPPED - `uv pip install torchreid` and provide ReID-trained "
-                "weights, then re-run")
-    model = torchreid.models.build_model("osnet_x1_0", num_classes=1000, pretrained=True)
+    ckpts = (sorted(MODELS.glob("*osnet*ain*.pth*")) or sorted(MODELS.glob("*osnet*.pth*")))
+    if not ckpts:
+        return ("osnet: SKIPPED - place an OSNet-AIN .pth.tar in models/ (torchreid "
+                "MODEL_ZOO), then re-run")
+    defn = _find_osnet_ain_def()
+    if defn is None:
+        return "osnet: SKIPPED - `uv pip install torchreid gdown` (for the model def)"
+    import importlib.util
+    import torch
+    spec = importlib.util.spec_from_file_location("osnet_ain", str(defn))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    ckpt = torch.load(str(ckpts[0]), map_location="cpu", weights_only=False)
+    sd = {k.replace("module.", ""): v for k, v in ckpt["state_dict"].items()}
+    n_cls = sd["classifier.weight"].shape[0]        # match the training set's class count
+    model = mod.osnet_ain_x1_0(num_classes=n_cls, pretrained=False)
+    missing, _ = model.load_state_dict(sd, strict=False)
     model.eval()
-    # NOTE: pretrained=True loads ImageNet weights. For true ReID accuracy, load
-    # market1501/veri weights via torchreid.utils.load_pretrained_weights(model, path)
-    # before export.
-    dummy = torch.zeros(1, 3, 256, 128)
-    torch.jit.trace(model, dummy).save(str(dst))
-    return f"osnet: exported -> {dst} (verify ReID weights were loaded)"
+    with torch.no_grad():                            # eval() forward returns the embedding
+        torch.jit.trace(model, torch.zeros(1, 3, 256, 128)).save(str(dst))
+    return f"osnet: exported {ckpts[0].name} -> {dst} (missing keys: {len(missing)})"
 
 
 def _export_easyocr() -> str:

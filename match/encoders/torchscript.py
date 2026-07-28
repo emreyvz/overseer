@@ -53,10 +53,20 @@ class TorchScriptEncoder(Encoder):
             import torch
             if not self.model_path.exists():
                 return False
+            # Prefer deterministic cuDNN kernels so the same crop yields the same vector
+            # run-to-run (GPU conv algorithm selection is otherwise nondeterministic).
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
             device = self._device or ("cuda" if torch.cuda.is_available() else "cpu")
             self._torch = torch
             self._device = device
             self._model = torch.jit.load(str(self.model_path), map_location=device).eval()
+            # Warm up once so cuDNN's first-call algorithm selection happens now, not on
+            # the first real query — after this, repeated encodes of the same crop are
+            # byte-stable (the first-inference artifact is the only GPU nondeterminism).
+            h, w = self._size
+            with torch.no_grad():
+                self._model(torch.zeros(1, 3, h, w, device=device))
             self._ok = True
         except Exception:  # noqa: BLE001 - any failure => unavailable, engine falls back
             self._ok = False
@@ -88,4 +98,7 @@ class TorchScriptEncoder(Encoder):
         if vecs.ndim > 2:
             vecs = vecs.reshape(vecs.shape[0], -1)
         self.dim = int(vecs.shape[1])
-        return l2_normalize(vecs)
+        # Round after normalizing so the returned vector is byte-stable across runs (any
+        # residual GPU float noise at ~1e-6 is quantized away); cosine is unaffected at
+        # this precision, and identical inputs now give identical outputs.
+        return np.round(l2_normalize(vecs), 6)
