@@ -52,6 +52,7 @@ export const api = {
     post<{ matches: { camId: string; cam: string; score: number; cls?: string; margin?: number; ambiguous?: boolean; bbox: [number, number, number, number] }[] }>(`/api/visualmatch`, { image, kind, minScore }),
   plateMatch: (plate: string) =>
     post<{ matches: { camId: string; cam: string; plate: string; score: number; bbox: [number, number, number, number] }[] }>(`/api/platematch`, { plate }),
+  roster: () => get<import('./types').RosterEntry[]>(`/api/roster`),
   aiStatus: () => get<AiStatus>(`/api/ai/status`),
   aiConfig: (cfg: { provider?: string; base_url?: string; api_key?: string; model?: string; vision_model?: string; features?: Record<string, boolean> }) =>
     post<AiStatus>(`/api/ai/config`, cfg),

@@ -6,7 +6,7 @@ import type {
 import { MODULES } from './lexicon'
 import { fpRate } from './feedback'
 
-export type Mode = 'pov' | 'montage' | 'topology' | 'forensic' | 'archive' | 'case'
+export type Mode = 'pov' | 'montage' | 'topology' | 'forensic' | 'archive' | 'case' | 'roster'
 
 export const booted = writable(false)
 export type Stage = 'boot' | 'select' | 'live'

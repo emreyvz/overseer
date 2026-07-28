@@ -11,7 +11,7 @@
   $effect(() => { if ($commandOpen) { value = ''; sel = 0; queueMicrotask(() => el?.focus()) } })
 
   const MODE_WORDS: Record<string, Mode> = {
-    topology: 'topology', forensic: 'forensic', archive: 'archive', pov: 'pov',
+    topology: 'topology', forensic: 'forensic', archive: 'archive', pov: 'pov', roster: 'roster',
   }
 
   interface Sug { v: string; d: string }
@@ -20,6 +20,7 @@
     { v: 'topology', d: 'TOPOLOGY MAP' },
     { v: 'forensic', d: 'FORENSIC SEARCH' },
     { v: 'watchlist', d: 'WATCHLIST · TARGETS' },
+    { v: 'roster', d: 'ROSTER · PEOPLE & VEHICLES' },
     { v: 'ai', d: 'AI ASSISTANT · ASK / SEARCH' },
     { v: 'archive', d: 'ARCHIVE' },
     { v: 'zones', d: 'DRAW ZONE / LINE' },

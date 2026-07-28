@@ -24,6 +24,7 @@
   import Topology from './components/modes/Topology.svelte'
   import Forensic from './components/modes/Forensic.svelte'
   import Archive from './components/modes/Archive.svelte'
+  import Roster from './components/modes/Roster.svelte'
   import ZoneEditor from './components/pov/ZoneEditor.svelte'
   import ObjectRegister from './components/pov/ObjectRegister.svelte'
   import AlertRules from './components/AlertRules.svelte'
@@ -170,6 +171,7 @@
   {#if $mode === 'topology'}<Topology />{/if}
   {#if $mode === 'forensic'}<Forensic />{/if}
   {#if $mode === 'archive'}<Archive />{/if}
+  {#if $mode === 'roster'}<Roster />{/if}
   {#if $zoneEditor}<ZoneEditor />{/if}
   {#if $objectRegister}<ObjectRegister />{/if}
   {#if $alertRules}<AlertRules />{/if}

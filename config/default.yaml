@@ -28,6 +28,9 @@ detectors:
   yolo:
     model: yolo11s.pt
     confidence: 0.25
+    person_confidence: 0.18   # lower floor for PEOPLE only (sitting / swimming / awkward
+                              # poses score low); other classes stay at `confidence` so this
+                              # doesn't turn clutter into false vehicles/objects
     frame_interval: 2
     imgsz: 1280
     # Sliced inference for distant/low-quality footage (hotel-lobby style scenes where

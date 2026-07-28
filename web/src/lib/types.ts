@@ -76,6 +76,17 @@ export interface Camera {
   download?: { status: 'idle' | 'downloading' | 'ready' | 'failed'; progress: number }
 }
 
+export interface RosterEntry {
+  id: string
+  cls: 'person' | 'vehicle' | string
+  snapshot: string | null      // /snapshots/... path, prefix with the API base
+  plate: string | null
+  attrs: { upper_color?: string; lower_color?: string; height?: string; accessory?: string[] }
+  obs: number
+  first_ts: number
+  last_ts: number
+}
+
 export type ConnState = 'connecting' | 'online' | 'reconnecting' | 'offline'
 
 export interface TimelineEvent {
