@@ -44,6 +44,21 @@ def test_creates_anonymous_entry(tmp_path: Path) -> None:
     assert e["obs"] == 1
 
 
+def test_trail_records_cameras_over_time(tmp_path: Path) -> None:
+    r = _roster(tmp_path)
+    emb = _emb(1)
+    r.observe_reid("person", _crop(), emb, now=0.0, cam="Gate")     # first seen here
+    r.observe_reid("person", _crop(), emb, now=5.0, cam="Gate")     # still Gate
+    r.observe_reid("person", _crop(), emb, now=9.0, cam="Lobby")    # moved to Lobby
+    e = r.get("P-001")
+    assert e["first_cam"] == "Gate"
+    assert e["cam"] == "Lobby"                                       # last seen
+    trail = e["trail"]
+    assert [t["cam"] for t in trail] == ["Gate", "Lobby"]            # ordered by first sighting
+    gate = trail[0]
+    assert gate["count"] == 2 and gate["first"] == 0.0 and gate["last"] == 5000.0
+
+
 def test_reid_dedups_same_subject(tmp_path: Path) -> None:
     r = _roster(tmp_path)
     emb = _emb(1)

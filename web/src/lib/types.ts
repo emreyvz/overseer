@@ -88,8 +88,17 @@ export interface RosterEntry {
   attrs: { upper_color?: string; lower_color?: string; height?: string; accessory?: string[]; subtype?: string; make?: string }
   obs: number
   cam?: string | null           // camera the subject was last seen on
+  first_cam?: string | null     // camera the subject was FIRST seen on
+  trail?: RosterSighting[]      // movement trail: cameras visited, earliest first
   first_ts: number
   last_ts: number
+}
+
+export interface RosterSighting {
+  cam: string
+  first: number                 // ms epoch of first sighting on this camera
+  last: number                  // ms epoch of most recent sighting on this camera
+  count: number
 }
 
 export type ConnState = 'connecting' | 'online' | 'reconnecting' | 'offline'

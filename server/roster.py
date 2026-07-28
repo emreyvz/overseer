@@ -81,13 +81,20 @@ class SessionRoster:
                 eid = self._new_id(cls)
                 e = {"id": eid, "cls": cls, "first_ts": now, "last_ts": now, "obs": 0,
                      "snapshot": None, "snapshot_path": None, "best_area": 0.0,
-                     "plate": None, "attrs": {}, "cam": cam, "last_shot": 0.0,
-                     "embedding": embedding}
+                     "plate": None, "attrs": {}, "cam": cam, "first_cam": cam,
+                     "last_shot": 0.0, "embedding": embedding, "trail": {}}
                 self._entries[eid] = e
             e["last_ts"] = now
             e["obs"] += 1
             if cam:
                 e["cam"] = cam
+                # per-camera sighting record: builds the subject's movement trail across cameras
+                seg = e["trail"].get(cam)
+                if seg is None:
+                    e["trail"][cam] = {"first": now, "last": now, "count": 1}
+                else:
+                    seg["last"] = now
+                    seg["count"] += 1
             if plate:
                 e["plate"] = plate
             if attrs:
@@ -110,8 +117,13 @@ class SessionRoster:
 
     @staticmethod
     def _public(e: dict) -> dict:
+        # the movement trail: cameras this subject was seen on, earliest sighting first
+        trail = [{"cam": c, "first": s["first"] * 1000, "last": s["last"] * 1000,
+                  "count": s["count"]}
+                 for c, s in sorted(e.get("trail", {}).items(), key=lambda kv: kv[1]["first"])]
         return {"id": e["id"], "cls": e["cls"], "snapshot": e["snapshot"], "plate": e["plate"],
                 "attrs": e["attrs"], "obs": e["obs"], "cam": e.get("cam"),
+                "first_cam": e.get("first_cam"), "trail": trail,
                 "first_ts": e["first_ts"] * 1000, "last_ts": e["last_ts"] * 1000}
 
     def list(self) -> list[dict]:
