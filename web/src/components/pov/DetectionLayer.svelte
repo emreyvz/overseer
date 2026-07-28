@@ -189,6 +189,7 @@
           {#if t.d.klass === 'TARGET'}{@const v = matchVerdict(t.d.conf)}<span class="cf vc vc-{v.tone}">{v.label} {v.bars}</span>
           {:else}<span class="cf">{Math.round(t.d.conf * 100)}%</span>{/if}</div>
         <div class="trow caps"><span class="kk">CLASS</span><span class="vv">{trUpper(t.d.cls)}</span></div>
+        {#if t.d.plate}<div class="trow caps"><span class="kk">PLATE</span><span class="vv plate">{t.d.plate}<span class="est"> ~est</span></span></div>{/if}
         {#if attrLine(t.d)}<div class="trow caps"><span class="kk">ATTR</span><span class="vv">{attrLine(t.d)}</span></div>{/if}
         {#if a.owner}<div class="trow caps"><span class="kk">OWNER</span><span class="vv">{trUpper(a.owner)}</span></div>{/if}
         {#if a.notes}<div class="tnote caps">“{a.notes}”</div>{/if}
@@ -264,6 +265,8 @@
   .vc { font-weight: 700; letter-spacing: 0.06em; }
   .vc-lock { color: var(--ink); } .vc-firm { color: var(--ink-dim); } .vc-review { color: var(--amber, #d8a200); }
   .trow .kk { color: var(--ink-dim); } .trow .vv { color: var(--ink); }
+  .plate { font-weight: 700; letter-spacing: 0.14em; }
+  .est { color: var(--ink-dim); font-weight: 400; letter-spacing: 0.06em; }
   .tnote { font-size: 8px; color: var(--ink-dim); font-style: italic; }
   .asep { height: 1px; background: var(--hairline); margin: 3px 0; }
   .tbtns { display: flex; gap: 6px; margin-top: 4px; }
