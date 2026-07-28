@@ -183,6 +183,11 @@ objects:
   owner_distance: 120.0
   stable_seconds: 3.0
   removed_seconds: 5.0
+  # Smart abandoned-object: only alert on luggage a person BROUGHT and then LEFT unattended,
+  # so permanently-static fixtures don't spam false positives.
+  unattended_seconds: 8.0        # owner must be gone this long before it's "abandoned"
+  owner_min_frames: 3            # a person must have genuinely been with it (not just pass by)
+  abandon_classes: [backpack, handbag, suitcase]   # luggage only ([] = any accessory)
 alerts:
   enabled: true
   cooldown_seconds: 60.0
