@@ -20,7 +20,8 @@ def _obj_config(tmp_path: Path):
     p.write_text(
         "objects:\n  buffer_size: 300\n  expire_seconds: 30.0\n  abandon_seconds: 3.0\n"
         "  obj_eps: 20.0\n  owner_distance: 100.0\n  stable_seconds: 2.0\n"
-        "  removed_seconds: 3.0\n", encoding="utf-8")
+        "  removed_seconds: 3.0\n  unattended_seconds: 3.0\n  owner_min_frames: 2\n",
+        encoding="utf-8")
     return load_config(p)
 
 
@@ -47,7 +48,10 @@ def test_object_abandoned(tmp_path: Path) -> None:
     mon = ObjectMonitor(_obj_config(tmp_path))
     bag = Detection("backpack", 0.9, (190, 190, 210, 210), "accessory",
                     track_id=5)
+    owner = Detection("person", 0.9, (195, 200, 225, 300), "person", track_id=7)
     events = []
-    for i in range(5):
-        events += mon.process([bag], [], now=float(i))         # stationary, no owner
+    for i in range(3):
+        events += mon.process([bag], [owner], now=float(i))    # owner brings it, stays
+    for i in range(3, 8):
+        events += mon.process([bag], [], now=float(i))         # owner leaves; bag stays put
     assert any(e.event_type.name == "ABANDONED_OBJECT" for e in events)

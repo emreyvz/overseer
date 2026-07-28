@@ -25,6 +25,8 @@ class _Obj:
     last_seen: float
     label: str
     established: bool = False
+    owner_frames: int = 0          # frames a person was genuinely near it (it's someone's)
+    owner_last_seen: float = 0.0   # last time a person was within owner_distance
     abandoned_fired: bool = False
     removed_fired: bool = False
 
@@ -43,6 +45,15 @@ class ObjectMonitor:
         self._owner_distance = float(config.get("objects.owner_distance", 120.0))
         self._stable = float(config.get("objects.stable_seconds", 3.0))
         self._removed = float(config.get("objects.removed_seconds", 5.0))
+        # Smart abandonment: only alert on real luggage that a person BROUGHT and then LEFT.
+        # Requires the object to have been genuinely someone's (owner near for >= owner_min
+        # frames) and then unattended for `unattended_seconds` — so permanently-static
+        # fixtures (a bag on a rack, a parked stroller) never trigger.
+        self._unattended = float(config.get("objects.unattended_seconds", 8.0))
+        self._owner_min_frames = int(config.get("objects.owner_min_frames", 3))
+        classes = config.get("objects.abandon_classes",
+                             ["backpack", "handbag", "suitcase"])
+        self._abandon_classes = {str(c).lower() for c in classes} if classes else None
         self._objs: dict[int, _Obj] = {}
 
     def reset(self) -> None:
@@ -72,22 +83,32 @@ class ObjectMonitor:
             self._objs[tid] = obj
         obj.points.append((cx, cy, now))
         obj.last_seen = now
+        # owner association: a person actually near it (so a fixture that no one ever tends
+        # is never mistaken for abandoned luggage)
+        if any(dist((cx, cy), pc) <= self._owner_distance for pc in person_centers):
+            obj.owner_frames += 1
+            obj.owner_last_seen = now
         if now - obj.first_seen >= self._stable:
             obj.established = True
-        if now - obj.first_seen < self._abandon:
+        if obj.abandoned_fired or not obj.established:
             return []
+        # only real luggage classes (configurable)
+        if self._abandon_classes is not None and det.label.lower() not in self._abandon_classes:
+            return []
+        # stationary over the recent window
         window = [(x, y, t) for (x, y, t) in obj.points if now - t <= self._abandon]
         if len(window) < 2:
             return []
         xs = [x for x, _, _ in window]
         ys = [y for _, y, _ in window]
-        spread = max(max(xs) - min(xs), max(ys) - min(ys))
-        if spread >= self._eps or obj.abandoned_fired:
-            return []
-        has_owner = any(dist((cx, cy), pc) <= self._owner_distance
-                        for pc in person_centers)
-        if has_owner:
-            return []
+        if max(max(xs) - min(xs), max(ys) - min(ys)) >= self._eps:
+            return []                                   # moving -> not abandoned
+        # the abandonment signature: it was genuinely someone's, and they've now been gone
+        # long enough that it is unattended
+        if obj.owner_frames < self._owner_min_frames:
+            return []                                   # never really anyone's -> a fixture
+        if now - obj.owner_last_seen < self._unattended:
+            return []                                   # owner still around / only just left
         obj.abandoned_fired = True
         return [ObjectEvent(EventType.ABANDONED_OBJECT, tid, obj.label,
                             {"label": obj.label, "pos": [cx, cy]})]
