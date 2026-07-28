@@ -173,7 +173,7 @@
                foreignObject grows with it (fixed size would clip the bottom + border). -->
           <foreignObject x="12" y={big ? -52 : -42} width={big ? 192 : 130} height={big ? 152 : 106} style="overflow: visible">
             <div class="ncard" class:big data-node={c.id}>
-              <div class="nthumb"><LiveThumb id={c.id} fps={hoverId === c.id ? 4 : 2} onstatus={(o) => (mapOnline[c.id] = o)} /></div>
+              <div class="nthumb"><LiveThumb id={c.id} fps={hoverId === c.id ? 4 : 2} download={c.download} onstatus={(o) => (mapOnline[c.id] = o)} /></div>
               <div class="nmeta caps"><span class="nn">/// {c.name}</span><span class="ns">CAM {c.id} · {mapOnline[c.id] ? 'ONLINE' : '—'}</span></div>
             </div>
           </foreignObject>
