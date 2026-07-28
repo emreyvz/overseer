@@ -29,6 +29,9 @@ roster:
   imgsz: 960
   interval: 4.0             # seconds to cycle through every camera once
   dedup_threshold: 0.82     # ReID cosine above which two sightings are the same identity
+  fullres_interval: 25.0    # passive cameras: seconds between one-shot FULL-RES grabs (0 = off,
+                            # thumbnail only). Catches distant subjects on cameras you're not
+                            # actively viewing, without straining the system.
 
 detectors:
   motion:
