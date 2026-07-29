@@ -45,6 +45,7 @@ from vehicle.make import MakeClassifier
 from vision.egomotion import EgoMotion
 from vision.motion import MotionDetector
 from zones.monitor import ZoneMonitor
+from . import suggestions
 from .clipenc import encode_clip
 from .media import MediaLibrary
 from .ooi import OOIManager
@@ -767,6 +768,28 @@ class Backend:
         """Per-camera behavioural profile + reputation, one row per camera seen this session."""
         names = {s.id: s.name for s in self.db.list_sources()}
         return self.cam_profiles.all(names)
+
+    def build_suggestions(self) -> list[dict]:
+        """Proactive, data-driven recommendations: alert rules for behaviours a camera keeps
+        seeing (that have no rule yet), and camera-improvement advice from the reputation
+        signals. Explainable and high-confidence — never invented. Pure logic lives in
+        server.suggestions; here we just gather the evidence and delegate."""
+        now = time.time()
+        days = int(self.config.get("events.retention_days", 7))
+        start = now - days * 86400
+        names = {s.id: s.name for s in self.db.list_sources()}
+        existing = {(r.event_type, r.source_id) for r in self.db.list_alert_rules()}
+        min_n = int(self.config.get("suggestions.min_events", 5))
+        counts_by_source: dict[int, dict[str, int]] = {}
+        for sid in names:
+            try:
+                counts_by_source[sid] = self.db.event_type_counts(start, now, source_id=sid)
+            except Exception:  # noqa: BLE001
+                continue
+        out = suggestions.alert_suggestions(
+            counts_by_source, names, existing, min_events=min_n, retention_days=days)
+        out.extend(suggestions.camera_suggestions(self.cam_profiles.all(names)))
+        return out
 
     def relationship_graph(self, min_count: int = 2, limit: int = 300) -> dict:
         """The social graph: nodes (with a photo) and weighted association edges."""

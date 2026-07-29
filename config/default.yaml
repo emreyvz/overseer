@@ -246,6 +246,10 @@ alerts:
 cases:
   window_before: 90.0
   window_after: 120.0
+# Smart suggestions: propose an alert rule once a camera has logged a behaviour at least this
+# many times (over events.retention_days) without a rule covering it.
+suggestions:
+  min_events: 5
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT

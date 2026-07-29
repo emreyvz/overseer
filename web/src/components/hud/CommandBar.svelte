@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { commandOpen, mode, stage, pickerView, zoneEditor, alertRules, objectRegister, storageScreen, watchlistOpen, aiOpen, shuttingDown, flashBanner, triggerGlitch, type Mode } from '../../lib/stores'
+  import { commandOpen, mode, stage, pickerView, zoneEditor, alertRules, objectRegister, storageScreen, watchlistOpen, aiOpen, suggestionsOpen, shuttingDown, flashBanner, triggerGlitch, type Mode } from '../../lib/stores'
   import { sfx, keyTick } from '../../lib/audio'
   import { sendCommand } from '../../lib/ws'
   import { LEX } from '../../lib/lexicon'
@@ -23,6 +23,7 @@
     { v: 'watchlist', d: 'WATCHLIST · TARGETS' },
     { v: 'roster', d: 'ROSTER · PEOPLE & VEHICLES' },
     { v: 'ai', d: 'AI ASSISTANT · ASK / SEARCH' },
+    { v: 'suggestions', d: 'SMART SUGGESTIONS · RECOMMENDATIONS' },
     { v: 'archive', d: 'ARCHIVE' },
     { v: 'zones', d: 'DRAW ZONE / LINE' },
     { v: 'object', d: 'TRACK UNKNOWN OBJECT' },
@@ -57,6 +58,7 @@
     if (head === 'alerts' || head === 'alert') { sfx('click'); alertRules.set(true); close(); return }
     if (head === 'watchlist' || head === 'watch') { sfx('click'); watchlistOpen.set(true); close(); return }
     if (head === 'ai' || head === 'assistant' || head === 'asistan') { sfx('click'); aiOpen.set(true); close(); return }
+    if (head === 'suggestions' || head === 'suggest' || head === 'tips') { sfx('click'); suggestionsOpen.set(true); close(); return }
     if (head === 'storage') { sfx('click'); storageScreen.set(true); close(); return }
     if (head === 'record') { sfx('click'); flashBanner('RECORDING ON', false, 1200); sendCommand('record:toggle'); close(); return }
     if (head === 'snapshot') { sfx('shutter'); flashBanner('SNAPSHOT CAPTURED', false, 1000); sendCommand('snapshot'); close(); return }

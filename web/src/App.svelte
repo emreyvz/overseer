@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
-    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, type Mode,
+    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
@@ -33,6 +33,7 @@
   import EnrollModal from './components/pov/EnrollModal.svelte'
   import Watchlist from './components/Watchlist.svelte'
   import AiConsole from './components/AiConsole.svelte'
+  import SmartSuggestions from './components/suggestions/SmartSuggestions.svelte'
 
   const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case' }
 
@@ -135,6 +136,7 @@
     if (k === 'z') { zoneEditor.set(true); return }
     if (k === 'o') { objectRegister.set(true); return }
     if (k === 'w') { watchlistOpen.set(true); return }
+    if (k === 'g') { suggestionsOpen.set(true); sfx('click'); return }
     if (/^[1-9]$/.test(k)) { switchCam(Number(k)); return }
     if (k in MODE_KEYS) { toMode(MODE_KEYS[k]); return }
   }
@@ -184,6 +186,7 @@
 {/if}
 
 {#if $aiOpen}<AiConsole />{/if}
+{#if $suggestionsOpen}<SmartSuggestions onclose={() => suggestionsOpen.set(false)} />{/if}
 {#if $shuttingDown}<Shutdown />{/if}
 <PostFx />
 

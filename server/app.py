@@ -516,6 +516,27 @@ async def api_plates_watch(payload: dict) -> Any:
     return {"plates": backend.watch_plate(plate, bool(payload.get("on", True)))}
 
 
+@app.get("/api/suggestions")
+async def api_suggestions() -> Any:
+    """Proactive smart suggestions — alert rules to add and camera improvements."""
+    if backend is None:
+        return {"suggestions": []}
+    return {"suggestions": await asyncio.to_thread(backend.build_suggestions)}
+
+
+@app.post("/api/alerts/rules")
+async def api_add_alert_rule(payload: dict) -> Any:
+    """Create an alert rule (used by one-click suggestion acceptance) and refresh the engine."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    rid = backend.db.add_alert_rule(
+        str(payload.get("name", "RULE")), str(payload["event_type"]),
+        source_id=payload.get("source_id"), severity=str(payload.get("severity", "warning")),
+        min_count=payload.get("min_count"), cooldown_s=float(payload.get("cooldown_s", 60.0)))
+    backend.alert_engine.set_rules(backend.db.list_alert_rules())
+    return {"id": rid}
+
+
 @app.get("/api/cameras/dna")
 async def api_camera_dna() -> Any:
     """Per-camera DNA (behavioural tags) and reputation (reliability score)."""
