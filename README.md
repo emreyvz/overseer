@@ -39,6 +39,12 @@ Full resolution live analysis with a "look closer" tool that crops, upscales and
 
 Lock onto any detection for a live target card with its class, attributes and projected path. If the target leaves the frame and returns, overseer re acquires it on its own.
 
+### Spatial 3D scene
+
+![Spatial 3D scene](demo/spatial_3d_scene.png)
+
+Lift any camera's flat feed into a navigable 3D scene. Monocular depth turns a single frame into a point cloud you can orbit, with every person and vehicle dropped where they actually stand in space. See who is in front, who is behind, and how the place is laid out. No stereo, no calibration.
+
 ### Vehicle or Person Profile
 
 ![Vehicle or person profile](demo/profile_tracking_when_where.png)

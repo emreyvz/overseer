@@ -77,6 +77,7 @@ export const investigateCase = writable<number | null>(null) // open case id in 
 export const graphOpen = writable(false)                     // social / relationship graph screen
 export const mergeOpen = writable(false)                     // identity merge center
 export const suggestionsOpen = writable(false)               // smart suggestions advisor screen
+export const spatialOpen = writable<string | null>(null)     // 3D spatial scene for a camera (source id)
 export const dossierOpen = writable(false)  // stationary editor panel for the selected tracklet
 
 // Switching cameras clears the previous camera's transient panels (selection,

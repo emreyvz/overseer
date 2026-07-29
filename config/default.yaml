@@ -250,6 +250,16 @@ cases:
 # many times (over events.retention_days) without a rule covering it.
 suggestions:
   min_events: 5
+# Spatial 3D scene view (Feature 4): lift a camera's flat frame into a navigable point cloud
+# via monocular depth (Depth Anything V2). The model loads lazily on first request; if its
+# weights can't be fetched the view simply reports "unavailable". CUDA inference ~30 ms.
+spatial:
+  enabled: true
+  model: depth-anything/Depth-Anything-V2-Small-hf
+  input_width: 640        # frame is resized to this width before depth (quality vs latency)
+  grid: 320               # point-cloud grid width sent to the browser (bounds payload size)
+  fov_deg: 60.0           # assumed horizontal field of view for back-projection
+  detect_conf: 0.3        # confidence floor for the entities placed as 3D markers
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT

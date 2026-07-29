@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen } from '../../lib/stores'
+  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen, spatialOpen } from '../../lib/stores'
   import { SIM } from '../../lib/sim'
   import { LEX } from '../../lib/lexicon'
   import { api } from '../../lib/api'
@@ -138,6 +138,9 @@
     <button class="inspectbtn caps" class:on={inspectOn} onclick={() => { inspectOn = !inspectOn; hits = []; sfx('click', { volume: 0.3 }) }}>
       ⌖ LOOK CLOSER{inspectOn ? ' · ON' : ''}
     </button>
+    <button class="spatialbtn caps" onclick={() => { if ($activeCam) { spatialOpen.set($activeCam); sfx('click', { volume: 0.3 }) } }}>
+      ⛶ 3D SPATIAL
+    </button>
   {/if}
 
   {#if switching && panOld && panNew}
@@ -214,6 +217,9 @@
   .inspectbtn { position: absolute; left: 62px; bottom: 52px; z-index: var(--z-overlay); padding: 4px 10px; border: 1px solid var(--ink-dim);
     background: rgba(0,0,0,0.5); color: var(--ink-dim); font-size: var(--fs-micro); letter-spacing: var(--tracking); cursor: pointer; }
   .inspectbtn:hover { border-color: var(--cyan); color: var(--cyan); }
+  .spatialbtn { position: absolute; left: 168px; bottom: 52px; z-index: var(--z-overlay); padding: 4px 10px; border: 1px solid var(--ink-dim);
+    background: rgba(0,0,0,0.5); color: var(--ink-dim); font-size: var(--fs-micro); letter-spacing: var(--tracking); cursor: pointer; }
+  .spatialbtn:hover { border-color: var(--cyan); color: var(--cyan); }
   .inspectbtn.on { border-color: var(--cyan); color: var(--cyan); background: rgba(56,208,227,0.12); }
 
   .loc { position: absolute; left: 62px; bottom: 26px; z-index: var(--z-overlay); font-size: var(--fs-label); color: var(--ink); }
