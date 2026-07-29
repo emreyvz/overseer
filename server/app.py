@@ -516,6 +516,14 @@ async def api_plates_watch(payload: dict) -> Any:
     return {"plates": backend.watch_plate(plate, bool(payload.get("on", True)))}
 
 
+@app.get("/api/cameras/dna")
+async def api_camera_dna() -> Any:
+    """Per-camera DNA (behavioural tags) and reputation (reliability score)."""
+    if backend is None:
+        return {"cameras": []}
+    return {"cameras": await asyncio.to_thread(backend.camera_dna)}
+
+
 @app.get("/api/relationships")
 async def api_relationships() -> Any:
     """The social graph — subjects and their discovered co-occurrence associations."""

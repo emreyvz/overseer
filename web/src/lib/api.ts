@@ -25,6 +25,7 @@ export interface GraphNode { id: string; cls: string; snapshot?: string | null; 
 export interface GraphEdge { a: string; b: string; count: number; confidence: number; cameras: string[] }
 export interface SocialGraph { nodes: GraphNode[]; edges: GraphEdge[] }
 export interface MergeCandidate { a: import('./types').RosterEntry; b: import('./types').RosterEntry; similarity: number; reason: string }
+export interface CameraDna { id: number | string; name?: string | null; dna: string[]; reputation: number; frames: number; brightness?: number; motion?: number; fps?: number; reconnects?: number; person?: number; vehicle?: number }
 export interface CaseRow { id: number; name: string; threat: string; notes: string; status?: string; created: number; targets: number }
 export interface CaseEventRow { ts: number; kind: string; type: string; cam: string; severity: string; summary: string; snapshot?: string | null; clip?: string | null }
 export interface CaseDetail { id: number; name: string; threat: string; notes: string; status: string; created: number; cameras: string[]; events: CaseEventRow[]; aiSummary: string | null }
@@ -72,6 +73,7 @@ export const api = {
   supercut: (id: string) => get<{ url: string }>(`/api/roster/${id}/supercut`),
   entityRelationships: (id: string) => get<{ associates: Associate[] }>(`/api/roster/${id}/relationships`),
   relationships: () => get<SocialGraph>(`/api/relationships`),
+  cameraDna: () => get<{ cameras: CameraDna[] }>(`/api/cameras/dna`),
   mergeCandidates: () => get<{ candidates: MergeCandidate[] }>(`/api/roster/merge-candidates`),
   mergeRoster: (keep: string, drop: string) => post<import('./types').RosterEntry>(`/api/roster/merge`, { keep, drop }),
   mergeReject: (a: string, b: string) => post<{ ok: boolean }>(`/api/roster/merge-reject`, { a, b }),
