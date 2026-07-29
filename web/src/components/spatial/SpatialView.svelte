@@ -38,8 +38,8 @@
 
   // Back-projection / depth-to-Z tuning (settled by visual iteration across cameras).
   const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6
-  const MESH_MAXLEN = 0.13    // cull mesh triangles whose 3D edge is longer than this (kills skirts)
-  const SKYCULL = 0.03        // drop the most-distant (sky / flat far background) points
+  const MESH_MAXLEN = 0.10    // cull mesh triangles whose 3D edge is longer than this (kills skirts)
+  const SKYCULL = 0.05        // drop the most-distant (sky / flat far background) points
   const CLS_COLOR: Record<string, string> = {
     person: '#35e0ff', vehicle: '#ffb038', animal: '#6be675', object: '#c9d4dc', weapon: '#ff3b3b',
   }
@@ -93,7 +93,7 @@
     if (refresh) sfx('sonar')
     loading = true; unavailable = false; reason = ''; phase = 'capture'
     let res: Awaited<ReturnType<typeof api.spatial>> | null = null
-    try { res = await api.spatial(cam, 320) } catch { res = null }
+    try { res = await api.spatial(cam, 384) } catch { res = null }
     if (!res || !res.scene) {
       reason = REASON_TEXT[res?.reason ?? ''] ?? 'The spatial view is unavailable right now.'
       loading = false; unavailable = true; phase = ''; return
@@ -156,6 +156,39 @@
     return ZNEAR + Math.pow(1 - disp01, GAMMA) * (ZFAR - ZNEAR)
   }
 
+  // Solve a 3x3 linear system (Gaussian elimination w/ partial pivot) for the quadratic ground fit.
+  function solve3(A: number[][], b: number[]): [number, number, number] | null {
+    const m = [[...A[0], b[0]], [...A[1], b[1]], [...A[2], b[2]]]
+    for (let i = 0; i < 3; i++) {
+      let p = i
+      for (let r = i + 1; r < 3; r++) if (Math.abs(m[r][i]) > Math.abs(m[p][i])) p = r
+      if (Math.abs(m[p][i]) < 1e-9) return null
+      ;[m[i], m[p]] = [m[p], m[i]]
+      for (let r = 0; r < 3; r++) {
+        if (r === i) continue
+        const f = m[r][i] / m[i][i]
+        for (let cc = i; cc < 4; cc++) m[r][cc] -= f * m[i][cc]
+      }
+    }
+    return [m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]]
+  }
+
+  // Fit the ground's height trend Y = a + bZ + cZ² over the near/low image rows, so the same
+  // correction can de-bow the mesh AND the entity markers consistently. Null if too few samples.
+  function fitGround(disp: Float32Array, w: number, h: number, fx: number, cx: number, cy: number): [number, number, number] | null {
+    let n = 0, sZ = 0, sZ2 = 0, sZ3 = 0, sZ4 = 0, sY = 0, sZY = 0, sZ2Y = 0
+    for (let y = Math.floor(h * 0.5); y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dv = disp[y * w + x]
+        if (dv < SKYCULL) continue
+        const Z = zOf(dv), Y = -(y - cy) * Z / fx, Z2 = Z * Z
+        n++; sZ += Z; sZ2 += Z2; sZ3 += Z2 * Z; sZ4 += Z2 * Z2; sY += Y; sZY += Z * Y; sZ2Y += Z2 * Y
+      }
+    }
+    if (n < 40) return null
+    return solve3([[n, sZ, sZ2], [sZ, sZ2, sZ3], [sZ2, sZ3, sZ4]], [sY, sZY, sZ2Y])
+  }
+
   async function buildCloud(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>) {
     if (!scene) return
     const { w, h, fov, image, depth, entities, bg_image, bg_depth } = d
@@ -169,46 +202,51 @@
     // fill AND the back-cap that turns foreground objects into solid volumes.
     const bg = (bg_image && bg_depth) ? await decodeLayer(bg_image, bg_depth, w, h) : null
 
+    // shared ground de-bow: fit the ground's height trend once so the mesh AND the markers flatten
+    // together (monocular depth bows a flat road upward with distance — this straightens it).
+    const gy = fitGround(fg.disp, w, h, fx, cx, cy)
+    const deb = (Z: number) => gy ? gy[0] + gy[1] * Z + gy[2] * Z * Z : 0
+
     // foreground as a SOLID: each object is extruded back to the reconstructed background and its
-    // silhouette stitched, so it's an opaque, textured volume — not a see-through shell.
+    // silhouette stitched, so it's an opaque, textured VOLUME — not a see-through shell.
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     mesh = layerMesh(fg.disp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0,
-      { solid: true, bgdisp: bg ? bg.disp : null, maxT: 0.35 })
+      { solid: true, bgdisp: bg ? bg.disp : null, maxT: 0.5, flattenCoef: gy })
     scene.add(mesh)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
     if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
     if (bg) {
-      bgMesh = layerMesh(bg.disp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04)
+      bgMesh = layerMesh(bg.disp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04, { flattenCoef: gy })
       scene.add(bgMesh)
     }
 
-    // entity markers
+    // entity markers — de-bowed with the same trend so they sit on the flattened ground
     if (markers) { scene.remove(markers); disposeGroup(markers) }
     markers = new THREE.Group()
     entityCount = entities.length
     for (const e of entities) {
       const Z = zOf(e.depth)
       const u = e.cx * w, v = e.cy * h
-      const X = (u - cx) * Z / fx, Y = -(v - cy) * Z / fx
+      const X = (u - cx) * Z / fx, Y = -(v - cy) * Z / fx - deb(Z)
       const spr = makeMarker(e.label || e.cls, CLS_COLOR[e.cls] || '#c9d4dc')
       spr.position.set(X, Y, -Z)
       markers.add(spr)
     }
     scene.add(markers)
 
-    // fit-to-bounds framing (on the foreground surface), offset off-axis so the 3D reads at once
+    // framing: the ground is now flat (X-Z plane), so establish from ABOVE at a 3/4 angle that
+    // reveals the layout, framed to the ground footprint.
     const box = new THREE.Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position') as THREE.BufferAttribute)
     const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
     const vfov = camera!.fov * Math.PI / 180
-    const fitH = (size.y / 2) / Math.tan(vfov / 2)
-    const fitW = (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect
-    const dist = Math.max(fitH, fitW) * 1.08 + size.z * 0.4
-    const yaw = 18 * Math.PI / 180, pitch = 6 * Math.PI / 180
-    if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.25; controls.maxDistance = dist * 4 }
+    const foot = Math.max(size.x, size.z)
+    const dist = (foot / 2) / Math.tan(vfov / 2) * 1.1 + size.y
+    const yaw = 20 * Math.PI / 180, pitch = 22 * Math.PI / 180
+    if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.15; controls.maxDistance = dist * 5 }
     camera!.position.set(
       c.x + dist * Math.sin(yaw) * Math.cos(pitch),
-      c.y - dist * Math.sin(pitch),
+      c.y + dist * Math.sin(pitch),
       c.z + dist * Math.cos(yaw) * Math.cos(pitch))
     camera!.updateProjectionMatrix()
   }
@@ -231,7 +269,7 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
     const maxT = opt.maxT ?? 0.35, minT = 0.03
     const pos: number[] = [], col: number[] = []
@@ -267,6 +305,10 @@
         const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1
         tri(tl, bl, tr); tri(tr, bl, br)
       }
+    }
+    if (opt.flattenCoef) {   // de-bow: subtract the shared ground trend so the ground reads flat
+      const [a, b, c] = opt.flattenCoef
+      for (let j = 0; j < nF; j++) { const Z = vz[j]; pos[j * 3 + 1] -= a + b * Z + c * Z * Z }
     }
     if (solid) {
       for (let j = 0; j < nF; j++) {   // back vertices: extruded to the background, capped
