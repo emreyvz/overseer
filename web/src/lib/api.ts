@@ -24,6 +24,8 @@ export interface Associate { id: string; count: number; cameras: string[]; first
 export interface GraphNode { id: string; cls: string; snapshot?: string | null; plate?: string | null }
 export interface GraphEdge { a: string; b: string; count: number; confidence: number; cameras: string[] }
 export interface SocialGraph { nodes: GraphNode[]; edges: GraphEdge[] }
+export interface EgoNode { id: string; hop: number; cls: string; snapshot?: string | null; plate?: string | null }
+export interface EgoGraph { center: string; nodes: EgoNode[]; edges: GraphEdge[] }
 export interface MergeCandidate { a: import('./types').RosterEntry; b: import('./types').RosterEntry; similarity: number; reason: string }
 export interface CameraDna { id: number | string; name?: string | null; dna: string[]; reputation: number; frames: number; brightness?: number; motion?: number; fps?: number; reconnects?: number; person?: number; vehicle?: number }
 export interface CaseRow { id: number; name: string; threat: string; notes: string; status?: string; created: number; targets: number }
@@ -77,6 +79,7 @@ export const api = {
     post<import('./types').RosterEntry>(`/api/roster/${id}/watch`, { on }),
   supercut: (id: string) => get<{ url: string }>(`/api/roster/${id}/supercut`),
   entityRelationships: (id: string) => get<{ associates: Associate[] }>(`/api/roster/${id}/relationships`),
+  entityGraph: (id: string) => get<EgoGraph>(`/api/roster/${id}/graph`),
   relationships: () => get<SocialGraph>(`/api/relationships`),
   cameraDna: () => get<{ cameras: CameraDna[] }>(`/api/cameras/dna`),
   spatial: (sid: string, grid = 320) => get<{ scene: SpatialScene | null; reason?: string }>(`/api/spatial/${sid}?grid=${grid}`),

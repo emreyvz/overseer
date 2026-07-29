@@ -571,6 +571,15 @@ async def api_entity_relationships(det_id: str) -> Any:
     return {"associates": assoc}
 
 
+@app.get("/api/roster/{det_id}/graph")
+async def api_entity_graph(det_id: str) -> Any:
+    """The subject's 2-hop relationship network for the profile page (subject → contacts →
+    their contacts)."""
+    if backend is None:
+        return {"center": det_id, "nodes": [], "edges": []}
+    return await asyncio.to_thread(backend.entity_ego_graph, det_id)
+
+
 @app.post("/api/roster/{det_id}/find")
 async def api_roster_find(det_id: str) -> Any:
     """Find this roster subject across all cameras by appearance (ReID) — returns scored hits."""
