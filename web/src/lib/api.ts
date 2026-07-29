@@ -34,22 +34,6 @@ export interface SceneSubject { id: string; cls: string; snapshot?: string | nul
 export interface CaseDetail { id: number; name: string; threat: string; notes: string; status: string; created: number; cameras: string[]; events: CaseEventRow[]; subjects: SceneSubject[]; aiSummary: string | null }
 export interface SpatialEntity { id: string; cls: string; cx: number; cy: number; depth: number; conf: number; label: string }
 export interface SpatialScene { cam: string; sid: string; w: number; h: number; fov: number; image: string; depth: string; entities: SpatialEntity[]; ts: number; bg_image?: string; bg_depth?: string }
-export interface WorldNode {
-  id: string; class: string; subtype: string; confidence: number
-  transform: { position: [number, number, number]; rotation_quat: [number, number, number, number]; scale: [number, number, number] }
-  dimensions: { w: number; h: number; l: number }
-  elevation: number; parent: string; children: string[]; relations: unknown[]
-  asset: { strategy: string; mesh_ref: string | null; pivot: string }
-  material: { type: string; tint: [number, number, number]; texture_ref: string | null }
-  metadata: Record<string, unknown>
-}
-export interface WorldScene {
-  schema: string; mode: 'worldmodel'; cam: string; sid: string; ts: number
-  camera: { fov: number; w: number; h: number; intrinsics: { fx: number; fy: number; cx: number; cy: number } }
-  terrain: { id: string; type: string; size: number; material: string }
-  lighting: { sky: [number, number, number]; sun: [number, number, number] }
-  nodes: WorldNode[]
-}
 export interface SuggestRule { name: string; event_type: string; source_id: number; severity: string }
 export interface Suggestion { kind: 'alert' | 'camera'; cam: string; title: string; why: string; count?: number; rule?: SuggestRule }
 
@@ -99,7 +83,6 @@ export const api = {
   relationships: () => get<SocialGraph>(`/api/relationships`),
   cameraDna: () => get<{ cameras: CameraDna[] }>(`/api/cameras/dna`),
   spatial: (sid: string, grid = 320) => get<{ scene: SpatialScene | null; reason?: string }>(`/api/spatial/${sid}?grid=${grid}`),
-  worldmodel: (sid: string) => get<{ scene: WorldScene | null; reason?: string; have_gb?: number; need_gb?: number }>(`/api/worldmodel/${sid}`),
   suggestions: () => get<{ suggestions: Suggestion[] }>(`/api/suggestions`),
   addAlertRule: (rule: SuggestRule) => post<{ id: number }>(`/api/alerts/rules`, rule),
   mergeCandidates: () => get<{ candidates: MergeCandidate[] }>(`/api/roster/merge-candidates`),

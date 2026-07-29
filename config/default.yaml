@@ -274,12 +274,9 @@ spatial:
   grid: 320               # point-cloud grid width sent to the browser (bounds payload size)
   fov_deg: 60.0           # assumed horizontal field of view for back-projection
   detect_conf: 0.3        # confidence floor for the entities placed as 3D markers
-  # SEMANTIC WORLD MODEL (⛶ 3D SPATIAL): parse the frame into a clean, editable scene graph of
-  # independent 3D objects on an inferred ground — a game-level-style world, not a pixel/point
-  # reconstruction. See docs/world-model-architecture.md. Scene-parsing weights (SegFormer/ADE20K,
-  # ~100 MB) download lazily; runs on the already-loaded depth model. VRAM-gated (>= 3 GB).
-  seg_model: nvidia/segformer-b2-finetuned-ade-512-512
-  worldmodel_size: 640    # working resolution for parsing + placement (quality vs time)
+  complete: true          # geometric scene completion: reconstruct the occluded background behind
+                          # foreground objects (inpainted depth+texture) as a second mesh layer,
+                          # so disocclusion holes are filled with real surface, not black voids
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT

@@ -154,7 +154,6 @@ class Backend:
         self._depth = DepthEstimator(
             model_name=str(self.config.get("spatial.model",
                                            "depth-anything/Depth-Anything-V2-Small-hf")))
-        self._worldmodel = None   # semantic world-model builder (lazy, seg + depth — VRAM-gated)
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -1338,38 +1337,6 @@ class Backend:
             rgb_grid, disp01, entities, fov=float(self.config.get("spatial.fov_deg", 60.0)),
             cam=src.name, sid=str(sid), ts=time.time() * 1000.0, bg_rgb=bg_rgb, bg_disp01=bg_disp)
         return {"scene": scene}
-
-    def build_world_model(self, sid: str) -> dict:
-        """Feature 4 — build a SEMANTIC WORLD MODEL of the camera scene: parse the frame + depth into
-        a clean, editable Scene-Graph IR of independent objects (class, transform, dimensions,
-        material, asset strategy) on an inferred ground — a hand-built-looking level, not a pixel
-        reconstruction. See docs/world-model-architecture.md. VRAM-gated. Returns the usual
-        {"scene": ...} / {"scene": None, "reason": ...} contract."""
-        from . import worldmodel as _wm
-        if not self.config.get("spatial.enabled", True):
-            return {"scene": None, "reason": "disabled"}
-        have = _wm.vram_gb()
-        if have < _wm.MIN_VRAM_GB:
-            return {"scene": None, "reason": "insufficient_vram",
-                    "have_gb": round(have, 1), "need_gb": _wm.MIN_VRAM_GB}
-        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
-        if src is None:
-            return {"scene": None, "reason": "no_source"}
-        frame = self._source_frame(src)
-        if frame is None:
-            return {"scene": None, "reason": "no_frame"}
-        if self._worldmodel is None:
-            self._worldmodel = _wm.WorldModel(
-                self._depth, detector=self._yolo,
-                fov_deg=float(self.config.get("spatial.fov_deg", 60.0)),
-                model=str(self.config.get("spatial.seg_model", _wm._SEG_MODEL)))
-        out = self._worldmodel.build(frame, size=int(self.config.get("spatial.worldmodel_size", 640)))
-        if out is None:
-            return {"scene": None, "reason": "depth_unavailable"}
-        out["cam"] = src.name
-        out["sid"] = str(sid)
-        out["ts"] = time.time() * 1000.0
-        return {"scene": out}
 
     def _spatial_entities(self, frame: Any, disp: Any, dmin: float,
                           dmax: float) -> tuple[list[dict], list[tuple[float, float, float, float]]]:

@@ -525,14 +525,6 @@ async def api_spatial(sid: str, grid: int = 320) -> Any:
     return await asyncio.to_thread(backend.spatial_scene, sid, grid)
 
 
-@app.get("/api/worldmodel/{sid}")
-async def api_worldmodel(sid: str) -> Any:
-    """Semantic world model: scene-parsing + depth -> an editable Scene-Graph IR of independent 3D
-    objects on an inferred ground. Always 200 with {"scene": {...}} or {"scene": null, "reason": ...}
-    (incl. insufficient_vram + have/need)."""
-    if backend is None:
-        return {"scene": None, "reason": "backend_down"}
-    return await asyncio.to_thread(backend.build_world_model, sid)
 
 
 @app.get("/api/suggestions")
