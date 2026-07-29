@@ -1327,24 +1327,32 @@ class Backend:
         rgb_grid = cv2.resize(work, (grid_w, gh), interpolation=cv2.INTER_AREA)
         disp_grid = cv2.resize(disp, (grid_w, gh), interpolation=cv2.INTER_AREA)
         disp01, dmin, dmax = spatial.normalize_disparity(disp_grid)
-        entities = self._spatial_entities(work, disp, dmin, dmax)
+        entities, boxes = self._spatial_entities(work, disp, dmin, dmax)
+        # Geometric scene completion: reconstruct the occluded background behind foreground
+        # objects as a real surface (inpainted depth + texture), shipped as a second mesh layer.
+        bg_rgb = bg_disp = None
+        if self.config.get("spatial.complete", True) and boxes:
+            bg_rgb, bg_disp = spatial.complete_background(rgb_grid, disp01, boxes)
         scene = spatial.encode_scene(
             rgb_grid, disp01, entities, fov=float(self.config.get("spatial.fov_deg", 60.0)),
-            cam=src.name, sid=str(sid), ts=time.time() * 1000.0)
+            cam=src.name, sid=str(sid), ts=time.time() * 1000.0, bg_rgb=bg_rgb, bg_disp01=bg_disp)
         return {"scene": scene}
 
-    def _spatial_entities(self, frame: Any, disp: Any, dmin: float, dmax: float) -> list[dict]:
-        """Detected people/vehicles/objects in `frame`, each with a normalized centre and a
-        depth sample (median disparity in its box) so it can be dropped into the 3D scene."""
+    def _spatial_entities(self, frame: Any, disp: Any, dmin: float,
+                          dmax: float) -> tuple[list[dict], list[tuple[float, float, float, float]]]:
+        """Detected people/vehicles/objects in `frame`: (entity markers, normalized boxes). Each
+        marker has a normalized centre + a depth sample so it drops into the 3D scene; the boxes
+        drive background completion (what to inpaint behind)."""
         det = self._yolo or self._roster_det
         if det is None:
-            return []
+            return [], []
         h, w = frame.shape[:2]
         try:
             dets = det.detect_crop(frame, conf=float(self.config.get("spatial.detect_conf", 0.3)))
         except Exception:  # noqa: BLE001
-            return []
+            return [], []
         out: list[dict] = []
+        boxes: list[tuple[float, float, float, float]] = []
         for idx, d in enumerate(dets):
             x1, y1, x2, y2 = d.bbox
             cls = _CATEGORY_CLS.get(d.category, "object")
@@ -1354,7 +1362,8 @@ class Backend:
                 "depth": spatial.entity_depth(disp, (x1, y1, x2, y2), (w, h), dmin, dmax),
                 "conf": round(float(d.confidence), 2), "label": (d.label or cls).upper(),
             })
-        return out
+            boxes.append((x1 / w, y1 / h, x2 / w, y2 / h))
+        return out, boxes
 
     def _encode_clip(self, frames: list, fps: float = 10.0) -> str | None:
         """Write frames to a browser-playable clip under snapshots/clips and return its URL."""

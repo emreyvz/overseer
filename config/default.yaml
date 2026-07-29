@@ -274,6 +274,9 @@ spatial:
   grid: 320               # point-cloud grid width sent to the browser (bounds payload size)
   fov_deg: 60.0           # assumed horizontal field of view for back-projection
   detect_conf: 0.3        # confidence floor for the entities placed as 3D markers
+  complete: true          # geometric scene completion: reconstruct the occluded background behind
+                          # foreground objects (inpainted depth+texture) as a second mesh layer,
+                          # so disocclusion holes are filled with real surface, not black voids
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT

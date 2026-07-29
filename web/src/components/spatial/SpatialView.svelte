@@ -48,10 +48,8 @@
   let scene: THREE.Scene | null = null
   let camera: THREE.PerspectiveCamera | null = null
   let controls: OrbitControls | null = null
-  let mesh: THREE.Mesh | null = null
-  let backdrop: THREE.Mesh | null = null      // content-based fill behind the surface (billboarded)
-  let sceneCenter = new THREE.Vector3()
-  let backdropDist = 6
+  let mesh: THREE.Mesh | null = null           // foreground: the directly-observed surface
+  let bgMesh: THREE.Mesh | null = null         // completed background reconstructed behind objects
   let markers: THREE.Group | null = null
   let raf = 0
   let ro: ResizeObserver | null = null
@@ -73,15 +71,9 @@
     controls.dampingFactor = 0.08
     controls.rotateSpeed = 0.7
     controls.zoomSpeed = 0.9
-    const _dir = new THREE.Vector3()
     const loop = () => {
       raf = requestAnimationFrame(loop)
       controls?.update()
-      if (backdrop && camera) {   // keep the backdrop behind the scene, facing the camera
-        camera.getWorldDirection(_dir)
-        backdrop.position.copy(sceneCenter).addScaledVector(_dir, backdropDist)
-        backdrop.quaternion.copy(camera.quaternion)
-      }
       if (renderer && scene && camera) renderer.render(scene, camera)
     }
     loop()
@@ -166,83 +158,27 @@
 
   async function buildCloud(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>) {
     if (!scene) return
-    const { w, h, fov, image, depth, entities } = d
-    // decode the float32 depth grid (0..1, 1 = nearest)
-    const bytes = Uint8Array.from(atob(depth), (c) => c.charCodeAt(0))
-    const disp = new Float32Array(bytes.buffer)
-    // decode the RGB frame for per-point colour
-    const img = new Image()
-    img.src = 'data:image/jpeg;base64,' + image
-    await img.decode()
-    const cv = document.createElement('canvas'); cv.width = w; cv.height = h
-    const ctx = cv.getContext('2d')!
-    ctx.drawImage(img, 0, 0, w, h)
-    const rgba = ctx.getImageData(0, 0, w, h).data
-
+    const { w, h, fov, image, depth, entities, bg_image, bg_depth } = d
     const fx = 0.5 * w / Math.tan((fov * Math.PI) / 180 / 2)
     const cx = w / 2, cy = h / 2
-    // Back-project every non-sky pixel into a vertex, then stitch neighbours into a triangle
-    // mesh — a continuous 3D surface, so the gaps between points are FILLED and the scene reads
-    // as solid geometry rather than a sparse dot cloud. Triangles that would span a large depth
-    // discontinuity (a foreground silhouette) are dropped so objects don't smear into the
-    // background; smaller gaps are bridged, completing the parts we can't literally see.
-    const pos: number[] = [], col: number[] = []
-    const vidx = new Int32Array(w * h).fill(-1)
-    let vn = 0
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x
-        if (disp[i] < SKYCULL) continue          // sky / far flat background
-        vidx[i] = vn++
-        const Z = zOf(disp[i])
-        pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -Z)
-        const p = i * 4
-        col.push(rgba[p] / 255, rgba[p + 1] / 255, rgba[p + 2] / 255)
-      }
-    }
-    const idx: number[] = []
-    const el = (va: number, vb: number) =>
-      Math.hypot(pos[va * 3] - pos[vb * 3], pos[va * 3 + 1] - pos[vb * 3 + 1], pos[va * 3 + 2] - pos[vb * 3 + 2])
-    const tri = (a: number, b: number, c: number) => {
-      const va = vidx[a], vb = vidx[b], vc = vidx[c]
-      if (va < 0 || vb < 0 || vc < 0) return
-      // cull triangles with a long 3D edge — those are the stretched "skirts" a soft depth edge
-      // would drape from a foreground silhouette down to the far background.
-      if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > MESH_MAXLEN) return
-      idx.push(va, vb, vc)
-    }
-    for (let y = 0; y < h - 1; y++) {
-      for (let x = 0; x < w - 1; x++) {
-        const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1
-        tri(tl, bl, tr); tri(tr, bl, br)
-      }
-    }
-    // (re)build the surface
+
+    // foreground: the directly-observed surface — a continuous triangle mesh with sharp
+    // silhouettes (stretched skirts culled).
+    const fg = await decodeLayer(image, depth, w, h)
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
-    geo.setIndex(idx)
-    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
-    mesh = new THREE.Mesh(geo, mat)
+    mesh = layerMesh(fg.disp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0)
     scene.add(mesh)
 
-    // content-based backdrop: a dimmed, blurred, vignetted copy of the frame, billboarded behind
-    // the surface so disocclusion holes reveal soft scene-coloured atmosphere instead of black.
-    if (backdrop) { scene.remove(backdrop); backdrop.geometry.dispose(); const bm = backdrop.material as THREE.MeshBasicMaterial; bm.map?.dispose(); bm.dispose() }
-    const bcv = document.createElement('canvas'); bcv.width = w; bcv.height = h
-    const bx = bcv.getContext('2d')!
-    bx.filter = 'blur(7px) brightness(0.34)'; bx.drawImage(img, 0, 0, w, h)
-    bx.filter = 'none'; bx.globalCompositeOperation = 'destination-in'
-    const vg = bx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.18, w / 2, h / 2, Math.max(w, h) * 0.62)
-    vg.addColorStop(0, 'rgba(0,0,0,1)'); vg.addColorStop(1, 'rgba(0,0,0,0)')
-    bx.fillStyle = vg; bx.fillRect(0, 0, w, h)
-    const btex = new THREE.CanvasTexture(bcv); btex.minFilter = THREE.LinearFilter
-    backdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshBasicMaterial({ map: btex, transparent: true, fog: false, depthWrite: false }))
-    backdrop.scale.set((w / h) * 20, 20, 1)
-    backdrop.renderOrder = -1
-    scene.add(backdrop)
+    // completed background: the scene reconstructed BEHIND foreground objects (inpainted depth +
+    // texture, computed backend-side) as a continuous surface at its true depth, pushed a hair
+    // back so the foreground always wins where both exist. This fills disocclusion holes with
+    // REAL geometry (correct parallax) instead of a flat backdrop or a black void.
+    if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
+    if (bg_image && bg_depth) {
+      const bg = await decodeLayer(bg_image, bg_depth, w, h)
+      bgMesh = layerMesh(bg.disp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04)
+      scene.add(bgMesh)
+    }
 
     // entity markers
     if (markers) { scene.remove(markers); disposeGroup(markers) }
@@ -258,10 +194,9 @@
     }
     scene.add(markers)
 
-    // fit-to-bounds framing, offset a touch off-axis so the 3D structure reads immediately
-    const box = new THREE.Box3().setFromBufferAttribute(geo.getAttribute('position') as THREE.BufferAttribute)
+    // fit-to-bounds framing (on the foreground surface), offset off-axis so the 3D reads at once
+    const box = new THREE.Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position') as THREE.BufferAttribute)
     const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
-    sceneCenter = c.clone(); backdropDist = Math.max(size.x, size.y, size.z) * 2.2
     const vfov = camera!.fov * Math.PI / 180
     const fitH = (size.y / 2) / Math.tan(vfov / 2)
     const fitW = (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect
@@ -273,6 +208,56 @@
       c.y - dist * Math.sin(pitch),
       c.z + dist * Math.cos(yaw) * Math.cos(pitch))
     camera!.updateProjectionMatrix()
+  }
+
+  async function decodeLayer(image: string, depth: string, w: number, h: number) {
+    const bytes = Uint8Array.from(atob(depth), (c) => c.charCodeAt(0))
+    const disp = new Float32Array(bytes.buffer)
+    const img = new Image(); img.src = 'data:image/jpeg;base64,' + image; await img.decode()
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+    const ctx = cv.getContext('2d')!; ctx.drawImage(img, 0, 0, w, h)
+    return { disp, rgba: ctx.getImageData(0, 0, w, h).data }
+  }
+
+  // Back-project a depth+colour grid into a triangle-mesh surface. `maxlen` culls stretched
+  // silhouette skirts (larger = keep the surface continuous, for the smooth background layer);
+  // `zbias` pushes the surface back so a rear layer never z-fights the front one.
+  function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
+                     fx: number, cx: number, cy: number, maxlen: number, zbias: number): THREE.Mesh {
+    const pos: number[] = [], col: number[] = []
+    const vidx = new Int32Array(w * h).fill(-1)
+    let vn = 0
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x
+        if (disp[i] < SKYCULL) continue
+        vidx[i] = vn++
+        const Z = zOf(disp[i])
+        pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -(Z + zbias))
+        const p = i * 4
+        col.push(rgba[p] / 255, rgba[p + 1] / 255, rgba[p + 2] / 255)
+      }
+    }
+    const idx: number[] = []
+    const el = (va: number, vb: number) =>
+      Math.hypot(pos[va * 3] - pos[vb * 3], pos[va * 3 + 1] - pos[vb * 3 + 1], pos[va * 3 + 2] - pos[vb * 3 + 2])
+    const tri = (a: number, b: number, c: number) => {
+      const va = vidx[a], vb = vidx[b], vc = vidx[c]
+      if (va < 0 || vb < 0 || vc < 0) return
+      if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > maxlen) return
+      idx.push(va, vb, vc)
+    }
+    for (let y = 0; y < h - 1; y++) {
+      for (let x = 0; x < w - 1; x++) {
+        const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1
+        tri(tl, bl, tr); tri(tr, bl, br)
+      }
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+    geo.setIndex(idx)
+    return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))
   }
 
   function makeMarker(text: string, color: string): THREE.Sprite {
@@ -325,7 +310,7 @@
     ro?.disconnect()
     controls?.dispose()
     if (mesh) { mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
-    if (backdrop) { backdrop.geometry.dispose(); const bm = backdrop.material as THREE.MeshBasicMaterial; bm.map?.dispose(); bm.dispose() }
+    if (bgMesh) { bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose() }
     if (markers) disposeGroup(markers)
     renderer?.dispose()
     if (renderer?.domElement && host?.contains(renderer.domElement)) host.removeChild(renderer.domElement)

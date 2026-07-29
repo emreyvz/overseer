@@ -3,7 +3,7 @@ import base64
 
 import numpy as np
 
-from server.spatial import encode_scene, entity_depth, normalize_disparity
+from server.spatial import complete_background, encode_scene, entity_depth, normalize_disparity
 
 
 def test_normalize_disparity_maps_to_unit_range() -> None:
@@ -49,3 +49,36 @@ def test_encode_scene_roundtrips_depth_and_shape() -> None:
     assert np.allclose(arr.reshape(6, 8), disp01, atol=1e-6)
     # image decodes as a JPEG of the right size
     assert len(base64.b64decode(scene["image"])) > 0
+
+
+def test_complete_background_fills_foreground_box() -> None:
+    # a near foreground blob over a far background; its box should be inpainted back to background
+    disp = np.full((40, 40), 0.2, np.float32)   # background = far
+    disp[10:30, 10:30] = 0.9                     # foreground object = near
+    rgb = np.zeros((40, 40, 3), np.uint8)
+    rgb[10:30, 10:30] = (0, 0, 255)              # red object on black bg
+    boxes = [(10 / 40, 10 / 40, 30 / 40, 30 / 40)]
+    bg_rgb, bg_disp = complete_background(rgb, disp, boxes)
+    # inside the box, the depth is pulled back toward the surrounding background (far)
+    assert bg_disp[20, 20] < 0.5
+    # and the red object texture is gone (inpainted from the black surroundings)
+    assert bg_rgb[20, 20][2] < 128
+    # outside the box is untouched
+    assert bg_disp[2, 2] == disp[2, 2]
+
+
+def test_complete_background_no_boxes_is_identity() -> None:
+    disp = np.full((8, 8), 0.5, np.float32)
+    rgb = np.zeros((8, 8, 3), np.uint8)
+    bg_rgb, bg_disp = complete_background(rgb, disp, [])
+    assert np.array_equal(bg_disp, disp) and np.array_equal(bg_rgb, rgb)
+
+
+def test_encode_scene_includes_background_layer_when_supplied() -> None:
+    rgb = np.zeros((6, 8, 3), np.uint8)
+    disp01 = np.full((6, 8), 0.5, np.float32)
+    scene = encode_scene(rgb, disp01, [], fov=60.0, cam="C", sid="1", ts=0.0,
+                         bg_rgb=rgb.copy(), bg_disp01=disp01.copy())
+    assert "bg_image" in scene and "bg_depth" in scene
+    arr = np.frombuffer(base64.b64decode(scene["bg_depth"]), np.float32)
+    assert arr.size == 48
