@@ -4,7 +4,7 @@
   // review each), an AI narrative summary, evidence, a status lifecycle and notes.
   import { onMount, onDestroy } from 'svelte'
   import { api, type CaseDetail, type CaseEventRow } from '../../lib/api'
-  import { cameras, activeCam, mode, stage, pickerView, flashBanner, triggerGlitch } from '../../lib/stores'
+  import { cameras, activeCam, mode, stage, pickerView, spatialOpen, flashBanner, triggerGlitch } from '../../lib/stores'
   import { sendCommand } from '../../lib/ws'
   import { SIM } from '../../lib/sim'
   import { sfx } from '../../lib/audio'
@@ -58,6 +58,8 @@
   const sevClass = (s: string) => (s === 'critical' ? 'crit' : s === 'warning' ? 'warn' : 'info')
   // leave the investigation and go straight back to the world map
   function toMap() { sfx('whoosh'); triggerGlitch(160); onclose(); mode.set('pov'); pickerView.set('map'); stage.set('select') }
+  // resolve a camera NAME (as the timeline carries) to its source id, for the 3D scene view
+  const spatialId = (name?: string | null): string | null => (name ? ($cameras.find((c) => c.name === name)?.id ?? null) : null)
 </script>
 
 <div class="inv" role="dialog" aria-label="Investigation">
@@ -90,6 +92,9 @@
           {:else if focus?.snapshot}
             <img src={src(focus.snapshot)} alt="" />
           {:else}<div class="noimg caps">NO FOOTAGE FOR THIS MOMENT</div>{/if}
+          {#if spatialId(focus?.cam)}
+            <button class="spatial3d caps" onclick={() => spatialOpen.set(spatialId(focus?.cam))} title="Reconstruct this camera's scene in 3D">⛶ 3D SCENE</button>
+          {/if}
           {#if focus}
             <div class="pcap caps"><span class="ptype">{focus.type}</span><span class="pmeta">{focus.cam} · {clock(focus.ts)}</span></div>
           {/if}
@@ -212,6 +217,9 @@
 
   .player { position: relative; aspect-ratio: 16/9; background: #05070a; border: 1px solid var(--hairline); overflow: hidden; }
   .player video, .player img { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .spatial3d { position: absolute; top: 8px; right: 8px; z-index: 3; padding: 4px 10px; border: 1px solid var(--ink-dim);
+    background: rgba(0,0,0,0.55); color: var(--ink-dim); font-size: 9px; letter-spacing: var(--tracking); cursor: pointer; }
+  .spatial3d:hover { border-color: var(--cyan); color: var(--cyan); }
   .noimg { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--ink-ghost); font-size: 10px; letter-spacing: 0.16em; }
   .pcap { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; padding: 8px 12px;
     background: linear-gradient(transparent, rgba(4,7,10,0.85)); font-size: 9px; }

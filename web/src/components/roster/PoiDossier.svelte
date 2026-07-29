@@ -6,7 +6,7 @@
   import { onDestroy, onMount } from 'svelte'
   import { tweened } from 'svelte/motion'
   import { cubicOut } from 'svelte/easing'
-  import { cameras, activeCam, mode, triggerGlitch, flashBanner, watchlistOpen } from '../../lib/stores'
+  import { cameras, activeCam, mode, triggerGlitch, flashBanner, watchlistOpen, spatialOpen } from '../../lib/stores'
   import { annotations, annotate } from '../../lib/annotations'
   import { enroll } from '../../lib/watchlist'
   import { api } from '../../lib/api'
@@ -199,6 +199,7 @@
         <span class="lock caps">LOCK</span>
         {#if watched}<span class="bolo caps">◉ BOLO · WATCHED</span>{/if}
         {#if entry.snapshot}<button class="cut caps" onclick={() => (cutout = !cutout)}>{cutout ? 'RESTORE BG' : 'ISOLATE'}</button>{/if}
+        {#if camByName(entry.cam)}<button class="s3d caps" onclick={() => spatialOpen.set(camByName(entry.cam)!.id)} title="Reconstruct this subject's scene in 3D">⛶ 3D</button>{/if}
       </div>
 
       <div class="ident">
@@ -384,6 +385,9 @@
   .cut { position: absolute; bottom: 12px; left: 12px; z-index: 3; padding: 4px 10px; border: 1px solid var(--hairline);
     background: rgba(5,8,11,0.7); color: var(--ink-dim); font-size: 8px; letter-spacing: 0.16em; cursor: pointer; }
   .cut:hover { border-color: var(--cyan); color: var(--cyan); }
+  .s3d { position: absolute; bottom: 12px; right: 12px; z-index: 3; padding: 4px 10px; border: 1px solid var(--hairline);
+    background: rgba(5,8,11,0.7); color: var(--ink-dim); font-size: 8px; letter-spacing: 0.16em; cursor: pointer; }
+  .s3d:hover { border-color: var(--cyan); color: var(--cyan); }
   .noimg { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--ink-ghost); font-size: 9px; letter-spacing: 0.16em; }
 
   .ident { animation: fadeup 560ms 200ms both; }
