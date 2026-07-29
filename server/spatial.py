@@ -35,15 +35,46 @@ def entity_depth(disp: np.ndarray, box_xyxy: tuple[float, float, float, float],
     return round((dval - dmin) / (dmax - dmin + 1e-6), 4)
 
 
+def complete_background(rgb_grid: np.ndarray, disp01: np.ndarray,
+                        boxes_norm: list[tuple[float, float, float, float]]) -> tuple[np.ndarray, np.ndarray]:
+    """Reconstruct the OCCLUDED background as real geometry. Where a foreground object (a detected
+    person/vehicle box) hides the scene, inpaint BOTH the depth and the texture from the
+    surrounding background, so the wall/floor/scene continues behind it. The frontend renders this
+    as a second mesh layer at its true depth — filling disocclusion holes with a plausible 3D
+    surface (correct parallax), not a flat backdrop. Returns (bg_rgb_bgr, bg_disp01)."""
+    h, w = disp01.shape
+    mask = np.zeros((h, w), np.uint8)
+    for (nx1, ny1, nx2, ny2) in boxes_norm:
+        x1, y1 = int(nx1 * w), int(ny1 * h)
+        x2, y2 = int(nx2 * w), int(ny2 * h)
+        if x2 > x1 and y2 > y1:
+            mask[max(0, y1):min(h, y2), max(0, x1):min(w, x2)] = 255
+    if not mask.any():
+        return rgb_grid.copy(), disp01.copy()
+    mask = cv2.dilate(mask, np.ones((3, 3), np.uint8), iterations=1)
+    rad = max(4, w // 60)
+    bg_rgb = cv2.inpaint(rgb_grid, mask, rad, cv2.INPAINT_TELEA)
+    du8 = (np.clip(disp01, 0.0, 1.0) * 255.0).astype(np.uint8)
+    bg_du8 = cv2.inpaint(du8, mask, rad, cv2.INPAINT_TELEA)
+    return bg_rgb, (bg_du8.astype(np.float32) / 255.0)
+
+
 def encode_scene(rgb_grid: np.ndarray, disp01: np.ndarray, entities: list[dict], *,
-                 fov: float, cam: str, sid: str, ts: float, jpeg_quality: int = 82) -> dict:
+                 fov: float, cam: str, sid: str, ts: float, jpeg_quality: int = 82,
+                 bg_rgb: np.ndarray | None = None, bg_disp01: np.ndarray | None = None) -> dict:
     """Assemble the wire payload: base64 JPEG for colour, base64 float32 for depth, plus the
-    3D entity markers. `rgb_grid` is BGR (as OpenCV holds it); `disp01` is the matching grid."""
+    3D entity markers. `rgb_grid` is BGR (as OpenCV holds it); `disp01` is the matching grid.
+    When a completed background layer is supplied it's shipped too (bg_image / bg_depth)."""
     h, w = disp01.shape
     ok, jpg = cv2.imencode(".jpg", rgb_grid, [cv2.IMWRITE_JPEG_QUALITY, int(jpeg_quality)])
     image_b64 = base64.b64encode(jpg.tobytes()).decode("ascii") if ok else ""
     depth_b64 = base64.b64encode(np.ascontiguousarray(disp01, np.float32).tobytes()).decode("ascii")
-    return {
+    out = {
         "cam": cam, "sid": str(sid), "w": int(w), "h": int(h), "fov": float(fov),
         "image": image_b64, "depth": depth_b64, "entities": entities, "ts": float(ts),
     }
+    if bg_rgb is not None and bg_disp01 is not None:
+        ok2, jpg2 = cv2.imencode(".jpg", bg_rgb, [cv2.IMWRITE_JPEG_QUALITY, int(jpeg_quality)])
+        out["bg_image"] = base64.b64encode(jpg2.tobytes()).decode("ascii") if ok2 else ""
+        out["bg_depth"] = base64.b64encode(np.ascontiguousarray(bg_disp01, np.float32).tobytes()).decode("ascii")
+    return out
