@@ -34,6 +34,14 @@
     } catch { land = [] }
   })
 
+  // — camera DNA + reputation (per-camera behavioural profile) —
+  let dna = $state<Record<string, import('../../lib/api').CameraDna>>({})
+  async function loadDna() {
+    try { const r = await api.cameraDna(); dna = Object.fromEntries(r.cameras.map((c) => [String(c.id), c])) } catch { /* offline */ }
+  }
+  onMount(() => { loadDna(); const t = setInterval(loadDna, 6000); return () => clearInterval(t) })
+  const repClass = (r: number) => (r >= 0.66 ? 'good' : r >= 0.4 ? 'ok' : 'poor')
+
   // — pan / zoom (zoom-to-cursor, no drift) —
   let tx = $state(0), ty = $state(0), k = $state(1)
   let svg = $state<SVGSVGElement>()
@@ -199,6 +207,14 @@
       <div class="r"><span class="k">CAM</span><span class="v">{selCam.id}</span></div>
       <div class="r"><span class="k">STATUS</span><span class="v">{selCam.health === 'online' ? 'ONLINE' : 'OFFLINE'}</span></div>
       <div class="r"><span class="k">POSITION</span><span class="v">{selCam.coords ? `${selCam.coords[0].toFixed(3)}, ${selCam.coords[1].toFixed(3)}` : 'NONE'}</span></div>
+      {#if dna[String(selCam.id)] && dna[String(selCam.id)].frames > 0}
+        {@const dd = dna[String(selCam.id)]}
+        <div class="dna">
+          <div class="dl">CAMERA DNA</div>
+          <div class="r"><span class="k">REPUTATION</span><span class="rep rep-{repClass(dd.reputation)}">{Math.round(dd.reputation * 100)}%<span class="repbar"><span class="repfill rep-{repClass(dd.reputation)}" style={`width:${Math.round(dd.reputation * 100)}%`}></span></span></span></div>
+          {#if dd.dna.length}<div class="tags">{#each dd.dna as t}<span class="dtag">{t}</span>{/each}</div>{:else}<div class="dnone">PROFILING…</div>{/if}
+        </div>
+      {/if}
       <div class="coord">
         <div class="cl">ENTER COORDINATES</div>
         <div class="ins">
@@ -263,6 +279,15 @@
   .editor .tab.hot { color: var(--cyan); }
   .editor .r { display: flex; justify-content: space-between; padding: 3px 10px; font-size: var(--fs-micro); }
   .editor .k { color: var(--ink-dim); } .editor .v { color: var(--ink); }
+  .dna { border-top: 1px solid var(--hairline); margin-top: 6px; padding: 8px 10px; }
+  .dl { font-size: var(--fs-micro); color: var(--cyan); letter-spacing: var(--tracking); margin-bottom: 6px; }
+  .rep { display: flex; align-items: center; gap: 6px; }
+  .rep-good { color: var(--cyan); } .rep-ok { color: var(--amber, #d8a200); } .rep-poor { color: var(--scarlet); }
+  .repbar { width: 54px; height: 3px; background: var(--hairline); }
+  .repfill { display: block; height: 100%; } .repfill.rep-good { background: var(--cyan); } .repfill.rep-ok { background: var(--amber, #d8a200); } .repfill.rep-poor { background: var(--scarlet); }
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+  .dtag { padding: 2px 7px; border: 1px solid var(--hairline); color: var(--ink); font-size: 8px; letter-spacing: 0.08em; }
+  .dnone { font-size: 8px; color: var(--ink-ghost); margin-top: 6px; }
   .coord { border-top: 1px solid var(--hairline); margin-top: 6px; padding: 8px 10px; }
   .cl { font-size: var(--fs-micro); color: var(--scarlet); letter-spacing: var(--tracking); margin-bottom: 6px; }
   .ins { display: flex; gap: 8px; } .ins label { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 8px; color: var(--ink-ghost); }

@@ -143,6 +143,8 @@ class Backend:
         self._plate_watch_cd = float(self.config.get("match.anpr.watch_cooldown", 30.0))
         from .relationships import RelationshipGraph
         self.relationships = RelationshipGraph()   # co-occurrence graph between roster subjects
+        from .cameradna import CameraProfiles
+        self.cam_profiles = CameraProfiles()       # per-camera DNA + reputation from observations
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -759,6 +761,11 @@ class Backend:
                         "plate": e.get("plate"), "cam": e.get("cam")})
         return out
 
+    def camera_dna(self) -> list[dict]:
+        """Per-camera behavioural profile + reputation, one row per camera seen this session."""
+        names = {s.id: s.name for s in self.db.list_sources()}
+        return self.cam_profiles.all(names)
+
     def relationship_graph(self, min_count: int = 2, limit: int = 300) -> dict:
         """The social graph: nodes (with a photo) and weighted association edges."""
         g = self.relationships.graph(min_count=min_count, limit=limit)
@@ -842,6 +849,8 @@ class Backend:
     def _on_status(self, status: str) -> None:
         mapping = {"connecting": "connecting", "reconnecting": "reconnecting",
                    "connected": "online", "stopped": "offline"}
+        if status == "reconnecting" and self._source_id is not None:
+            self.cam_profiles.note_reconnect(self._source_id)   # dents the camera's reputation
         self.set_conn(mapping.get(status, self._conn))
 
     @staticmethod
@@ -889,11 +898,14 @@ class Backend:
         dets = []
         idx = 0
         weapon_box = None
+        prof_dets: list = []   # (cls, conf) for the camera DNA / reputation profile
         for group in r.detections.values():
             for d in group:
                 x1, y1, x2, y2 = d.bbox
                 cls = _CATEGORY_CLS.get(d.category, "object")
                 weapon = d.category == "weapon"
+                if cls in ("person", "vehicle", "animal"):
+                    prof_dets.append((cls, float(d.confidence)))
                 if weapon:
                     weapon_box = (x1, y1, x2, y2)
                 # Only surface people / vehicles / animals (and weapons) in the live
@@ -949,6 +961,10 @@ class Backend:
         self.plates.prune(vehicle_ids)
         self.live_make.prune(vehicle_ids)
         self.speed.prune(now)
+        if self._source_id is not None:   # accumulate this camera's DNA / reputation
+            self.cam_profiles.observe_frame(
+                self._source_id, brightness=float(getattr(r.metrics, "brightness", 0.0)),
+                motion=float(r.motion_percent), fps=float(r.fps), dets=prof_dets)
         self._emit({"t": "detections", "d": dets})
 
         # weapon alert with a cropped image of the weapon itself (throttled)
