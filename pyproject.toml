@@ -29,6 +29,12 @@ dependencies = [
     # occluded scene. Heavy + VRAM-gated; the weights fetch lazily on first use.
     "diffusers>=0.27",
     "accelerate>=0.30",
+    # Multi-view full-3D (Feature 4, primary): DUSt3R runtime deps. DUSt3R itself is cloned into
+    # third_party/dust3r (scripts/setup_dust3r) — it's not on PyPI. These are its light extras;
+    # core so `uv sync` keeps them. Pure PyTorch, no CUDA build. Weights fetch lazily.
+    "roma>=1.5",
+    "einops>=0.8",
+    "trimesh>=4.0",
 ]
 
 [project.optional-dependencies]

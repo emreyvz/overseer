@@ -30,9 +30,10 @@
   // narrated with a progress bar + rotating stages, so the operator never stares at a black void.
   let genProgress = $state(0)          // 0..100, eased toward ~94 until the real result lands
   let genStage = $state(0)
-  const GEN_STEPS = ['ACQUIRING FRAME', 'ESTIMATING DEPTH FIELD', 'SYNTHESIZING OCCLUDED VIEWS', 'FUSING POINT CLOUD']
+  const GEN_STEPS = ['CAPTURING VIEWPOINTS', 'MATCHING FEATURES', 'FUSING MULTI-VIEW GEOMETRY', 'BUILDING POINT CLOUD']
   let genRaf = 0
   let genActive = false
+  let method = $state<'multiview' | 'monocular' | ''>('')
   let pointTex: THREE.Texture | null = null
 
   const REASON_TEXT: Record<string, string> = {
@@ -126,7 +127,7 @@
   // fast depth-mesh is NOT put into the 3D scene — only the point cloud is ever shown.
   async function loadFull() {
     loading = true; unavailable = false; reason = ''; phase = 'capture'
-    genProgress = 0; genStage = 0
+    genProgress = 0; genStage = 0; method = ''
     const fullP = api.spatial3d(cam).catch(() => null)          // heavy job starts now
     const fastP = api.spatial(cam, 256).catch(() => null)       // quick frame for the montage
     startGenProgress()
@@ -142,6 +143,7 @@
       loading = false; unavailable = true; phase = ''; return
     }
     camName = res.scene.cam
+    method = res.scene.method ?? ''
     genProgress = 100; genStage = GEN_STEPS.length - 1
     try { phase = 'lift'; buildPointCloud(res.scene); await wait(560) } catch { unavailable = true }
     loading = false; phase = ''
@@ -224,19 +226,29 @@
     const size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3())
     const diag = Math.max(size.length(), 1)
     if (!pointTex) pointTex = makeDiscTexture()
-    // small crisp round points: big enough to close inter-sample gaps, small enough to keep
-    // texture detail instead of smearing into overlapping blobs. alphaTest crops each disc tight.
+    // multi-view clouds are a wide, near-flat ground footprint — bigger points close the gaps;
+    // the monocular fallback is denser/bumpier and wants finer points to keep detail.
+    const isMV = method === 'multiview'
     const mat = new THREE.PointsMaterial({
-      size: diag * 0.006, vertexColors: true, sizeAttenuation: true,
+      size: diag * (isMV ? 0.009 : 0.006), vertexColors: true, sizeAttenuation: true,
       map: pointTex, alphaTest: 0.5, transparent: true, depthWrite: true })
     pointsObj = new THREE.Points(geo, mat)
     scene.add(pointsObj)
     entityCount = 0
-    // frame it (offset off-axis), pulled back so the whole scene reads at once
+    // Framing: multi-view scenes vary (flat aerial vs forward-receding dashcam), so no single
+    // angle is optimal — fit the whole cloud (bounding sphere) and establish from a moderate 3/4
+    // angle that reads well for either; drag-to-orbit takes it from there. The bumpier monocular
+    // fallback keeps its tuned low 3/4 framing.
     const vfov = camera!.fov * Math.PI / 180
-    const dist = Math.max((size.y / 2) / Math.tan(vfov / 2), (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect) * 1.55
-    const yaw = 16 * Math.PI / 180, pitch = 8 * Math.PI / 180
-    if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.2; controls.maxDistance = dist * 5 }
+    let dist: number, yaw: number, pitch: number
+    if (isMV) {
+      dist = (diag / 2) / Math.tan(vfov / 2) * 1.15
+      yaw = 24 * Math.PI / 180; pitch = 26 * Math.PI / 180
+    } else {
+      dist = Math.max((size.y / 2) / Math.tan(vfov / 2), (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect) * 1.55
+      yaw = 16 * Math.PI / 180; pitch = 8 * Math.PI / 180
+    }
+    if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.15; controls.maxDistance = dist * 6 }
     camera!.position.set(c.x + dist * Math.sin(yaw) * Math.cos(pitch), c.y - dist * Math.sin(pitch), c.z + dist * Math.cos(yaw) * Math.cos(pitch))
     camera!.updateProjectionMatrix()
   }
@@ -499,7 +511,7 @@
   <header class="top caps">
     <span class="eyebrow">⛶ SPATIAL RECONSTRUCTION</span>
     <span class="camn">{camName || '—'}</span>
-    <span class="mode">{full ? 'GENERATIVE · FULL 3D' : 'MONOCULAR DEPTH · 3D'}</span>
+    <span class="mode">{full ? (method === 'multiview' ? 'MULTI-VIEW STEREO · FULL 3D' : method === 'monocular' ? 'MONOCULAR GEN · FULL 3D' : 'FULL 3D') : 'MONOCULAR DEPTH · 3D'}</span>
     <span class="spacer"></span>
     {#if entityCount}<span class="ec caps">◈ {entityCount} ENTIT{entityCount === 1 ? 'Y' : 'IES'}</span>{/if}
     <button class="ref caps" class:on={full} title="Generative full-3D reconstruction (heavy, fills every hole)"
@@ -524,7 +536,7 @@
           {/each}
         </div>
         <div class="pl caps"><span class="pulse">{GEN_STEPS[genStage] || 'RECONSTRUCTING'}_ · {Math.round(genProgress)}%</span></div>
-        <div class="gensub caps">generative full-3D · synthesizing occluded geometry across novel views · ~30s</div>
+        <div class="gensub caps">multi-view stereo · fusing camera viewpoints into real 3D geometry · ~25s</div>
       </div>
     </div>
   {:else if loading}

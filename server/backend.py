@@ -154,7 +154,8 @@ class Backend:
         self._depth = DepthEstimator(
             model_name=str(self.config.get("spatial.model",
                                            "depth-anything/Depth-Anything-V2-Small-hf")))
-        self._scene3d = None   # generative full-3D reconstruction (lazy, heavy — VRAM-gated)
+        self._scene3d = None   # monocular generative fallback (lazy, heavy — VRAM-gated)
+        self._mvscene = None   # multi-view DUSt3R reconstruction (lazy, heavy — VRAM-gated)
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -1339,14 +1340,34 @@ class Backend:
             cam=src.name, sid=str(sid), ts=time.time() * 1000.0, bg_rgb=bg_rgb, bg_disp01=bg_disp)
         return {"scene": scene}
 
+    def _capture_burst(self, src: Any, n: int = 4, gap: float = 0.35,
+                       min_diff: float = 1.8) -> list:
+        """Grab up to ``n`` frames ~``gap`` s apart from a source, keeping only frames that differ
+        enough from the last kept one — a moving camera thus yields distinct viewpoints (parallax),
+        a static one collapses to a single frame (caller falls back to monocular)."""
+        frames: list = []
+        last_small = None
+        for i in range(n):
+            f = self._source_frame(src)
+            if f is not None:
+                small = cv2.resize(f, (96, 54))
+                if last_small is None or float(np.mean(cv2.absdiff(small, last_small))) > min_diff:
+                    frames.append(f)
+                    last_small = small
+            if i < n - 1:
+                time.sleep(gap)
+        return frames
+
     def spatial_scene_full(self, sid: str) -> dict:
-        """Feature 4 (PRO) — a full GENERATIVE 3D reconstruction of the camera scene: the frame is
-        back-projected, then novel views are rendered and their disocclusion holes are inpainted
-        by a diffusion model and fused back, so the whole scene (behind objects, off-frame) is
-        completed as a watertight point cloud. Heavy (~15 s, needs a capable GPU). VRAM-gated: if
-        the GPU is too small the operator is told, rather than OOM'ing. Returns the usual
+        """Feature 4 (PRO) — a full 3D reconstruction of the camera scene. Primary path is
+        MULTI-VIEW STEREO: a short burst of frames (the camera is moving, so they carry parallax)
+        is fed to DUSt3R, which regresses per-pixel 3D pointmaps + poses and fuses them into one
+        real, metric point cloud — flat ground, true depth, no hallucinated surfaces. If the scene
+        is static (single distinct frame) or DUSt3R is unavailable, it falls back to the monocular
+        generative reconstruction. Heavy (~15-40 s), VRAM-gated. Returns the usual
         {"scene": ...} / {"scene": None, "reason": ...} contract."""
         import base64
+        from . import mvsfm as _mv
         from . import scene3d as _s3
         if not self.config.get("spatial.enabled", True):
             return {"scene": None, "reason": "disabled"}
@@ -1357,22 +1378,46 @@ class Backend:
         src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
         if src is None:
             return {"scene": None, "reason": "no_source"}
-        frame = self._source_frame(src)
-        if frame is None:
-            return {"scene": None, "reason": "no_frame"}
-        if self._scene3d is None:
-            self._scene3d = _s3.Scene3D(
-                self._depth, fov_deg=float(self.config.get("spatial.fov_deg", 60.0)),
-                model=str(self.config.get("spatial.inpaint_model",
-                                          "stable-diffusion-v1-5/stable-diffusion-inpainting")))
-        out = self._scene3d.reconstruct(frame, size=int(self.config.get("spatial.full_size", 512)))
+
+        out = None
+        method = "monocular"
+        # --- primary: multi-view DUSt3R on a parallax burst ---
+        use_mv = bool(self.config.get("spatial.multiview", True)) and _mv.dust3r_present()
+        if use_mv:
+            burst = self._capture_burst(
+                src, n=int(self.config.get("spatial.mv_views", 4)),
+                gap=float(self.config.get("spatial.mv_gap_s", 0.35)))
+            if len(burst) >= 2:
+                if self._mvscene is None:
+                    self._mvscene = _mv.MultiViewScene()
+                try:
+                    out = self._mvscene.reconstruct(
+                        burst, niter=int(self.config.get("spatial.mv_niter", 300)))
+                    if out is not None:
+                        method = "multiview"
+                except Exception:  # noqa: BLE001
+                    log.exception("multiview reconstruction failed; falling back to monocular")
+                    out = None
+        # --- fallback: monocular generative reconstruction ---
+        if out is None:
+            frame = self._source_frame(src)
+            if frame is None:
+                return {"scene": None, "reason": "no_frame"}
+            if self._scene3d is None:
+                self._scene3d = _s3.Scene3D(
+                    self._depth, fov_deg=float(self.config.get("spatial.fov_deg", 60.0)),
+                    model=str(self.config.get("spatial.inpaint_model",
+                                              "stable-diffusion-v1-5/stable-diffusion-inpainting")))
+            out = self._scene3d.reconstruct(
+                frame, size=int(self.config.get("spatial.full_size", 512)))
         if out is None:
             return {"scene": None, "reason": "depth_unavailable"}
         pts = np.ascontiguousarray(out["points"], np.float32)
         cols = np.ascontiguousarray(out["colors"], np.uint8)
         return {"scene": {
-            "mode": "points", "cam": src.name, "sid": str(sid), "fov": float(out["fov"]),
-            "count": int(len(pts)), "points": base64.b64encode(pts.tobytes()).decode("ascii"),
+            "mode": "points", "method": method, "cam": src.name, "sid": str(sid),
+            "fov": float(out["fov"]), "count": int(len(pts)),
+            "points": base64.b64encode(pts.tobytes()).decode("ascii"),
             "colors": base64.b64encode(cols.tobytes()).decode("ascii"), "ts": time.time() * 1000.0,
         }}
 

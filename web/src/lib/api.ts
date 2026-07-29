@@ -34,7 +34,7 @@ export interface SceneSubject { id: string; cls: string; snapshot?: string | nul
 export interface CaseDetail { id: number; name: string; threat: string; notes: string; status: string; created: number; cameras: string[]; events: CaseEventRow[]; subjects: SceneSubject[]; aiSummary: string | null }
 export interface SpatialEntity { id: string; cls: string; cx: number; cy: number; depth: number; conf: number; label: string }
 export interface SpatialScene { cam: string; sid: string; w: number; h: number; fov: number; image: string; depth: string; entities: SpatialEntity[]; ts: number; bg_image?: string; bg_depth?: string }
-export interface SpatialFull { mode: 'points'; cam: string; sid: string; fov: number; count: number; points: string; colors: string; ts: number }
+export interface SpatialFull { mode: 'points'; method?: 'multiview' | 'monocular'; cam: string; sid: string; fov: number; count: number; points: string; colors: string; ts: number }
 export interface SuggestRule { name: string; event_type: string; source_id: number; severity: string }
 export interface Suggestion { kind: 'alert' | 'camera'; cam: string; title: string; why: string; count?: number; rule?: SuggestRule }
 

@@ -283,6 +283,15 @@ spatial:
   # the model downloads lazily on first use. Below the VRAM floor the operator is warned instead.
   inpaint_model: stable-diffusion-v1-5/stable-diffusion-inpainting
   full_size: 512          # working resolution for the generative reconstruction (quality vs time)
+  # PRIMARY full-3D path: MULTI-VIEW STEREO via DUSt3R. A moving camera gives parallax across a
+  # short burst of frames; DUSt3R regresses + fuses them into a real metric point cloud (true
+  # geometry, no hallucination). Pure PyTorch, no CUDA build; ViT-Large weights (~2 GB) download
+  # lazily. Needs the clone at third_party/dust3r (scripts/setup_dust3r). Falls back to the
+  # monocular generative path above for static scenes or when unavailable.
+  multiview: true
+  mv_views: 4             # frames to capture for the burst (more = wider baseline, more VRAM/time)
+  mv_gap_s: 0.35          # seconds between burst frames (sets the parallax baseline)
+  mv_niter: 300           # global-alignment optimisation steps (quality vs time)
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT
