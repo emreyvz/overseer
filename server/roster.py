@@ -42,6 +42,7 @@ class SessionRoster:
         self._dedup = float(dedup_threshold)
         self._entries: dict[str, dict] = {}
         self._counter: dict[str, int] = {"person": 0, "vehicle": 0}
+        self._merge_rejected: set[frozenset] = set()   # pairs an operator said are NOT the same
         self._lock = threading.Lock()
 
     def _url(self, p: Path) -> str | None:
@@ -209,6 +210,68 @@ class SessionRoster:
             return None
         img = cv2.imread(str(path), cv2.IMREAD_COLOR)
         return (img, cls) if img is not None else None
+
+    def merge_candidates(self, low: float = 0.62, limit: int = 40) -> list[dict]:
+        """Likely-duplicate pairs for the merge center: same-class entries whose appearance
+        embeddings are similar (cosine >= low, i.e. below the auto-merge threshold so they were
+        NOT already folded), or that share a plate. Rejected pairs are excluded."""
+        with self._lock:
+            items = [(eid, e) for eid, e in self._entries.items()
+                     if e["snapshot"] and e.get("embedding") is not None]
+            out: list[dict] = []
+            for i in range(len(items)):
+                ai, ae = items[i]
+                for j in range(i + 1, len(items)):
+                    bi, be = items[j]
+                    if ae["cls"] != be["cls"] or frozenset((ai, bi)) in self._merge_rejected:
+                        continue
+                    plate = bool(ae["cls"] == "vehicle" and ae["plate"] and ae["plate"] == be["plate"])
+                    sim = _cosine(ae["embedding"], be["embedding"])
+                    if plate or sim >= low:
+                        out.append({"a": self._public(ae), "b": self._public(be),
+                                    "similarity": 1.0 if plate else round(float(sim), 3),
+                                    "reason": "plate" if plate else "appearance"})
+            out.sort(key=lambda x: -x["similarity"])
+            return out[:limit]
+
+    def reject_merge(self, a: str, b: str) -> None:
+        """Remember that two subjects are NOT the same, so they're never suggested again."""
+        with self._lock:
+            self._merge_rejected.add(frozenset((a, b)))
+
+    def merge(self, keep_id: str, drop_id: str) -> dict | None:
+        """Fold drop_id into keep_id as one canonical identity: union the movement trails, sum
+        the sightings, keep the best photo/embedding, and carry over plate/clip/watched."""
+        with self._lock:
+            if keep_id == drop_id:
+                return None
+            keep = self._entries.get(keep_id)
+            drop = self._entries.get(drop_id)
+            if keep is None or drop is None:
+                return None
+            if drop["first_ts"] < keep["first_ts"]:
+                keep["first_cam"] = drop.get("first_cam")
+            keep["first_ts"] = min(keep["first_ts"], drop["first_ts"])
+            keep["last_ts"] = max(keep["last_ts"], drop["last_ts"])
+            keep["obs"] += drop["obs"]
+            for cam, seg in drop["trail"].items():
+                k = keep["trail"].get(cam)
+                if k is None:
+                    keep["trail"][cam] = seg
+                else:
+                    k["first"] = min(k["first"], seg["first"])
+                    k["last"] = max(k["last"], seg["last"])
+                    k["count"] += seg["count"]
+                    k["clip"] = k.get("clip") or seg.get("clip")
+            if drop["best_area"] > keep["best_area"]:   # keep the sharper representative photo
+                for f in ("snapshot", "snapshot_path", "best_area", "embedding"):
+                    keep[f] = drop[f]
+            keep["plate"] = keep["plate"] or drop["plate"]
+            keep["clip"] = keep.get("clip") or drop.get("clip")
+            keep["watched"] = bool(keep.get("watched") or drop.get("watched"))
+            keep["attrs"] = {**drop["attrs"], **keep["attrs"]}
+            del self._entries[drop_id]
+            return self._public(keep)
 
     def cutout_png(self, det_id: str) -> bytes | None:
         """The entry's photo with its background removed (YOLO-seg) as a transparent PNG;

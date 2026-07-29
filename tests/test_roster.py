@@ -178,3 +178,32 @@ def test_harvester_dedups_across_scans(tmp_path: Path) -> None:
     h._scan(_Src("cam-A"))
     h._scan(_Src("cam-A"))
     assert len(r.list()) == 1                    # same embedding -> one identity
+
+
+def _empair(cos: float):
+    a = np.zeros(16, np.float32); a[0] = 1.0
+    b = np.zeros(16, np.float32); b[0] = cos; b[1] = float((1 - cos * cos) ** 0.5)
+    return a, b
+
+
+def test_merge_candidates_and_merge(tmp_path: Path) -> None:
+    r = _roster(tmp_path)
+    e1, e2 = _empair(0.70)                              # below the 0.82 auto-merge threshold
+    id1 = r.observe_reid("person", _crop(), e1, now=0.0, cam="Gate")
+    id2 = r.observe_reid("person", _crop(), e2, now=5.0, cam="Lobby")
+    assert id1 != id2                                   # two separate entries (a duplicate)
+    cands = r.merge_candidates(low=0.62)
+    assert any({c["a"]["id"], c["b"]["id"]} == {id1, id2} for c in cands)
+    merged = r.merge(id1, id2)                          # fold the duplicate in
+    assert merged["obs"] == 2 and {t["cam"] for t in merged["trail"]} == {"Gate", "Lobby"}
+    assert r.get(id2) is None and len(r.list()) == 1
+
+
+def test_merge_reject_hides_pair(tmp_path: Path) -> None:
+    r = _roster(tmp_path)
+    e1, e2 = _empair(0.70)
+    id1 = r.observe_reid("person", _crop(), e1, now=0.0, cam="Gate")
+    id2 = r.observe_reid("person", _crop(), e2, now=1.0, cam="Gate")
+    assert r.merge_candidates(low=0.62)
+    r.reject_merge(id1, id2)
+    assert r.merge_candidates(low=0.62) == []

@@ -75,6 +75,7 @@ export const watchlistOpen = writable(false)                 // watchlist browse
 export const aiOpen = writable(false)                        // AI assistant console
 export const investigateCase = writable<number | null>(null) // open case id in the investigation workspace
 export const graphOpen = writable(false)                     // social / relationship graph screen
+export const mergeOpen = writable(false)                     // identity merge center
 export const dossierOpen = writable(false)  // stationary editor panel for the selected tracklet
 
 // Switching cameras clears the previous camera's transient panels (selection,
