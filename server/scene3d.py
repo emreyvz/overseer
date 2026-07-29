@@ -164,7 +164,12 @@ class Scene3D:
             dist = float(np.linalg.norm(centroid))
             # novel views: orbit around the centroid (view-0 is yaw=0)
             poses = [(-22, 5), (22, 5), (-12, -9), (12, -9), (0, 15), (0, -13),
-                     (-34, 3), (34, 3), (-9, 20), (9, 20), (-30, -8), (30, -8)][:max_views]
+                     (-34, 3), (34, 3), (-9, 20), (9, 20), (-30, -8), (30, -8),
+                     # extra passes to reach concave/under-structure pockets the base
+                     # orbit skims over: the display pose itself, wide sides, and
+                     # steep dive/worm angles that look *into* shaded recesses
+                     (16, 6), (-42, 9), (42, 9), (-22, -15), (22, -15),
+                     (-15, 24), (0, -22)][:max_views]
             for k, (yaw_d, pitch_d) in enumerate(poses):
                 if progress:
                     progress(f"completing view {k + 1}/{len(poses)}", 0.2 + 0.7 * k / len(poses))
