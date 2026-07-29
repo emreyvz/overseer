@@ -277,6 +277,8 @@ spatial:
   complete: true          # geometric scene completion: reconstruct the occluded background behind
                           # foreground objects (inpainted depth+texture) as a second mesh layer,
                           # so disocclusion holes are filled with real surface, not black voids
+  texture_width: 960      # a crisp copy of the frame is sent alongside the coarse mesh and
+                          # UV-mapped onto it — full-detail texture without a heavy mesh
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT

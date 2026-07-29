@@ -51,6 +51,7 @@
   let mesh: THREE.Mesh | null = null           // foreground: the directly-observed surface
   let bgMesh: THREE.Mesh | null = null         // completed background reconstructed behind objects
   let markers: THREE.Group | null = null
+  let fgTex: THREE.Texture | null = null       // full-res texture map for the foreground mesh
   let raf = 0
   let ro: ResizeObserver | null = null
   let autoTimer: ReturnType<typeof setInterval> | null = null
@@ -207,11 +208,21 @@
     const gy = fitGround(fg.disp, w, h, fx, cx, cy)
     const deb = (Z: number) => gy ? gy[0] + gy[1] * Z + gy[2] * Z * Z : 0
 
+    // full-res texture: a crisp copy of the frame UV-mapped onto the (coarse) mesh
+    if (fgTex) { fgTex.dispose(); fgTex = null }
+    if (d.tex_image) {
+      const timg = new Image(); timg.src = 'data:image/jpeg;base64,' + d.tex_image
+      try { await timg.decode() } catch { /* fall back to vertex colour */ }
+      fgTex = new THREE.Texture(timg); fgTex.colorSpace = THREE.SRGBColorSpace
+      fgTex.minFilter = THREE.LinearMipmapLinearFilter; fgTex.magFilter = THREE.LinearFilter
+      fgTex.anisotropy = renderer?.capabilities.getMaxAnisotropy() ?? 1; fgTex.needsUpdate = true
+    }
+
     // foreground as a SOLID: each object is extruded back to the reconstructed background and its
     // silhouette stitched, so it's an opaque, textured VOLUME — not a see-through shell.
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     mesh = layerMesh(fg.disp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0,
-      { solid: true, bgdisp: bg ? bg.disp : null, maxT: 0.5, flattenCoef: gy })
+      { solid: true, bgdisp: bg ? bg.disp : null, maxT: 0.5, flattenCoef: gy, tex: fgTex })
     scene.add(mesh)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
@@ -269,10 +280,10 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
     const maxT = opt.maxT ?? 0.35, minT = 0.03
-    const pos: number[] = [], col: number[] = []
+    const pos: number[] = [], col: number[] = [], uv: number[] = []
     const vidx = new Int32Array(w * h).fill(-1)
     const vz: number[] = [], vpix: number[] = []
     let vn = 0
@@ -285,6 +296,7 @@
         pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -(Z + zbias)); vz.push(Z); vpix.push(i)
         const p = i * 4
         col.push(rgba[p] / 255, rgba[p + 1] / 255, rgba[p + 2] / 255)
+        uv.push(x / (w - 1), 1 - y / (h - 1))     // UV into the full-res texture (flipY default)
       }
     }
     const nF = vn
@@ -315,6 +327,7 @@
         const T = bgdisp ? Math.max(minT, Math.min(maxT, zOf(bgdisp[vpix[j]]) - vz[j])) : Math.min(maxT, minT + 0.12)
         pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T)
         col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82)
+        uv.push(uv[j * 2], uv[j * 2 + 1])           // back vertices reuse the front UV
       }
       const nFrontIdx = idx.length     // back shell (reversed winding)
       for (let t = 0; t < nFrontIdx; t += 3) idx.push(idx[t] + nF, idx[t + 2] + nF, idx[t + 1] + nF)
@@ -327,8 +340,13 @@
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
     geo.setIndex(idx)
-    return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))
+    // full-res texture map when provided (crisp, mesh-independent); else per-vertex colour.
+    const mat = opt.tex
+      ? new THREE.MeshBasicMaterial({ map: opt.tex, side: THREE.DoubleSide })
+      : new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
+    return new THREE.Mesh(geo, mat)
   }
 
   function makeMarker(text: string, color: string): THREE.Sprite {
@@ -383,6 +401,7 @@
     if (mesh) { mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     if (bgMesh) { bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose() }
     if (markers) disposeGroup(markers)
+    fgTex?.dispose()
     renderer?.dispose()
     if (renderer?.domElement && host?.contains(renderer.domElement)) host.removeChild(renderer.domElement)
   })

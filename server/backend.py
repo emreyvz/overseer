@@ -1336,6 +1336,14 @@ class Backend:
         scene = spatial.encode_scene(
             rgb_grid, disp01, entities, fov=float(self.config.get("spatial.fov_deg", 60.0)),
             cam=src.name, sid=str(sid), ts=time.time() * 1000.0, bg_rgb=bg_rgb, bg_disp01=bg_disp)
+        # High-res texture: a crisper copy of the SAME framed frame (same crop/aspect as the grid),
+        # so the browser can UV-map it onto the coarse depth mesh — full-detail texture, light mesh.
+        import base64 as _b64
+        tw = min(w0, int(self.config.get("spatial.texture_width", 960)))
+        texframe = frame if w0 <= tw else cv2.resize(frame, (tw, int(tw * h0 / w0)), interpolation=cv2.INTER_AREA)
+        ok_t, texjpg = cv2.imencode(".jpg", texframe, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        if ok_t:
+            scene["tex_image"] = _b64.b64encode(texjpg.tobytes()).decode("ascii")
         return {"scene": scene}
 
     def _spatial_entities(self, frame: Any, disp: Any, dmin: float,
