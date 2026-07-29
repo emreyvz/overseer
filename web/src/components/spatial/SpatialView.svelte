@@ -6,7 +6,7 @@
   // distances, layering, who stands where. Drag to orbit, scroll to zoom.
   import * as THREE from 'three'
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-  import { onDestroy, onMount } from 'svelte'
+  import { onDestroy, onMount, tick } from 'svelte'
   import { api } from '../../lib/api'
   import { sfx } from '../../lib/audio'
 
@@ -17,6 +17,14 @@
   let unavailable = $state(false)
   let reason = $state('')
   let camName = $state('')
+  // staged reconstruction so the user watches the process, not a spinner:
+  //   capture (grab frame) -> depth (scan-sweep the depth field over the frame) -> lift (to 3D)
+  let phase = $state<'' | 'capture' | 'depth' | 'lift'>('')
+  let previewCv = $state<HTMLCanvasElement | null>(null)
+  const PHASE_LABEL: Record<string, string> = {
+    capture: 'ACQUIRING FRAME', depth: 'ESTIMATING DEPTH FIELD', lift: 'LIFTING TO 3D',
+  }
+  const PHASE_STEP: Record<string, number> = { capture: 1, depth: 2, lift: 3 }
 
   const REASON_TEXT: Record<string, string> = {
     no_frame: "No live frame on this camera yet. Open it in the live view, then try again.",
@@ -30,7 +38,7 @@
 
   // Back-projection / depth-to-Z tuning (settled by visual iteration across cameras).
   const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6
-  const EDGE = 0.055          // cull flying pixels at strong depth discontinuities
+  const MESH_MAXLEN = 0.13    // cull mesh triangles whose 3D edge is longer than this (kills skirts)
   const SKYCULL = 0.03        // drop the most-distant (sky / flat far background) points
   const CLS_COLOR: Record<string, string> = {
     person: '#35e0ff', vehicle: '#ffb038', animal: '#6be675', object: '#c9d4dc', weapon: '#ff3b3b',
@@ -40,7 +48,10 @@
   let scene: THREE.Scene | null = null
   let camera: THREE.PerspectiveCamera | null = null
   let controls: OrbitControls | null = null
-  let cloud: THREE.Points | null = null
+  let mesh: THREE.Mesh | null = null
+  let backdrop: THREE.Mesh | null = null      // content-based fill behind the surface (billboarded)
+  let sceneCenter = new THREE.Vector3()
+  let backdropDist = 6
   let markers: THREE.Group | null = null
   let raf = 0
   let ro: ResizeObserver | null = null
@@ -62,9 +73,15 @@
     controls.dampingFactor = 0.08
     controls.rotateSpeed = 0.7
     controls.zoomSpeed = 0.9
+    const _dir = new THREE.Vector3()
     const loop = () => {
       raf = requestAnimationFrame(loop)
       controls?.update()
+      if (backdrop && camera) {   // keep the backdrop behind the scene, facing the camera
+        camera.getWorldDirection(_dir)
+        backdrop.position.copy(sceneCenter).addScaledVector(_dir, backdropDist)
+        backdrop.quaternion.copy(camera.quaternion)
+      }
       if (renderer && scene && camera) renderer.render(scene, camera)
     }
     loop()
@@ -78,18 +95,69 @@
     ro.observe(host)
   }
 
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
   async function loadScene(refresh = false) {
     if (refresh) sfx('sonar')
-    loading = true; unavailable = false; reason = ''
+    loading = true; unavailable = false; reason = ''; phase = 'capture'
     let res: Awaited<ReturnType<typeof api.spatial>> | null = null
     try { res = await api.spatial(cam, 320) } catch { res = null }
     if (!res || !res.scene) {
       reason = REASON_TEXT[res?.reason ?? ''] ?? 'The spatial view is unavailable right now.'
-      loading = false; unavailable = true; return
+      loading = false; unavailable = true; phase = ''; return
     }
     camName = res.scene.cam
-    try { await buildCloud(res.scene) } catch { unavailable = true }
-    loading = false
+    try {
+      await revealDepth(res.scene)      // show the frame, then sweep the depth field over it
+      phase = 'lift'
+      await buildCloud(res.scene)       // build the 3D behind the veil
+      await wait(520)                   // let it settle, then the veil fades to reveal it
+    } catch { unavailable = true }
+    loading = false; phase = ''
+  }
+
+  // Inferno-ish ramp: near (1) = warm/bright, far (0) = dark violet — reads as a depth field.
+  function depthColor(t: number): [number, number, number] {
+    const stops: [number, number[]][] = [
+      [0.0, [10, 6, 30]], [0.35, [90, 20, 90]], [0.6, [200, 60, 60]],
+      [0.8, [240, 130, 30]], [1.0, [252, 230, 140]]]
+    let a = stops[0], b = stops[stops.length - 1]
+    for (let i = 0; i < stops.length - 1; i++) if (t >= stops[i][0] && t <= stops[i + 1][0]) { a = stops[i]; b = stops[i + 1]; break }
+    const f = (t - a[0]) / (b[0] - a[0] + 1e-6)
+    return [a[1][0] + (b[1][0] - a[1][0]) * f, a[1][1] + (b[1][1] - a[1][1]) * f, a[1][2] + (b[1][2] - a[1][2]) * f]
+  }
+
+  // Draw the captured frame, then run a scan line down it that leaves the depth field behind —
+  // the operator literally watches depth being estimated. Resolves when the sweep completes.
+  async function revealDepth(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>) {
+    const { w, h, image, depth } = d
+    const bytes = Uint8Array.from(atob(depth), (c) => c.charCodeAt(0))
+    const disp = new Float32Array(bytes.buffer)
+    const img = new Image(); img.src = 'data:image/jpeg;base64,' + image; await img.decode()
+    phase = 'depth'
+    await tick()
+    const cv = previewCv
+    if (!cv) return
+    cv.width = w; cv.height = h
+    const g = cv.getContext('2d')!
+    // pre-render the depth colormap into an offscreen image
+    const dImg = g.createImageData(w, h)
+    for (let i = 0; i < w * h; i++) { const [r, gg, b] = depthColor(disp[i]); const p = i * 4; dImg.data[p] = r; dImg.data[p + 1] = gg; dImg.data[p + 2] = b; dImg.data[p + 3] = 255 }
+    const dCanvas = document.createElement('canvas'); dCanvas.width = w; dCanvas.height = h
+    dCanvas.getContext('2d')!.putImageData(dImg, 0, 0)
+    const DUR = 900, t0 = performance.now()
+    await new Promise<void>((resolve) => {
+      const frame = () => {
+        const p = Math.min(1, (performance.now() - t0) / DUR)
+        g.clearRect(0, 0, w, h)
+        g.drawImage(img, 0, 0, w, h)                 // the raw frame
+        const yline = Math.round(p * h)
+        g.drawImage(dCanvas, 0, 0, w, yline, 0, 0, w, yline)  // depth revealed above the line
+        g.fillStyle = 'rgba(120,224,255,0.9)'; g.fillRect(0, yline - 1, w, 2)  // scan line
+        if (p < 1) requestAnimationFrame(frame); else resolve()
+      }
+      frame()
+    })
   }
 
   function zOf(disp01: number) {
@@ -113,30 +181,68 @@
 
     const fx = 0.5 * w / Math.tan((fov * Math.PI) / 180 / 2)
     const cx = w / 2, cy = h / 2
+    // Back-project every non-sky pixel into a vertex, then stitch neighbours into a triangle
+    // mesh — a continuous 3D surface, so the gaps between points are FILLED and the scene reads
+    // as solid geometry rather than a sparse dot cloud. Triangles that would span a large depth
+    // discontinuity (a foreground silhouette) are dropped so objects don't smear into the
+    // background; smaller gaps are bridged, completing the parts we can't literally see.
     const pos: number[] = [], col: number[] = []
+    const vidx = new Int32Array(w * h).fill(-1)
+    let vn = 0
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = y * w + x
         if (disp[i] < SKYCULL) continue          // sky / far flat background
-        if (x > 0 && x < w - 1 && y > 0 && y < h - 1) {
-          const gx = Math.abs(disp[i + 1] - disp[i - 1])
-          const gy = Math.abs(disp[i + w] - disp[i - w])
-          if (gx > EDGE || gy > EDGE) continue   // edge-aware cull
-        }
+        vidx[i] = vn++
         const Z = zOf(disp[i])
         pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -Z)
         const p = i * 4
         col.push(rgba[p] / 255, rgba[p + 1] / 255, rgba[p + 2] / 255)
       }
     }
-    // (re)build the cloud
-    if (cloud) { scene.remove(cloud); cloud.geometry.dispose(); (cloud.material as THREE.Material).dispose() }
+    const idx: number[] = []
+    const el = (va: number, vb: number) =>
+      Math.hypot(pos[va * 3] - pos[vb * 3], pos[va * 3 + 1] - pos[vb * 3 + 1], pos[va * 3 + 2] - pos[vb * 3 + 2])
+    const tri = (a: number, b: number, c: number) => {
+      const va = vidx[a], vb = vidx[b], vc = vidx[c]
+      if (va < 0 || vb < 0 || vc < 0) return
+      // cull triangles with a long 3D edge — those are the stretched "skirts" a soft depth edge
+      // would drape from a foreground silhouette down to the far background.
+      if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > MESH_MAXLEN) return
+      idx.push(va, vb, vc)
+    }
+    for (let y = 0; y < h - 1; y++) {
+      for (let x = 0; x < w - 1; x++) {
+        const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1
+        tri(tl, bl, tr); tri(tr, bl, br)
+      }
+    }
+    // (re)build the surface
+    if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
-    const mat = new THREE.PointsMaterial({ size: 0.035, vertexColors: true, sizeAttenuation: true })
-    cloud = new THREE.Points(geo, mat)
-    scene.add(cloud)
+    geo.setIndex(idx)
+    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
+    mesh = new THREE.Mesh(geo, mat)
+    scene.add(mesh)
+
+    // content-based backdrop: a dimmed, blurred, vignetted copy of the frame, billboarded behind
+    // the surface so disocclusion holes reveal soft scene-coloured atmosphere instead of black.
+    if (backdrop) { scene.remove(backdrop); backdrop.geometry.dispose(); const bm = backdrop.material as THREE.MeshBasicMaterial; bm.map?.dispose(); bm.dispose() }
+    const bcv = document.createElement('canvas'); bcv.width = w; bcv.height = h
+    const bx = bcv.getContext('2d')!
+    bx.filter = 'blur(7px) brightness(0.34)'; bx.drawImage(img, 0, 0, w, h)
+    bx.filter = 'none'; bx.globalCompositeOperation = 'destination-in'
+    const vg = bx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.18, w / 2, h / 2, Math.max(w, h) * 0.62)
+    vg.addColorStop(0, 'rgba(0,0,0,1)'); vg.addColorStop(1, 'rgba(0,0,0,0)')
+    bx.fillStyle = vg; bx.fillRect(0, 0, w, h)
+    const btex = new THREE.CanvasTexture(bcv); btex.minFilter = THREE.LinearFilter
+    backdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ map: btex, transparent: true, fog: false, depthWrite: false }))
+    backdrop.scale.set((w / h) * 20, 20, 1)
+    backdrop.renderOrder = -1
+    scene.add(backdrop)
 
     // entity markers
     if (markers) { scene.remove(markers); disposeGroup(markers) }
@@ -155,6 +261,7 @@
     // fit-to-bounds framing, offset a touch off-axis so the 3D structure reads immediately
     const box = new THREE.Box3().setFromBufferAttribute(geo.getAttribute('position') as THREE.BufferAttribute)
     const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
+    sceneCenter = c.clone(); backdropDist = Math.max(size.x, size.y, size.z) * 2.2
     const vfov = camera!.fov * Math.PI / 180
     const fitH = (size.y / 2) / Math.tan(vfov / 2)
     const fitW = (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect
@@ -217,7 +324,8 @@
     if (raf) cancelAnimationFrame(raf)
     ro?.disconnect()
     controls?.dispose()
-    if (cloud) { cloud.geometry.dispose(); (cloud.material as THREE.Material).dispose() }
+    if (mesh) { mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
+    if (backdrop) { backdrop.geometry.dispose(); const bm = backdrop.material as THREE.MeshBasicMaterial; bm.map?.dispose(); bm.dispose() }
     if (markers) disposeGroup(markers)
     renderer?.dispose()
     if (renderer?.domElement && host?.contains(renderer.domElement)) host.removeChild(renderer.domElement)
@@ -239,7 +347,22 @@
   <div class="stage" bind:this={host}></div>
 
   {#if loading}
-    <div class="veil caps"><span class="pulse">RECONSTRUCTING DEPTH FIELD_</span></div>
+    <div class="veil caps" class:lifting={phase === 'lift'}>
+      <div class="reco">
+        <div class="preview" class:show={phase !== ''}>
+          <canvas bind:this={previewCv}></canvas>
+          {#if phase === 'capture'}<div class="scanbox"><span class="scanline"></span></div>{/if}
+        </div>
+        <div class="steps caps">
+          {#each ['capture', 'depth', 'lift'] as p}
+            <span class="step" class:on={phase === p} class:done={PHASE_STEP[phase] > PHASE_STEP[p]}>
+              <span class="dot"></span>{PHASE_LABEL[p]}
+            </span>
+          {/each}
+        </div>
+        <div class="pl caps"><span class="pulse">{PHASE_LABEL[phase] || 'RECONSTRUCTING'}_</span></div>
+      </div>
+    </div>
   {:else if unavailable}
     <div class="veil caps">
       <div class="uahead">SPATIAL VIEW UNAVAILABLE</div>
@@ -265,8 +388,26 @@
   .x:hover { border-color: var(--scarlet); color: var(--scarlet); }
   .stage { position: absolute; inset: 49px 0 0 0; }
   .veil { position: absolute; inset: 49px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 12px; color: var(--ink-dim); letter-spacing: 0.18em; background: rgba(4,6,10,0.35); }
+    gap: 12px; color: var(--ink-dim); letter-spacing: 0.18em; background: rgba(4,6,10,0.6); }
+  .veil.lifting { animation: veilout 520ms ease forwards; }
+  @keyframes veilout { to { opacity: 0; } }
   .pulse { animation: pulse 1.2s ease-in-out infinite; } @keyframes pulse { 50% { opacity: 0.4; } }
+  /* staged reconstruction loader */
+  .reco { display: flex; flex-direction: column; align-items: center; gap: 16px; width: min(52vw, 560px); }
+  .preview { position: relative; width: 62%; aspect-ratio: 16/9; border: 1px solid var(--hairline); background: #04070a;
+    overflow: hidden; opacity: 0; transform: scale(0.96); transition: opacity 300ms, transform 300ms; box-shadow: 0 0 40px rgba(0,0,0,0.6); }
+  .preview.show { opacity: 1; transform: scale(1); }
+  .preview canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scanbox { position: absolute; inset: 0; }
+  .scanbox .scanline { position: absolute; left: 0; right: 0; height: 2px; background: var(--cyan); box-shadow: 0 0 12px var(--cyan);
+    animation: sweep 1.1s ease-in-out infinite; }
+  @keyframes sweep { 0% { top: 4%; } 50% { top: 92%; } 100% { top: 4%; } }
+  .steps { display: flex; gap: 18px; }
+  .step { display: flex; align-items: center; gap: 6px; font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.14em; }
+  .step .dot { width: 6px; height: 6px; border: 1px solid var(--ink-ghost); border-radius: 50%; }
+  .step.on { color: var(--cyan); } .step.on .dot { border-color: var(--cyan); background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .step.done { color: var(--ink-dim); } .step.done .dot { border-color: var(--ink-dim); background: var(--ink-dim); box-shadow: none; }
+  .pl { font-size: 10px; color: var(--cyan); letter-spacing: 0.2em; }
   .uahead { color: var(--scarlet); font-size: 12px; letter-spacing: 0.2em; }
   .uasub { color: var(--ink-dim); font-size: 9px; letter-spacing: 0.06em; text-transform: none; }
   .hint { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: var(--ink-ghost);
