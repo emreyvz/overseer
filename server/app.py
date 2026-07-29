@@ -525,6 +525,15 @@ async def api_spatial(sid: str, grid: int = 320) -> Any:
     return await asyncio.to_thread(backend.spatial_scene, sid, grid)
 
 
+@app.get("/api/spatial3d/{sid}")
+async def api_spatial3d(sid: str) -> Any:
+    """Full generative 3D reconstruction of a camera's scene (heavy). Always 200 with
+    {"scene": {...}} or {"scene": null, "reason": ...} (incl. insufficient_vram + have/need)."""
+    if backend is None:
+        return {"scene": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.spatial_scene_full, sid)
+
+
 @app.get("/api/suggestions")
 async def api_suggestions() -> Any:
     """Proactive smart suggestions — alert rules to add and camera improvements."""

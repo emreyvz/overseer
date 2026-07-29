@@ -277,6 +277,12 @@ spatial:
   complete: true          # geometric scene completion: reconstruct the occluded background behind
                           # foreground objects (inpainted depth+texture) as a second mesh layer,
                           # so disocclusion holes are filled with real surface, not black voids
+  # FULL generative 3D (Feature 4 PRO): back-project the frame, then render novel views and let a
+  # diffusion inpainter hallucinate the occluded surroundings + object sides, fusing them in — a
+  # complete, watertight point-cloud scene from one frame. Heavy: needs a capable GPU (>= 6 GB);
+  # the model downloads lazily on first use. Below the VRAM floor the operator is warned instead.
+  inpaint_model: stable-diffusion-v1-5/stable-diffusion-inpainting
+  full_size: 512          # working resolution for the generative reconstruction (quality vs time)
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT

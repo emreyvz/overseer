@@ -154,6 +154,7 @@ class Backend:
         self._depth = DepthEstimator(
             model_name=str(self.config.get("spatial.model",
                                            "depth-anything/Depth-Anything-V2-Small-hf")))
+        self._scene3d = None   # generative full-3D reconstruction (lazy, heavy — VRAM-gated)
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -1337,6 +1338,43 @@ class Backend:
             rgb_grid, disp01, entities, fov=float(self.config.get("spatial.fov_deg", 60.0)),
             cam=src.name, sid=str(sid), ts=time.time() * 1000.0, bg_rgb=bg_rgb, bg_disp01=bg_disp)
         return {"scene": scene}
+
+    def spatial_scene_full(self, sid: str) -> dict:
+        """Feature 4 (PRO) — a full GENERATIVE 3D reconstruction of the camera scene: the frame is
+        back-projected, then novel views are rendered and their disocclusion holes are inpainted
+        by a diffusion model and fused back, so the whole scene (behind objects, off-frame) is
+        completed as a watertight point cloud. Heavy (~15 s, needs a capable GPU). VRAM-gated: if
+        the GPU is too small the operator is told, rather than OOM'ing. Returns the usual
+        {"scene": ...} / {"scene": None, "reason": ...} contract."""
+        import base64
+        from . import scene3d as _s3
+        if not self.config.get("spatial.enabled", True):
+            return {"scene": None, "reason": "disabled"}
+        have = _s3.vram_gb()
+        if have < _s3.MIN_VRAM_GB:
+            return {"scene": None, "reason": "insufficient_vram",
+                    "have_gb": round(have, 1), "need_gb": _s3.MIN_VRAM_GB}
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"scene": None, "reason": "no_source"}
+        frame = self._source_frame(src)
+        if frame is None:
+            return {"scene": None, "reason": "no_frame"}
+        if self._scene3d is None:
+            self._scene3d = _s3.Scene3D(
+                self._depth, fov_deg=float(self.config.get("spatial.fov_deg", 60.0)),
+                model=str(self.config.get("spatial.inpaint_model",
+                                          "stable-diffusion-v1-5/stable-diffusion-inpainting")))
+        out = self._scene3d.reconstruct(frame, size=int(self.config.get("spatial.full_size", 512)))
+        if out is None:
+            return {"scene": None, "reason": "depth_unavailable"}
+        pts = np.ascontiguousarray(out["points"], np.float32)
+        cols = np.ascontiguousarray(out["colors"], np.uint8)
+        return {"scene": {
+            "mode": "points", "cam": src.name, "sid": str(sid), "fov": float(out["fov"]),
+            "count": int(len(pts)), "points": base64.b64encode(pts.tobytes()).decode("ascii"),
+            "colors": base64.b64encode(cols.tobytes()).decode("ascii"), "ts": time.time() * 1000.0,
+        }}
 
     def _spatial_entities(self, frame: Any, disp: Any, dmin: float,
                           dmax: float) -> tuple[list[dict], list[tuple[float, float, float, float]]]:

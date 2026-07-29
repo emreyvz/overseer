@@ -17,6 +17,7 @@
   let unavailable = $state(false)
   let reason = $state('')
   let camName = $state('')
+  let full = $state(false)   // FULL generative 3D (heavy) vs fast depth-mesh
   // staged reconstruction so the user watches the process, not a spinner:
   //   capture (grab frame) -> depth (scan-sweep the depth field over the frame) -> lift (to 3D)
   let phase = $state<'' | 'capture' | 'depth' | 'lift'>('')
@@ -50,6 +51,7 @@
   let controls: OrbitControls | null = null
   let mesh: THREE.Mesh | null = null           // foreground: the directly-observed surface
   let bgMesh: THREE.Mesh | null = null         // completed background reconstructed behind objects
+  let pointsObj: THREE.Points | null = null    // FULL generative 3D reconstruction (point cloud)
   let markers: THREE.Group | null = null
   let raf = 0
   let ro: ResizeObserver | null = null
@@ -91,6 +93,7 @@
 
   async function loadScene(refresh = false) {
     if (refresh) sfx('sonar')
+    if (full) { await loadFull(); return }
     loading = true; unavailable = false; reason = ''; phase = 'capture'
     let res: Awaited<ReturnType<typeof api.spatial>> | null = null
     try { res = await api.spatial(cam, 320) } catch { res = null }
@@ -106,6 +109,59 @@
       await wait(520)                   // let it settle, then the veil fades to reveal it
     } catch { unavailable = true }
     loading = false; phase = ''
+  }
+
+  // FULL generative reconstruction: one long request (~15 s) that returns a completed point
+  // cloud. No frame-sweep — just a "reconstructing" state, then the cloud rises in.
+  async function loadFull() {
+    loading = true; unavailable = false; reason = ''; phase = 'capture'
+    let res: Awaited<ReturnType<typeof api.spatial3d>> | null = null
+    try { res = await api.spatial3d(cam) } catch { res = null }
+    if (!res || !res.scene) {
+      if (res?.reason === 'insufficient_vram') {
+        reason = `Full 3D needs a more capable GPU — about ${res.need_gb} GB of VRAM, but only ${res.have_gb} GB is available. Use the fast depth-mesh mode instead.`
+      } else {
+        reason = REASON_TEXT[res?.reason ?? ''] ?? 'Full 3D reconstruction is unavailable right now.'
+      }
+      loading = false; unavailable = true; phase = ''; return
+    }
+    camName = res.scene.cam
+    try { phase = 'lift'; buildPointCloud(res.scene); await wait(500) } catch { unavailable = true }
+    loading = false; phase = ''
+  }
+
+  function clearScene() {
+    if (mesh) { scene?.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose(); mesh = null }
+    if (bgMesh) { scene?.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
+    if (pointsObj) { scene?.remove(pointsObj); pointsObj.geometry.dispose(); (pointsObj.material as THREE.Material).dispose(); pointsObj = null }
+  }
+
+  function buildPointCloud(d: NonNullable<Awaited<ReturnType<typeof api.spatial3d>>['scene']>) {
+    if (!scene) return
+    const pb = Uint8Array.from(atob(d.points), (c) => c.charCodeAt(0))
+    const pos = new Float32Array(pb.buffer)                     // N*3 xyz
+    const cb = Uint8Array.from(atob(d.colors), (c) => c.charCodeAt(0))  // N*3 rgb
+    const col = new Float32Array(cb.length)
+    for (let i = 0; i < cb.length; i++) col[i] = cb[i] / 255
+    clearScene()
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+    geo.computeBoundingBox()
+    const bb = geo.boundingBox!
+    const size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3())
+    const diag = Math.max(size.length(), 1)
+    const mat = new THREE.PointsMaterial({ size: diag * 0.009, vertexColors: true, sizeAttenuation: true })
+    pointsObj = new THREE.Points(geo, mat)
+    scene.add(pointsObj)
+    entityCount = 0
+    // frame it (offset off-axis)
+    const vfov = camera!.fov * Math.PI / 180
+    const dist = Math.max((size.y / 2) / Math.tan(vfov / 2), (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect) * 1.15
+    const yaw = 16 * Math.PI / 180, pitch = 6 * Math.PI / 180
+    if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.2; controls.maxDistance = dist * 5 }
+    camera!.position.set(c.x + dist * Math.sin(yaw) * Math.cos(pitch), c.y - dist * Math.sin(pitch), c.z + dist * Math.cos(yaw) * Math.cos(pitch))
+    camera!.updateProjectionMatrix()
   }
 
   // Inferno-ish ramp: near (1) = warm/bright, far (0) = dark violet — reads as a depth field.
@@ -158,6 +214,7 @@
 
   async function buildCloud(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>) {
     if (!scene) return
+    if (pointsObj) { scene.remove(pointsObj); pointsObj.geometry.dispose(); (pointsObj.material as THREE.Material).dispose(); pointsObj = null }
     const { w, h, fov, image, depth, entities, bg_image, bg_depth } = d
     const fx = 0.5 * w / Math.tan((fov * Math.PI) / 180 / 2)
     const cx = w / 2, cy = h / 2
@@ -340,6 +397,7 @@
     controls?.dispose()
     if (mesh) { mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     if (bgMesh) { bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose() }
+    if (pointsObj) { pointsObj.geometry.dispose(); (pointsObj.material as THREE.Material).dispose() }
     if (markers) disposeGroup(markers)
     renderer?.dispose()
     if (renderer?.domElement && host?.contains(renderer.domElement)) host.removeChild(renderer.domElement)
@@ -350,17 +408,27 @@
   <header class="top caps">
     <span class="eyebrow">⛶ SPATIAL RECONSTRUCTION</span>
     <span class="camn">{camName || '—'}</span>
-    <span class="mode">MONOCULAR DEPTH · 3D</span>
+    <span class="mode">{full ? 'GENERATIVE · FULL 3D' : 'MONOCULAR DEPTH · 3D'}</span>
     <span class="spacer"></span>
     {#if entityCount}<span class="ec caps">◈ {entityCount} ENTIT{entityCount === 1 ? 'Y' : 'IES'}</span>{/if}
-    <button class="ref caps" class:on={auto} onclick={toggleAuto}>{auto ? '● LIVE' : '○ LIVE'}</button>
-    <button class="ref caps" onclick={() => loadScene(true)}>↻ RECAPTURE</button>
+    <button class="ref caps" class:on={full} title="Generative full-3D reconstruction (heavy, fills every hole)"
+      onclick={() => { full = !full; if (!full) auto = false; loadScene(true) }}>{full ? '◉ FULL 3D' : '○ FULL 3D'}</button>
+    {#if !full}<button class="ref caps" class:on={auto} onclick={toggleAuto}>{auto ? '● LIVE' : '○ LIVE'}</button>{/if}
+    <button class="ref caps" onclick={() => loadScene(true)}>↻ {full ? 'REBUILD' : 'RECAPTURE'}</button>
     <button class="x caps" onclick={onclose}>✕ CLOSE</button>
   </header>
 
   <div class="stage" bind:this={host}></div>
 
-  {#if loading}
+  {#if loading && full}
+    <div class="veil caps" class:lifting={phase === 'lift'}>
+      <div class="reco">
+        <div class="genring"></div>
+        <div class="pl caps"><span class="pulse">{phase === 'lift' ? 'BUILDING POINT CLOUD' : 'GENERATING FULL 3D SCENE'}_</span></div>
+        <div class="gensub caps">inpainting occluded surfaces across novel views · ~15s</div>
+      </div>
+    </div>
+  {:else if loading}
     <div class="veil caps" class:lifting={phase === 'lift'}>
       <div class="reco">
         <div class="preview" class:show={phase !== ''}>
@@ -422,6 +490,9 @@
   .step.on { color: var(--cyan); } .step.on .dot { border-color: var(--cyan); background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
   .step.done { color: var(--ink-dim); } .step.done .dot { border-color: var(--ink-dim); background: var(--ink-dim); box-shadow: none; }
   .pl { font-size: 10px; color: var(--cyan); letter-spacing: 0.2em; }
+  .genring { width: 54px; height: 54px; border: 2px solid var(--hairline); border-top-color: var(--cyan); border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .gensub { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.1em; text-transform: none; }
   .uahead { color: var(--scarlet); font-size: 12px; letter-spacing: 0.2em; }
   .uasub { color: var(--ink-dim); font-size: 9px; letter-spacing: 0.06em; text-transform: none; }
   .hint { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: var(--ink-ghost);

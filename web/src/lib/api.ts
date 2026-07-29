@@ -34,6 +34,7 @@ export interface SceneSubject { id: string; cls: string; snapshot?: string | nul
 export interface CaseDetail { id: number; name: string; threat: string; notes: string; status: string; created: number; cameras: string[]; events: CaseEventRow[]; subjects: SceneSubject[]; aiSummary: string | null }
 export interface SpatialEntity { id: string; cls: string; cx: number; cy: number; depth: number; conf: number; label: string }
 export interface SpatialScene { cam: string; sid: string; w: number; h: number; fov: number; image: string; depth: string; entities: SpatialEntity[]; ts: number; bg_image?: string; bg_depth?: string }
+export interface SpatialFull { mode: 'points'; cam: string; sid: string; fov: number; count: number; points: string; colors: string; ts: number }
 export interface SuggestRule { name: string; event_type: string; source_id: number; severity: string }
 export interface Suggestion { kind: 'alert' | 'camera'; cam: string; title: string; why: string; count?: number; rule?: SuggestRule }
 
@@ -83,6 +84,7 @@ export const api = {
   relationships: () => get<SocialGraph>(`/api/relationships`),
   cameraDna: () => get<{ cameras: CameraDna[] }>(`/api/cameras/dna`),
   spatial: (sid: string, grid = 320) => get<{ scene: SpatialScene | null; reason?: string }>(`/api/spatial/${sid}?grid=${grid}`),
+  spatial3d: (sid: string) => get<{ scene: SpatialFull | null; reason?: string; have_gb?: number; need_gb?: number }>(`/api/spatial3d/${sid}`),
   suggestions: () => get<{ suggestions: Suggestion[] }>(`/api/suggestions`),
   addAlertRule: (rule: SuggestRule) => post<{ id: number }>(`/api/alerts/rules`, rule),
   mergeCandidates: () => get<{ candidates: MergeCandidate[] }>(`/api/roster/merge-candidates`),

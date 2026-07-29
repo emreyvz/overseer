@@ -25,6 +25,10 @@ dependencies = [
     # on first use (the view degrades to "unavailable" if that fetch can't happen, e.g. offline).
     "transformers>=4.44",
     "timm>=1.0",
+    # Full generative 3D reconstruction (Feature 4 PRO): a diffusion inpainter completes the
+    # occluded scene. Heavy + VRAM-gated; the weights fetch lazily on first use.
+    "diffusers>=0.27",
+    "accelerate>=0.30",
 ]
 
 [project.optional-dependencies]
