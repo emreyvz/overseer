@@ -165,17 +165,20 @@
     // foreground: the directly-observed surface — a continuous triangle mesh with sharp
     // silhouettes (stretched skirts culled).
     const fg = await decodeLayer(image, depth, w, h)
+    // the completed background (computed backend-side) is decoded first: it's both the far-field
+    // fill AND the back-cap that turns foreground objects into solid volumes.
+    const bg = (bg_image && bg_depth) ? await decodeLayer(bg_image, bg_depth, w, h) : null
+
+    // foreground as a SOLID: each object is extruded back to the reconstructed background and its
+    // silhouette stitched, so it's an opaque, textured volume — not a see-through shell.
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
-    mesh = layerMesh(fg.disp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0)
+    mesh = layerMesh(fg.disp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0,
+      { solid: true, bgdisp: bg ? bg.disp : null, maxT: 0.35 })
     scene.add(mesh)
 
-    // completed background: the scene reconstructed BEHIND foreground objects (inpainted depth +
-    // texture, computed backend-side) as a continuous surface at its true depth, pushed a hair
-    // back so the foreground always wins where both exist. This fills disocclusion holes with
-    // REAL geometry (correct parallax) instead of a flat backdrop or a black void.
+    // thin completed-background layer behind everything, filling the far field (correct parallax).
     if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
-    if (bg_image && bg_depth) {
-      const bg = await decodeLayer(bg_image, bg_depth, w, h)
+    if (bg) {
       bgMesh = layerMesh(bg.disp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04)
       scene.add(bgMesh)
     }
@@ -220,12 +223,20 @@
   }
 
   // Back-project a depth+colour grid into a triangle-mesh surface. `maxlen` culls stretched
-  // silhouette skirts (larger = keep the surface continuous, for the smooth background layer);
-  // `zbias` pushes the surface back so a rear layer never z-fights the front one.
+  // silhouette skirts; `zbias` pushes the surface back so a rear layer never z-fights the front.
+  // When `solid`, each surface vertex is EXTRUDED backward — to the reconstructed background
+  // behind it (`bgdisp`), capped at `maxT` — and every silhouette boundary is stitched into a
+  // side wall, so a paper-thin shell becomes a watertight, opaque VOLUME. A foreground object
+  // we only saw the front of thus gets a completed, textured body (back + sides), not a
+  // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
-                     fx: number, cx: number, cy: number, maxlen: number, zbias: number): THREE.Mesh {
+                     fx: number, cx: number, cy: number, maxlen: number, zbias: number,
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number } = {}): THREE.Mesh {
+    const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
+    const maxT = opt.maxT ?? 0.35, minT = 0.03
     const pos: number[] = [], col: number[] = []
     const vidx = new Int32Array(w * h).fill(-1)
+    const vz: number[] = [], vpix: number[] = []
     let vn = 0
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -233,24 +244,42 @@
         if (disp[i] < SKYCULL) continue
         vidx[i] = vn++
         const Z = zOf(disp[i])
-        pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -(Z + zbias))
+        pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -(Z + zbias)); vz.push(Z); vpix.push(i)
         const p = i * 4
         col.push(rgba[p] / 255, rgba[p + 1] / 255, rgba[p + 2] / 255)
       }
     }
+    const nF = vn
     const idx: number[] = []
     const el = (va: number, vb: number) =>
       Math.hypot(pos[va * 3] - pos[vb * 3], pos[va * 3 + 1] - pos[vb * 3 + 1], pos[va * 3 + 2] - pos[vb * 3 + 2])
+    const edge = new Map<string, number>()
+    const bump = (a: number, b: number) => { const k = a < b ? a + '_' + b : b + '_' + a; edge.set(k, (edge.get(k) ?? 0) + 1) }
     const tri = (a: number, b: number, c: number) => {
       const va = vidx[a], vb = vidx[b], vc = vidx[c]
       if (va < 0 || vb < 0 || vc < 0) return
       if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > maxlen) return
       idx.push(va, vb, vc)
+      if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) }
     }
     for (let y = 0; y < h - 1; y++) {
       for (let x = 0; x < w - 1; x++) {
         const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1
         tri(tl, bl, tr); tri(tr, bl, br)
+      }
+    }
+    if (solid) {
+      for (let j = 0; j < nF; j++) {   // back vertices: extruded to the background, capped
+        const T = bgdisp ? Math.max(minT, Math.min(maxT, zOf(bgdisp[vpix[j]]) - vz[j])) : Math.min(maxT, minT + 0.12)
+        pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T)
+        col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82)
+      }
+      const nFrontIdx = idx.length     // back shell (reversed winding)
+      for (let t = 0; t < nFrontIdx; t += 3) idx.push(idx[t] + nF, idx[t + 2] + nF, idx[t + 1] + nF)
+      for (const [k, c] of edge) {     // side walls closing every silhouette boundary
+        if (c !== 1) continue
+        const [a, b] = k.split('_').map(Number)
+        idx.push(a, b, b + nF, a, b + nF, a + nF)
       }
     }
     const geo = new THREE.BufferGeometry()
