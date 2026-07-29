@@ -1140,22 +1140,23 @@ class Backend:
             })
         return out
 
-    def spatial_scene(self, sid: str, grid_w: int = 320) -> dict | None:
+    def spatial_scene(self, sid: str, grid_w: int = 320) -> dict:
         """Feature 4 — lift a camera's flat 2D frame into a navigable 3D point cloud.
 
         Runs Depth Anything V2 on the latest frame, downsamples RGB + depth to a working grid
         (bounded payload), and locates every detected entity in that same frame so the markers
         line up with the cloud. The frontend back-projects the grid through a pinhole model and
-        renders it in three.js. Returns None when the source has no frame or depth is
-        unavailable (missing model/weights) — the endpoint reports "unavailable", never 5xx."""
+        renders it in three.js. Always returns a dict: {"scene": {...}} on success, or
+        {"scene": None, "reason": "..."} with a specific cause so the UI can explain itself
+        (never a 5xx). Reasons: disabled / no_source / no_frame / depth_unavailable."""
         if not self.config.get("spatial.enabled", True):
-            return None
+            return {"scene": None, "reason": "disabled"}
         src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
         if src is None:
-            return None
+            return {"scene": None, "reason": "no_source"}
         frame = self._source_frame(src)
         if frame is None:
-            return None
+            return {"scene": None, "reason": "no_frame"}
         # Run depth on a moderate-resolution copy (quality vs. latency), then downscale to grid.
         h0, w0 = frame.shape[:2]
         work_w = int(self.config.get("spatial.input_width", 640))
@@ -1165,16 +1166,17 @@ class Backend:
             work = frame
         disp = self._depth.estimate(work)
         if disp is None:
-            return None
+            return {"scene": None, "reason": "depth_unavailable"}
         grid_w = max(120, min(int(grid_w), 480))
         gh = max(1, int(grid_w * work.shape[0] / work.shape[1]))
         rgb_grid = cv2.resize(work, (grid_w, gh), interpolation=cv2.INTER_AREA)
         disp_grid = cv2.resize(disp, (grid_w, gh), interpolation=cv2.INTER_AREA)
         disp01, dmin, dmax = spatial.normalize_disparity(disp_grid)
         entities = self._spatial_entities(work, disp, dmin, dmax)
-        return spatial.encode_scene(
+        scene = spatial.encode_scene(
             rgb_grid, disp01, entities, fov=float(self.config.get("spatial.fov_deg", 60.0)),
             cam=src.name, sid=str(sid), ts=time.time() * 1000.0)
+        return {"scene": scene}
 
     def _spatial_entities(self, frame: Any, disp: Any, dmin: float, dmax: float) -> list[dict]:
         """Detected people/vehicles/objects in `frame`, each with a normalized centre and a
