@@ -387,6 +387,7 @@ class RosterHarvester(threading.Thread):
                  watch_hit_fn: Callable[[dict], None] | None = None,
                  plate_hit_fn: Callable[[str, Any], None] | None = None,
                  relate_fn: Callable[[list, Any, float], None] | None = None,
+                 profile_fn: Callable[[object, float, list], None] | None = None,
                  watch_cooldown: float = 45.0,
                  interval: float = 4.0) -> None:
         super().__init__(daemon=True, name="RosterHarvester")
@@ -402,6 +403,7 @@ class RosterHarvester(threading.Thread):
         self._watch_hit_fn = watch_hit_fn
         self._plate_hit_fn = plate_hit_fn
         self._relate_fn = relate_fn
+        self._profile_fn = profile_fn
         self._watch_cooldown = float(watch_cooldown)
         self._interval = float(interval)
         self._i = 0
@@ -415,7 +417,20 @@ class RosterHarvester(threading.Thread):
         cam = getattr(source, "name", None)
         clipped = False   # at most one short sighting clip captured per scan (bounds the cost)
         frame_ids: list[str] = []   # subjects co-present in this frame -> relationship graph
-        for d in self._detect_fn(frame) or []:
+        dets_raw = self._detect_fn(frame) or []
+        # Feed the camera profile (DNA + reputation) so EVERY camera — not just the actively
+        # analysed one — builds a behavioural fingerprint over time. Motion isn't available in the
+        # passive sweep (no consecutive frames), and fps is the camera's, not our slow scan rate,
+        # so we pass neutral values and rely on brightness + the detection mix for the tags.
+        if self._profile_fn is not None:
+            try:
+                brightness = float(frame.mean())
+                prof_dets = [(self._cat2cls.get(getattr(d, "category", "object"), "object"),
+                              float(getattr(d, "confidence", 0.0))) for d in dets_raw]
+                self._profile_fn(getattr(source, "id", None), brightness, prof_dets)
+            except Exception:  # noqa: BLE001
+                pass
+        for d in dets_raw:
             cls = self._cat2cls.get(getattr(d, "category", "object"), "object")
             if cls not in ("person", "vehicle"):
                 continue
