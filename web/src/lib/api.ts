@@ -20,6 +20,10 @@ const del = <T>(p: string) => send<T>('DELETE', p)
 
 export interface SearchHit { kind: string; ts: number; type: string; label: string; snapshot?: string | null }
 export interface EventRow { id: number; ts: number; type: string; label: string; conf?: number | null; snapshot?: string | null }
+export interface Associate { id: string; count: number; cameras: string[]; first: number; last: number; confidence: number; cls: string; snapshot?: string | null; plate?: string | null; cam?: string | null }
+export interface GraphNode { id: string; cls: string; snapshot?: string | null; plate?: string | null }
+export interface GraphEdge { a: string; b: string; count: number; confidence: number; cameras: string[] }
+export interface SocialGraph { nodes: GraphNode[]; edges: GraphEdge[] }
 export interface CaseRow { id: number; name: string; threat: string; notes: string; status?: string; created: number; targets: number }
 export interface CaseEventRow { ts: number; kind: string; type: string; cam: string; severity: string; summary: string; snapshot?: string | null; clip?: string | null }
 export interface CaseDetail { id: number; name: string; threat: string; notes: string; status: string; created: number; cameras: string[]; events: CaseEventRow[]; aiSummary: string | null }
@@ -65,6 +69,8 @@ export const api = {
   watchRoster: (id: string, on: boolean) =>
     post<import('./types').RosterEntry>(`/api/roster/${id}/watch`, { on }),
   supercut: (id: string) => get<{ url: string }>(`/api/roster/${id}/supercut`),
+  entityRelationships: (id: string) => get<{ associates: Associate[] }>(`/api/roster/${id}/relationships`),
+  relationships: () => get<SocialGraph>(`/api/relationships`),
   findAcross: (id: string) =>
     post<{ matches: { camId: string; cam: string; score: number; ambiguous?: boolean }[] }>(`/api/roster/${id}/find`, {}),
   watchedPlates: () => get<{ plates: string[] }>(`/api/plates`),

@@ -8,6 +8,8 @@
   import { trUpper } from '../../lib/lexicon'
   import { sfx } from '../../lib/audio'
   import PoiDossier from '../roster/PoiDossier.svelte'
+  import SocialGraph from '../roster/SocialGraph.svelte'
+  import { graphOpen } from '../../lib/stores'
   import type { RosterEntry } from '../../lib/types'
 
   const API = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:8787'
@@ -86,6 +88,7 @@
         <button class="chip caps" class:on={filter === k} onclick={() => (filter = k)}>{label}</button>
       {/each}
       {#if nWatched > 0}<button class="chip caps bolo" class:on={bolo} onclick={() => (bolo = !bolo)}>◉ BOLO {nWatched}</button>{/if}
+      <button class="chip caps net" onclick={() => graphOpen.set(true)}>◈ NETWORK</button>
     </div>
     <div class="search">
       <span class="mag caps">⌕</span>
@@ -138,8 +141,14 @@
     </div>
   {/if}
 
+  {#if $graphOpen}
+    <SocialGraph onclose={() => graphOpen.set(false)}
+      onopen={(id) => { const e = entries.find((x) => x.id === id); if (e) { selected = e; graphOpen.set(false) } }} />
+  {/if}
+
   {#if selected}
-    <PoiDossier entry={selected} {now} onclose={() => (selected = null)} />
+    <PoiDossier entry={selected} {now} onclose={() => (selected = null)}
+      onopen={(id) => { const e = entries.find((x) => x.id === id); if (e) selected = e }} />
   {/if}
 </section>
 
@@ -153,6 +162,8 @@
   .chip { padding: 4px 12px; border: 1px solid var(--ink-dim); background: none; color: var(--ink-dim);
     font-size: var(--fs-label); letter-spacing: var(--tracking); cursor: pointer; }
   .chip.on { border-color: var(--ink); color: var(--ink); }
+  .chip.net { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 40%, transparent); }
+  .chip.net:hover { background: rgba(56,208,227,0.1); }
   .chip.bolo { color: var(--scarlet); border-color: color-mix(in srgb, var(--scarlet) 45%, transparent); }
   .chip.bolo.on { background: var(--scarlet); color: #fff; border-color: var(--scarlet); }
   .search { flex: 1; min-width: 200px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--hairline);

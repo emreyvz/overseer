@@ -9,7 +9,7 @@
   import { cameras, activeCam, mode, triggerGlitch, flashBanner, watchlistOpen } from '../../lib/stores'
   import { annotations, annotate } from '../../lib/annotations'
   import { enroll } from '../../lib/watchlist'
-  import { api } from '../../lib/api'
+  import { api, type Associate } from '../../lib/api'
   import { trUpper } from '../../lib/lexicon'
   import { sfx } from '../../lib/audio'
   import { sendCommand } from '../../lib/ws'
@@ -17,7 +17,7 @@
   import LiveThumb from '../LiveThumb.svelte'
   import type { RosterEntry } from '../../lib/types'
 
-  let { entry, now, onclose }: { entry: RosterEntry; now: number; onclose: () => void } = $props()
+  let { entry, now, onclose, onopen }: { entry: RosterEntry; now: number; onclose: () => void; onopen?: (id: string) => void } = $props()
 
   const API = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:8787'
   const LIVE_MS = 8000
@@ -60,9 +60,14 @@
   // journey supercut — the subject's per-camera clips stitched into one video
   let superUrl = $state<string | null>(null)
   let superLoading = $state(false)
+  // discovered associates (frequently seen together)
+  let associates = $state<Associate[]>([])
+  async function loadAssoc() {
+    try { associates = (await api.entityRelationships(entry.id)).associates } catch { associates = [] }
+  }
   // cross-camera ReID search — enroll the subject and hand off to the animated LOCATE screen
   let finding = $state(false)
-  $effect(() => { void entry.id; watchLocal = null; superUrl = null })  // reset per subject
+  $effect(() => { void entry.id; watchLocal = null; superUrl = null; associates = []; loadAssoc() })  // reset per subject
   async function findAcross() {
     if (finding || !photo) return
     finding = true; sfx('sonar')
@@ -216,6 +221,22 @@
         <div class="crow caps"><span class="k">FIRST CONTACT</span><span class="v">{entry.first_cam ?? '—'} · {clock24(entry.first_ts)}</span></div>
         {#if apprLine}<div class="crow caps"><span class="k">APPEARANCE</span><span class="v">{apprLine}</span></div>{/if}
       </div>
+
+      {#if associates.length}
+        <div class="assoc">
+          <div class="ah caps">◇ ASSOCIATES · {associates.length}</div>
+          <div class="alist">
+            {#each associates as m (m.id)}
+              <button class="acard" onclick={() => onopen?.(m.id)} title={`${m.count}× together`}>
+                <div class="athumb">{#if m.snapshot}<img src={`${API}${m.snapshot}`} alt="" />{:else}<div class="anone caps">{m.cls === 'vehicle' ? '🚗' : '👤'}</div>{/if}</div>
+                <span class="aid caps">{m.id}</span>
+                <span class="abar"><span class="afill" style={`width:${Math.round(m.confidence * 100)}%`}></span></span>
+                <span class=" apct caps">{Math.round(m.confidence * 100)}%</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
       <textarea class="notes" placeholder="INTELLIGENCE NOTE…" value={a.notes ?? ''}
         oninput={(ev) => annotate(entry.id, { notes: (ev.target as HTMLTextAreaElement).value })}></textarea>
@@ -393,6 +414,18 @@
   .num.sm { font-size: 19px; }
   .lbl { font-size: 8px; letter-spacing: 0.22em; color: var(--ink-ghost); }
 
+  .assoc { animation: fadeup 560ms 500ms both; }
+  .ah { font-size: 9px; color: var(--ink-dim); letter-spacing: 0.14em; border-bottom: 1px solid var(--hairline); padding-bottom: 5px; margin-bottom: 8px; }
+  .alist { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+  .acard { display: flex; flex-direction: column; gap: 3px; background: none; border: 1px solid var(--hairline); padding: 5px; cursor: pointer; }
+  .acard:hover { border-color: var(--cyan); }
+  .athumb { aspect-ratio: 1/1; background: #05070a; overflow: hidden; }
+  .athumb img { width: 100%; height: 100%; object-fit: cover; }
+  .anone { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 16px; }
+  .aid { font-size: 8px; color: var(--ink); letter-spacing: 0.06em; }
+  .abar { height: 3px; background: var(--hairline); }
+  .afill { display: block; height: 100%; background: var(--cyan); }
+  .apct { font-size: 7px; color: var(--ink-dim); }
   .chron { display: flex; flex-direction: column; gap: 5px; animation: fadeup 560ms 460ms both; }
   .crow { display: flex; justify-content: space-between; gap: 10px; font-size: 9px; padding-bottom: 5px; border-bottom: 1px solid var(--hairline); }
   .crow .k { color: var(--ink-ghost); letter-spacing: 0.14em; } .crow .v { color: var(--ink); text-align: right; }

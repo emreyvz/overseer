@@ -258,6 +258,7 @@ class RosterHarvester(threading.Thread):
                  clip_fn: Callable[[Any, tuple], str | None] | None = None,
                  watch_hit_fn: Callable[[dict], None] | None = None,
                  plate_hit_fn: Callable[[str, Any], None] | None = None,
+                 relate_fn: Callable[[list, Any, float], None] | None = None,
                  watch_cooldown: float = 45.0,
                  interval: float = 4.0) -> None:
         super().__init__(daemon=True, name="RosterHarvester")
@@ -272,6 +273,7 @@ class RosterHarvester(threading.Thread):
         self._clip_fn = clip_fn
         self._watch_hit_fn = watch_hit_fn
         self._plate_hit_fn = plate_hit_fn
+        self._relate_fn = relate_fn
         self._watch_cooldown = float(watch_cooldown)
         self._interval = float(interval)
         self._i = 0
@@ -284,6 +286,7 @@ class RosterHarvester(threading.Thread):
         fh, fw = frame.shape[:2]
         cam = getattr(source, "name", None)
         clipped = False   # at most one short sighting clip captured per scan (bounds the cost)
+        frame_ids: list[str] = []   # subjects co-present in this frame -> relationship graph
         for d in self._detect_fn(frame) or []:
             cls = self._cat2cls.get(getattr(d, "category", "object"), "object")
             if cls not in ("person", "vehicle"):
@@ -322,6 +325,7 @@ class RosterHarvester(threading.Thread):
                     attrs = {**(attrs or {}), "subtype": subtype}
             eid = self._roster.observe_reid(cls, crop, emb, time.time(), plate=plate,
                                             attrs=attrs, cam=cam)
+            frame_ids.append(eid)
             # BOLO: a watched subject re-identified here fires an alert (cooldown-gated)
             if self._watch_hit_fn is not None:
                 hit = self._roster.take_watch_hit(eid, cam, time.time(), self._watch_cooldown)
@@ -342,6 +346,12 @@ class RosterHarvester(threading.Thread):
                     url = None
                 if url:
                     self._roster.set_clip(eid, url, cam=cam)
+        # subjects co-present in this frame become associates in the relationship graph
+        if self._relate_fn is not None and len(frame_ids) >= 2:
+            try:
+                self._relate_fn(frame_ids, cam, time.time())
+            except Exception:  # noqa: BLE001
+                pass
 
     def run(self) -> None:
         while not self._stopped.is_set():
