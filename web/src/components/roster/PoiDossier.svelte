@@ -62,12 +62,22 @@
   let superLoading = $state(false)
   // discovered associates (frequently seen together)
   let associates = $state<Associate[]>([])
-  async function loadAssoc() {
-    try { associates = (await api.entityRelationships(entry.id)).associates } catch { associates = [] }
+  async function loadAssoc(id: string) {
+    try { associates = (await api.entityRelationships(id)).associates } catch { associates = [] }
   }
   // cross-camera ReID search — enroll the subject and hand off to the animated LOCATE screen
   let finding = $state(false)
-  $effect(() => { void entry.id; watchLocal = null; superUrl = null; associates = []; loadAssoc() })  // reset per subject
+  // Load the panel ONCE per subject. The roster store pushes a fresh entry object every second
+  // (same id, new reference); without this id guard the effect would re-fetch on every push and
+  // the associates would churn on screen. Keeping it keyed to the id makes the panel stable.
+  let assocFor: string | null = null
+  $effect(() => {
+    const id = entry.id
+    if (id === assocFor) return
+    assocFor = id
+    watchLocal = null; superUrl = null; associates = []   // reset per subject
+    loadAssoc(id)
+  })
   async function findAcross() {
     if (finding || !photo) return
     finding = true; sfx('sonar')
@@ -227,11 +237,13 @@
           <div class="ah caps">◇ ASSOCIATES · {associates.length}</div>
           <div class="alist">
             {#each associates as m (m.id)}
-              <button class="acard" onclick={() => onopen?.(m.id)} title={`${m.count}× together`}>
+              <button class="acard" onclick={() => onopen?.(m.id)}
+                title={`Seen together ${m.count}× on ${m.cameras.length ? m.cameras.join(', ') : 'one camera'}`}>
                 <div class="athumb">{#if m.snapshot}<img src={`${API}${m.snapshot}`} alt="" />{:else}<div class="anone caps">{m.cls === 'vehicle' ? '🚗' : '👤'}</div>{/if}</div>
                 <span class="aid caps">{m.id}</span>
                 <span class="abar"><span class="afill" style={`width:${Math.round(m.confidence * 100)}%`}></span></span>
-                <span class=" apct caps">{Math.round(m.confidence * 100)}%</span>
+                <span class="apct caps">{Math.round(m.confidence * 100)}%</span>
+                <span class="awhy caps">{m.count}× together{#if m.cameras.length} · {m.cameras.join(' · ')}{/if}</span>
               </button>
             {/each}
           </div>
@@ -416,8 +428,8 @@
 
   .assoc { animation: fadeup 560ms 500ms both; }
   .ah { font-size: 9px; color: var(--ink-dim); letter-spacing: 0.14em; border-bottom: 1px solid var(--hairline); padding-bottom: 5px; margin-bottom: 8px; }
-  .alist { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
-  .acard { display: flex; flex-direction: column; gap: 3px; background: none; border: 1px solid var(--hairline); padding: 5px; cursor: pointer; }
+  .alist { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+  .acard { display: flex; flex-direction: column; gap: 3px; background: none; border: 1px solid var(--hairline); padding: 5px; cursor: pointer; text-align: left; }
   .acard:hover { border-color: var(--cyan); }
   .athumb { aspect-ratio: 1/1; background: #05070a; overflow: hidden; }
   .athumb img { width: 100%; height: 100%; object-fit: cover; }
@@ -426,6 +438,9 @@
   .abar { height: 3px; background: var(--hairline); }
   .afill { display: block; height: 100%; background: var(--cyan); }
   .apct { font-size: 7px; color: var(--ink-dim); }
+  /* the "why related": co-occurrence count + the cameras they were seen together on */
+  .awhy { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.04em; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .chron { display: flex; flex-direction: column; gap: 5px; animation: fadeup 560ms 460ms both; }
   .crow { display: flex; justify-content: space-between; gap: 10px; font-size: 9px; padding-bottom: 5px; border-bottom: 1px solid var(--hairline); }
   .crow .k { color: var(--ink-ghost); letter-spacing: 0.14em; } .crow .v { color: var(--ink); text-align: right; }

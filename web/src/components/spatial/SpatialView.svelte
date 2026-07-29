@@ -15,7 +15,16 @@
   let host = $state<HTMLDivElement | null>(null)
   let loading = $state(true)
   let unavailable = $state(false)
+  let reason = $state('')
   let camName = $state('')
+
+  const REASON_TEXT: Record<string, string> = {
+    no_frame: "No live frame on this camera yet. Open it in the live view, then try again.",
+    depth_unavailable: "Depth model isn't available. Install dependencies with  uv sync  and restart the backend.",
+    no_source: 'That camera no longer exists.',
+    disabled: 'Spatial view is disabled in the configuration (spatial.enabled).',
+    backend_down: 'The backend is not reachable.',
+  }
   let entityCount = $state(0)
   let auto = $state(false)
 
@@ -71,12 +80,15 @@
 
   async function loadScene(refresh = false) {
     if (refresh) sfx('sonar')
-    loading = true; unavailable = false
-    let data: Awaited<ReturnType<typeof api.spatial>>['scene'] = null
-    try { data = (await api.spatial(cam, 320)).scene } catch { data = null }
-    if (!data) { loading = false; unavailable = true; return }
-    camName = data.cam
-    try { await buildCloud(data) } catch { unavailable = true }
+    loading = true; unavailable = false; reason = ''
+    let res: Awaited<ReturnType<typeof api.spatial>> | null = null
+    try { res = await api.spatial(cam, 320) } catch { res = null }
+    if (!res || !res.scene) {
+      reason = REASON_TEXT[res?.reason ?? ''] ?? 'The spatial view is unavailable right now.'
+      loading = false; unavailable = true; return
+    }
+    camName = res.scene.cam
+    try { await buildCloud(res.scene) } catch { unavailable = true }
     loading = false
   }
 
@@ -231,7 +243,7 @@
   {:else if unavailable}
     <div class="veil caps">
       <div class="uahead">SPATIAL VIEW UNAVAILABLE</div>
-      <div class="uasub">No frame on this camera, or the depth model isn't ready.</div>
+      <div class="uasub">{reason}</div>
       <button class="ref caps" onclick={() => loadScene(true)}>↻ RETRY</button>
     </div>
   {:else}

@@ -731,8 +731,10 @@ dependencies = [
     { name = "pyyaml" },
     { name = "reportlab" },
     { name = "requests" },
+    { name = "timm" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "transformers" },
     { name = "ultralytics" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "yt-dlp" },
@@ -741,10 +743,6 @@ dependencies = [
 [package.optional-dependencies]
 ai-extras = [
     { name = "easyocr" },
-]
-spatial = [
-    { name = "timm" },
-    { name = "transformers" },
 ]
 
 [package.dev-dependencies]
@@ -768,15 +766,15 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "reportlab", specifier = ">=5.0.0" },
     { name = "requests", specifier = ">=2.32" },
-    { name = "timm", marker = "extra == 'spatial'", specifier = ">=1.0" },
+    { name = "timm", specifier = ">=1.0" },
     { name = "torch", specifier = ">=2.5", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torchvision", specifier = ">=0.20", index = "https://download.pytorch.org/whl/cu124" },
-    { name = "transformers", marker = "extra == 'spatial'", specifier = ">=4.44" },
+    { name = "transformers", specifier = ">=4.44" },
     { name = "ultralytics", specifier = ">=8.4.102,<9" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
     { name = "yt-dlp", specifier = ">=2026.7.4" },
 ]
-provides-extras = ["ai-extras", "spatial"]
+provides-extras = ["ai-extras"]
 
 [package.metadata.requires-dev]
 dev = [

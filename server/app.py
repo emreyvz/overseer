@@ -518,13 +518,11 @@ async def api_plates_watch(payload: dict) -> Any:
 
 @app.get("/api/spatial/{sid}")
 async def api_spatial(sid: str, grid: int = 320) -> Any:
-    """Spatial 3D scene: a monocular-depth point cloud of the camera's current frame."""
+    """Spatial 3D scene: a monocular-depth point cloud of the camera's current frame.
+    Always 200 with {"scene": {...}} or {"scene": null, "reason": "..."}."""
     if backend is None:
-        return {"scene": None, "reason": "backend down"}
-    scene = await asyncio.to_thread(backend.spatial_scene, sid, grid)
-    if scene is None:
-        return {"scene": None, "reason": "unavailable"}
-    return {"scene": scene}
+        return {"scene": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.spatial_scene, sid, grid)
 
 
 @app.get("/api/suggestions")

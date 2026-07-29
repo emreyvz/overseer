@@ -20,6 +20,11 @@ dependencies = [
     "fastapi>=0.139.2",
     "uvicorn[standard]>=0.51.0",
     "yt-dlp>=2026.7.4",
+    # Spatial 3D scene view (Feature 4): monocular depth via Depth Anything V2. Core so the view
+    # works out of the box; the model weights themselves fetch lazily from the Hugging Face hub
+    # on first use (the view degrades to "unavailable" if that fetch can't happen, e.g. offline).
+    "transformers>=4.44",
+    "timm>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -29,13 +34,6 @@ dependencies = [
 # ReID needs torchreid (plus ReID-trained weights) — see that module's docstring.
 ai-extras = [
     "easyocr>=1.7",
-]
-# Spatial 3D scene view (Feature 4): monocular depth via Depth Anything V2. Optional — without
-# these the spatial view simply reports "unavailable" (the model + weights fetch lazily on first
-# use from the Hugging Face hub). Runs on the existing torch/CUDA stack.
-spatial = [
-    "transformers>=4.44",
-    "timm>=1.0",
 ]
 
 [dependency-groups]

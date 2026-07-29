@@ -75,7 +75,6 @@
           </div>
         {/if}
       {/each}
-      <div class="lreticle"></div>
     </div>
   </div>
 
@@ -107,9 +106,6 @@
   .lcell.cur .lt { border-color: var(--scarlet); box-shadow: 0 0 16px var(--scarlet-glow); }
   .lcell .ln { font-size: var(--fs-label); letter-spacing: var(--tracking); color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lcell.cur .ln { color: var(--ink); }
-  .lreticle { position: absolute; left: 0; right: 0; top: 50%; height: 54px; transform: translateY(-50%);
-    border-top: 1px solid rgba(225,6,0,0.5); border-bottom: 1px solid rgba(225,6,0,0.5); pointer-events: none; }
-
   /* RIGHT big view → grows to fullscreen on lock (explicit edges for a smooth transition) */
   .big { position: fixed; top: 13vh; bottom: 13vh; left: 34vw; right: 6vw; overflow: hidden; background: #05070a;
     border: 1px solid var(--hairline); box-shadow: 0 0 40px rgba(0,0,0,0.6);
