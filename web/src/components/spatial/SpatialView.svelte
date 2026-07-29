@@ -151,7 +151,7 @@
     const bb = geo.boundingBox!
     const size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3())
     const diag = Math.max(size.length(), 1)
-    const mat = new THREE.PointsMaterial({ size: diag * 0.009, vertexColors: true, sizeAttenuation: true })
+    const mat = new THREE.PointsMaterial({ size: diag * 0.013, vertexColors: true, sizeAttenuation: true })
     pointsObj = new THREE.Points(geo, mat)
     scene.add(pointsObj)
     entityCount = 0

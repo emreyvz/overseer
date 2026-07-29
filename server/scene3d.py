@@ -163,7 +163,8 @@ class Scene3D:
             centroid = pts.mean(0)
             dist = float(np.linalg.norm(centroid))
             # novel views: orbit around the centroid (view-0 is yaw=0)
-            poses = [(-24, 6), (24, 6), (-14, -10), (14, -10), (0, 16), (0, -14)][:max_views]
+            poses = [(-22, 5), (22, 5), (-12, -9), (12, -9), (0, 15), (0, -13),
+                     (-34, 3), (34, 3), (-9, 20), (9, 20), (-30, -8), (30, -8)][:max_views]
             for k, (yaw_d, pitch_d) in enumerate(poses):
                 if progress:
                     progress(f"completing view {k + 1}/{len(poses)}", 0.2 + 0.7 * k / len(poses))
