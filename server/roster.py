@@ -8,12 +8,15 @@ not a pile of duplicates. Background cutouts use YOLO-seg.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
+
+log = logging.getLogger("overseer.roster")
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
@@ -31,7 +34,8 @@ class SessionRoster:
     def __init__(self, snapshots: Any, snap_dir: Path, seg_backend: Any = None,
                  *, min_area: int = 1400, refresh_ratio: float = 1.4,
                  shot_interval: float = 1.5, max_entries: int = 600,
-                 dedup_threshold: float = 0.82) -> None:
+                 dedup_threshold: float = 0.82,
+                 auto_merge: bool = True, auto_merge_threshold: float = 0.85) -> None:
         self._snap = snapshots
         self._dir = Path(snap_dir)
         self._seg = seg_backend
@@ -40,6 +44,8 @@ class SessionRoster:
         self._shot_interval = float(shot_interval)
         self._max = int(max_entries)
         self._dedup = float(dedup_threshold)
+        self._auto_merge = bool(auto_merge)               # fold high-confidence duplicates unattended
+        self._auto_merge_th = float(auto_merge_threshold)  # cosine floor for an automatic merge
         self._entries: dict[str, dict] = {}
         self._counter: dict[str, int] = {"person": 0, "vehicle": 0}
         self._merge_rejected: set[frozenset] = set()   # pairs an operator said are NOT the same
@@ -243,35 +249,94 @@ class SessionRoster:
         """Fold drop_id into keep_id as one canonical identity: union the movement trails, sum
         the sightings, keep the best photo/embedding, and carry over plate/clip/watched."""
         with self._lock:
-            if keep_id == drop_id:
-                return None
-            keep = self._entries.get(keep_id)
-            drop = self._entries.get(drop_id)
-            if keep is None or drop is None:
-                return None
-            if drop["first_ts"] < keep["first_ts"]:
-                keep["first_cam"] = drop.get("first_cam")
-            keep["first_ts"] = min(keep["first_ts"], drop["first_ts"])
-            keep["last_ts"] = max(keep["last_ts"], drop["last_ts"])
-            keep["obs"] += drop["obs"]
-            for cam, seg in drop["trail"].items():
-                k = keep["trail"].get(cam)
-                if k is None:
-                    keep["trail"][cam] = seg
-                else:
-                    k["first"] = min(k["first"], seg["first"])
-                    k["last"] = max(k["last"], seg["last"])
-                    k["count"] += seg["count"]
-                    k["clip"] = k.get("clip") or seg.get("clip")
-            if drop["best_area"] > keep["best_area"]:   # keep the sharper representative photo
-                for f in ("snapshot", "snapshot_path", "best_area", "embedding"):
-                    keep[f] = drop[f]
-            keep["plate"] = keep["plate"] or drop["plate"]
-            keep["clip"] = keep.get("clip") or drop.get("clip")
-            keep["watched"] = bool(keep.get("watched") or drop.get("watched"))
-            keep["attrs"] = {**drop["attrs"], **keep["attrs"]}
-            del self._entries[drop_id]
-            return self._public(keep)
+            return self._merge_locked(keep_id, drop_id)
+
+    def _merge_locked(self, keep_id: str, drop_id: str) -> dict | None:
+        """merge() body without acquiring the lock — the caller must already hold it (so the
+        auto-merge pass can fold several pairs atomically without re-entering a non-reentrant
+        lock)."""
+        if keep_id == drop_id:
+            return None
+        keep = self._entries.get(keep_id)
+        drop = self._entries.get(drop_id)
+        if keep is None or drop is None:
+            return None
+        if drop["first_ts"] < keep["first_ts"]:
+            keep["first_cam"] = drop.get("first_cam")
+        keep["first_ts"] = min(keep["first_ts"], drop["first_ts"])
+        keep["last_ts"] = max(keep["last_ts"], drop["last_ts"])
+        keep["obs"] += drop["obs"]
+        for cam, seg in drop["trail"].items():
+            k = keep["trail"].get(cam)
+            if k is None:
+                keep["trail"][cam] = seg
+            else:
+                k["first"] = min(k["first"], seg["first"])
+                k["last"] = max(k["last"], seg["last"])
+                k["count"] += seg["count"]
+                k["clip"] = k.get("clip") or seg.get("clip")
+        if drop["best_area"] > keep["best_area"]:   # keep the sharper representative photo
+            for f in ("snapshot", "snapshot_path", "best_area", "embedding"):
+                keep[f] = drop[f]
+        keep["plate"] = keep["plate"] or drop["plate"]
+        keep["clip"] = keep.get("clip") or drop.get("clip")
+        keep["watched"] = bool(keep.get("watched") or drop.get("watched"))
+        keep["attrs"] = {**drop["attrs"], **keep["attrs"]}
+        del self._entries[drop_id]
+        return self._public(keep)
+
+    @staticmethod
+    def _temporally_impossible(a: dict, b: dict) -> bool:
+        """True if two entries can't be the same subject because they were seen on DIFFERENT
+        cameras at the same time (a person can't be in two places at once). Trail times are in
+        seconds; a small epsilon avoids blocking on near-adjacent, non-overlapping legs."""
+        eps = 1.0
+        for cam_a, sa in a["trail"].items():
+            for cam_b, sb in b["trail"].items():
+                if cam_a != cam_b and sa["first"] < sb["last"] - eps and sb["first"] < sa["last"] - eps:
+                    return True
+        return False
+
+    def auto_merge_pass(self) -> list[tuple[str, str, float]]:
+        """Fold the very-confident duplicate pairs automatically (Balanced policy): same plate,
+        or appearance cosine >= the auto-merge threshold. Skips pairs an operator marked NOT SAME
+        and pairs that are temporally impossible. Greedy by similarity so one entry isn't folded
+        twice in a pass. Returns (keep, drop, similarity) for each merge, and logs them."""
+        if not self._auto_merge:
+            return []
+        merged: list[tuple[str, str, float]] = []
+        with self._lock:
+            items = [(eid, e) for eid, e in self._entries.items()
+                     if e["snapshot"] and e.get("embedding") is not None]
+            cands: list[tuple[float, str, str]] = []
+            for i in range(len(items)):
+                ai, ae = items[i]
+                for j in range(i + 1, len(items)):
+                    bi, be = items[j]
+                    if ae["cls"] != be["cls"] or frozenset((ai, bi)) in self._merge_rejected:
+                        continue
+                    plate = bool(ae["cls"] == "vehicle" and ae["plate"] and ae["plate"] == be["plate"])
+                    sim = 1.0 if plate else _cosine(ae["embedding"], be["embedding"])
+                    if not plate and sim < self._auto_merge_th:
+                        continue
+                    if self._temporally_impossible(ae, be):
+                        continue
+                    cands.append((float(sim), ai, bi))
+            cands.sort(reverse=True)
+            dropped: set[str] = set()
+            for sim, ai, bi in cands:
+                if ai in dropped or bi in dropped:
+                    continue
+                a, b = self._entries.get(ai), self._entries.get(bi)
+                if a is None or b is None:
+                    continue
+                keep_id, drop_id = (ai, bi) if a["obs"] >= b["obs"] else (bi, ai)
+                if self._merge_locked(keep_id, drop_id) is not None:
+                    dropped.add(drop_id)
+                    merged.append((keep_id, drop_id, round(sim, 3)))
+        for keep_id, drop_id, sim in merged:
+            log.info("roster auto-merge: %s ⇐ %s (%.2f)", keep_id, drop_id, sim)
+        return merged
 
     def cutout_png(self, det_id: str) -> bytes | None:
         """The entry's photo with its background removed (YOLO-seg) as a transparent PNG;
@@ -432,6 +497,12 @@ class RosterHarvester(threading.Thread):
                 self._scan(source)
             except Exception:  # noqa: BLE001 - never let one bad frame kill the harvester
                 pass
+            # after each full sweep of every camera, fold the confident duplicate pairs
+            if self._i % len(sources) == 0:
+                try:
+                    self._roster.auto_merge_pass()
+                except Exception:  # noqa: BLE001 - auto-merge must never kill the harvester
+                    pass
             # pace so every camera is visited about once per `interval`
             self._stopped.wait(max(0.25, self._interval / len(sources)))
 

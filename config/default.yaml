@@ -40,6 +40,14 @@ roster:
   clip_frames: 16           # frames grabbed for that clip
   clip_fps: 10.0            # playback fps of the sighting clip
   watch_cooldown: 45.0      # BOLO: seconds between repeat alerts for the same watched subject
+  # Automatic identity merge (Balanced): after each full camera sweep the harvester folds the
+  # very-confident duplicate pairs on its own — same plate, or appearance cosine >= threshold.
+  # Safety rails always apply: pairs marked NOT SAME are never merged, and two entries seen on
+  # DIFFERENT cameras at the SAME time are never merged (can't be in two places at once). The
+  # uncertain band (dedup_threshold down to the merge-center floor) still waits for manual review.
+  auto_merge:
+    enabled: true
+    threshold: 0.85         # appearance cosine at/above which a merge happens unattended
 
 detectors:
   motion:

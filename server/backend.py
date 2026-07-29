@@ -162,7 +162,9 @@ class Backend:
         _roster_seg = YoloSegBackend(Path("models") / _seg_name) if _seg_name else None
         self.roster = SessionRoster(
             self.snapshots, self._snap_dir, _roster_seg,
-            dedup_threshold=float(self.config.get("roster.dedup_threshold", 0.82)))
+            dedup_threshold=float(self.config.get("roster.dedup_threshold", 0.82)),
+            auto_merge=bool(self.config.get("roster.auto_merge.enabled", True)),
+            auto_merge_threshold=float(self.config.get("roster.auto_merge.threshold", 0.85)))
         # Vehicle make/brand classifier for roster profiles (CPU, off the GPU hot path).
         # Quiet unless its weights are present under models/ (uv run -m match.tools.export_models
         # --only carbrand). Confidence-gated so it never asserts a confident-but-wrong brand.
