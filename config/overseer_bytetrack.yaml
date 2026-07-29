@@ -1,0 +1,11 @@
+# Overseer ByteTrack profile — tuned to hold a track through momentary detection loss
+# (occlusion, awkward poses like half-submerged swimmers, motion blur) so a subject we are
+# already tracking keeps its identity when it briefly drops below the detector and reappears.
+# Based on ultralytics' default bytetrack.yaml; only the retention/recovery knobs are changed.
+tracker_type: bytetrack
+track_high_thresh: 0.25   # first-stage match threshold
+track_low_thresh: 0.08    # second-stage: accept weaker re-detections back into an existing track
+new_track_thresh: 0.25    # start a new track only above this (keeps clutter out)
+track_buffer: 60          # keep a lost track alive ~2x longer (~4 s @ 15 fps) for re-association
+match_thresh: 0.8         # association similarity threshold
+fuse_score: True          # fuse detection score with motion/IoU — stabilizes weak detections

@@ -13,6 +13,11 @@ from camera.frame_buffer import Frame
 from core.config import Config
 from plugins.base import BaseDetector, Detection
 
+# Overseer's ByteTrack profile (longer track_buffer so a subject keeps its id through a
+# momentary detection drop). Falls back to ultralytics' built-in name if the file is missing.
+_TRACKER_CFG = Path(__file__).resolve().parents[1] / "config" / "overseer_bytetrack.yaml"
+_TRACKER = str(_TRACKER_CFG) if _TRACKER_CFG.exists() else "bytetrack.yaml"
+
 # Low-light enhancement: denoise luma → CLAHE → adaptive gamma. Denoising first
 # stops night sensor-noise (and small light speckle) from becoming phantom
 # detections, while the gamma lift reveals people/vehicles walking in the dark.
@@ -125,7 +130,7 @@ class YoloBackend:
             # logs a deprecation warning on every call, so we target `quantize` directly.
             quantize="fp16" if self._device.startswith("cuda") else None,
             classes=list(COCO_CLASS_MAP.keys()),
-            tracker="bytetrack.yaml",
+            tracker=_TRACKER,
             verbose=False,
         )
         self.last_inference_ms = (time.perf_counter() - started) * 1000.0

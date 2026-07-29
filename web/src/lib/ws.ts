@@ -1,6 +1,6 @@
 // OVERSEER — WebSocket client to stores. Degrades to 'offline' (NO SIGNAL) when no backend.
 import {
-  conn, frame, detections, ooiTargets, system, applyServerCameras, metrics, pushAlert, pushEvent,
+  conn, frame, applyDetections, resetCoast, ooiTargets, system, applyServerCameras, metrics, pushAlert, pushEvent,
 } from './stores'
 import type { WsMessage } from './types'
 
@@ -13,12 +13,12 @@ let stopped = false
 function apply(msg: WsMessage) {
   switch (msg.t) {
     case 'frame': frame.set(msg.d); break
-    case 'detections': detections.set(msg.d); break
+    case 'detections': applyDetections(msg.d); break
     case 'ooi': ooiTargets.set(msg.d); break
     case 'alert': pushAlert(msg.d); break
     case 'system': system.set(msg.d); break
     case 'cameras': applyServerCameras(msg.d); break
-    case 'conn': conn.set(msg.d); break
+    case 'conn': if (msg.d !== 'online') resetCoast(); conn.set(msg.d); break
     case 'event': pushEvent(msg.d); break
     case 'metrics': metrics.set(msg.d); break
   }

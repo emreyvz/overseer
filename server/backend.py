@@ -708,18 +708,47 @@ class Backend:
 
     # ---- investigation cases -----------------------------------------
     def open_case_from_alert(self, alert: dict) -> int:
-        """Create an investigation case seeded with an alert as its incident; returns its id."""
+        """Create an investigation case seeded with an alert as its incident; returns its id.
+        Guarantees footage: if the alert didn't freeze an incident clip at fire time, capture a
+        short clip from the incident's own camera now, so a case is never footage-less."""
         typ = str(alert.get("type", "INCIDENT"))
         cam = str(alert.get("cam", "") or "")
         sev = str(alert.get("severity", "info"))
         ts = float(alert.get("ts", time.time() * 1000)) / 1000.0
         threat = {"critical": "high", "warning": "medium"}.get(sev, "low")
         name = (f"{typ} · {cam}".strip(" ·")) or typ
+        clip = alert.get("clip")
+        snapshot = alert.get("snapshot")
+        if not clip:
+            clip, snap2 = self._capture_case_footage(cam)
+            snapshot = snapshot or snap2
         cid = self.db.add_case(name, threat_level=threat)
         self.db.add_case_event(cid, ts, "alert", event_type=typ, cam=cam, severity=sev,
                                summary=str(alert.get("summary", "")),
-                               snapshot=alert.get("snapshot"), clip=alert.get("clip"))
+                               snapshot=snapshot, clip=clip)
         return cid
+
+    def _capture_case_footage(self, cam: str) -> tuple[str | None, str | None]:
+        """Grab a short clip (and a mid-frame still) from a camera by name, for a case that has
+        no frozen incident clip. Best-effort — returns (clip_url|None, snapshot_url|None)."""
+        src = next((s for s in self.db.list_sources() if s.name == cam), None)
+        if src is None:
+            return None, None
+        try:
+            frames = self._grab_burst(src, int(self.config.get("cases.clip_frames", 16)))
+        except Exception:  # noqa: BLE001
+            frames = []
+        if len(frames) < 3:
+            return None, None
+        clip = self._encode_clip(frames, fps=float(self.config.get("roster.clip_fps", 10.0)))
+        snap = None
+        try:
+            mid = frames[len(frames) // 2]
+            p = self.snapshots.save(mid, prefix="case")
+            snap = f"/snapshots/{Path(p).relative_to(self._snap_dir).as_posix()}"
+        except Exception:  # noqa: BLE001
+            pass
+        return clip, snap
 
     def case_detail(self, case_id: int) -> dict | None:
         """A case as an investigation: its own incident events plus the surrounding scene events
@@ -756,9 +785,36 @@ class Backend:
         except Exception:  # noqa: BLE001
             ai_summary = None
         cams = sorted({t["cam"] for t in timeline if t["cam"]})
+        incident_cam = next((e.cam for e in cevents if e.kind == "alert" and e.cam),
+                            cevents[0].cam if cevents else None)
+        subjects = self._case_scene_subjects(incident_cam, (anchor - pre) * 1000,
+                                             (anchor + post) * 1000)
         return {"id": case.id, "name": case.name, "threat": case.threat_level, "notes": case.notes,
                 "status": case.status, "created": case.created_at * 1000,
-                "cameras": cams, "events": timeline, "aiSummary": ai_summary}
+                "cameras": cams, "events": timeline, "subjects": subjects, "aiSummary": ai_summary}
+
+    def _case_scene_subjects(self, cam: str | None, start_ms: float, end_ms: float,
+                             limit: int = 8) -> list[dict]:
+        """Roster subjects present at the incident camera during the case window, each with their
+        strongest known associates — the 'who was at the scene, and who they're linked to' panel.
+        Bridges the disjoint identity spaces by matching the roster trail (camera + time) to the
+        incident, since alerts themselves carry no subject id."""
+        if not cam:
+            return []
+        out: list[dict] = []
+        for e in self.roster.list():
+            legs = [t for t in e.get("trail", [])
+                    if t.get("cam") == cam and t.get("last", 0) >= start_ms
+                    and t.get("first", 0) <= end_ms]
+            if not legs:
+                continue
+            out.append({
+                "id": e["id"], "cls": e["cls"], "snapshot": e.get("snapshot"),
+                "plate": e.get("plate"), "seen": sum(int(t.get("count", 0)) for t in legs),
+                "associates": self.entity_relationships(e["id"], limit=3),
+            })
+        out.sort(key=lambda s: -s["seen"])
+        return out[:limit]
 
     # ---- relationships -----------------------------------------------
     def entity_relationships(self, eid: str, limit: int = 12) -> list[dict]:
