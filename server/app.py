@@ -454,6 +454,34 @@ async def api_roster() -> Any:
     return backend.roster.list() if backend else []
 
 
+# NOTE: these static-path routes must precede /api/roster/{det_id} so they aren't swallowed.
+@app.get("/api/roster/merge-candidates")
+async def api_merge_candidates() -> Any:
+    """Likely-duplicate identities to review in the merge center."""
+    if backend is None:
+        return {"candidates": []}
+    cands = await asyncio.to_thread(backend.roster.merge_candidates)
+    return {"candidates": cands}
+
+
+@app.post("/api/roster/merge")
+async def api_roster_merge(payload: dict) -> Any:
+    """Fold two roster entries into one canonical identity."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    merged = backend.roster.merge(str(payload.get("keep", "")), str(payload.get("drop", "")))
+    return merged if merged else JSONResponse({"error": "not found"}, status_code=404)
+
+
+@app.post("/api/roster/merge-reject")
+async def api_roster_merge_reject(payload: dict) -> Any:
+    """Mark two subjects as NOT the same so they're never suggested for merge again."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    backend.roster.reject_merge(str(payload.get("a", "")), str(payload.get("b", "")))
+    return {"ok": True}
+
+
 @app.get("/api/roster/{det_id}")
 async def api_roster_entry(det_id: str) -> Any:
     if backend is None:
