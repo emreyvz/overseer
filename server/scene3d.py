@@ -206,8 +206,27 @@ class Scene3D:
                 col = np.concatenate([col, filled_rgb[nh].astype(np.uint8)], 0)
             if progress:
                 progress("finalizing", 0.95)
+            # the inpaint+depth passes scatter floating garbage points (bad disparity in
+            # hallucinated regions); drop isolated points so the scene reads as clean surfaces
+            pts, col = self._density_filter(pts, col, vox=dist * 0.02, min_neighbors=6)
             pts, col = self._voxel_downsample(pts, col, vox=dist * 0.004)
             return {"points": pts, "colors": col, "fov": self._fov}
+
+    @staticmethod
+    def _density_filter(pts: np.ndarray, col: np.ndarray, vox: float,
+                        min_neighbors: int = 6) -> tuple[np.ndarray, np.ndarray]:
+        """Remove floating outliers: bucket points into coarse voxels and drop any point whose
+        voxel holds fewer than ``min_neighbors`` points. Cheap (O(n) via np.unique) and kills the
+        scattered speckle that hallucinated depth produces, while dense real surfaces survive."""
+        if vox <= 0 or len(pts) == 0:
+            return pts, col
+        key = np.floor(pts / vox).astype(np.int64)
+        h = key[:, 0] * 73856093 ^ key[:, 1] * 19349663 ^ key[:, 2] * 83492791
+        uniq, inv, counts = np.unique(h, return_inverse=True, return_counts=True)
+        keep = counts[inv] >= min_neighbors
+        if keep.sum() < len(pts) * 0.2:      # safety: never nuke most of the cloud
+            return pts, col
+        return pts[keep], col[keep]
 
     @staticmethod
     def _voxel_downsample(pts: np.ndarray, col: np.ndarray, vox: float,

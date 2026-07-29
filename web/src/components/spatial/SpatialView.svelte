@@ -17,7 +17,7 @@
   let unavailable = $state(false)
   let reason = $state('')
   let camName = $state('')
-  let full = $state(false)   // FULL generative 3D (heavy) vs fast depth-mesh
+  let full = $state(true)    // FULL generative 3D (heavy, DEFAULT) vs fast depth-mesh
   // staged reconstruction so the user watches the process, not a spinner:
   //   capture (grab frame) -> depth (scan-sweep the depth field over the frame) -> lift (to 3D)
   let phase = $state<'' | 'capture' | 'depth' | 'lift'>('')
@@ -26,6 +26,14 @@
     capture: 'ACQUIRING FRAME', depth: 'ESTIMATING DEPTH FIELD', lift: 'LIFTING TO 3D',
   }
   const PHASE_STEP: Record<string, number> = { capture: 1, depth: 2, lift: 3 }
+  // FULL-mode watchable loader: the captured frame is shown at once and the reconstruction is
+  // narrated with a progress bar + rotating stages, so the operator never stares at a black void.
+  let genProgress = $state(0)          // 0..100, eased toward ~94 until the real result lands
+  let genStage = $state(0)
+  const GEN_STEPS = ['ACQUIRING FRAME', 'ESTIMATING DEPTH FIELD', 'SYNTHESIZING OCCLUDED VIEWS', 'FUSING POINT CLOUD']
+  let genRaf = 0
+  let genActive = false
+  let pointTex: THREE.Texture | null = null
 
   const REASON_TEXT: Record<string, string> = {
     no_frame: "No live frame on this camera yet. Open it in the live view, then try again.",
@@ -111,12 +119,20 @@
     loading = false; phase = ''
   }
 
-  // FULL generative reconstruction: one long request (~15 s) that returns a completed point
-  // cloud. No frame-sweep — just a "reconstructing" state, then the cloud rises in.
+  // FULL generative reconstruction: one long request (~30 s) that returns a completed point
+  // cloud. We fire it immediately, and IN PARALLEL grab a fast frame+depth purely to drive a
+  // watchable loading montage (the real captured frame + a live depth/scan sweep + a staged
+  // progress bar) so the operator watches the scene being built instead of a black screen. The
+  // fast depth-mesh is NOT put into the 3D scene — only the point cloud is ever shown.
   async function loadFull() {
     loading = true; unavailable = false; reason = ''; phase = 'capture'
-    let res: Awaited<ReturnType<typeof api.spatial3d>> | null = null
-    try { res = await api.spatial3d(cam) } catch { res = null }
+    genProgress = 0; genStage = 0
+    const fullP = api.spatial3d(cam).catch(() => null)          // heavy job starts now
+    const fastP = api.spatial(cam, 256).catch(() => null)       // quick frame for the montage
+    startGenProgress()
+    fastP.then((fast) => { if (fast?.scene && genActive && loading) { if (!camName) camName = fast.scene.cam; startGenPreview(fast.scene) } })
+    const res = await fullP
+    stopGenPreview()
     if (!res || !res.scene) {
       if (res?.reason === 'insufficient_vram') {
         reason = `Full 3D needs a more capable GPU — about ${res.need_gb} GB of VRAM, but only ${res.have_gb} GB is available. Use the fast depth-mesh mode instead.`
@@ -126,8 +142,64 @@
       loading = false; unavailable = true; phase = ''; return
     }
     camName = res.scene.cam
-    try { phase = 'lift'; buildPointCloud(res.scene); await wait(500) } catch { unavailable = true }
+    genProgress = 100; genStage = GEN_STEPS.length - 1
+    try { phase = 'lift'; buildPointCloud(res.scene); await wait(560) } catch { unavailable = true }
     loading = false; phase = ''
+  }
+
+  // Ease the progress bar toward ~94% over ~30 s (it never completes on its own — the real
+  // result snaps it to 100), and advance the stage label with it.
+  function startGenProgress() {
+    genActive = true
+    const t0 = performance.now(), SPAN = 30_000
+    const tick2 = () => {
+      if (!genActive) return
+      const e = (performance.now() - t0) / SPAN
+      genProgress = Math.min(94, 94 * (1 - Math.exp(-2.4 * e)))   // fast then asymptotic
+      genStage = Math.min(GEN_STEPS.length - 1, Math.floor((genProgress / 94) * GEN_STEPS.length))
+      genRaf = requestAnimationFrame(tick2)
+    }
+    tick2()
+  }
+
+  // Paint the captured frame into the preview canvas and endlessly sweep a depth-colourised
+  // "reconstruction" band down it — the visual of the AI working the scene.
+  async function startGenPreview(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>) {
+    if (!genActive) return
+    const { w, h, image, depth } = d
+    await tick()
+    const cv = previewCv
+    if (!cv) return
+    const bytes = Uint8Array.from(atob(depth), (c) => c.charCodeAt(0))
+    const disp = new Float32Array(bytes.buffer)
+    const img = new Image(); img.src = 'data:image/jpeg;base64,' + image
+    try { await img.decode() } catch { return }
+    cv.width = w; cv.height = h
+    const g = cv.getContext('2d')!
+    const dImg = g.createImageData(w, h)
+    for (let i = 0; i < w * h; i++) { const [r, gg, b] = depthColor(disp[i]); const p = i * 4; dImg.data[p] = r; dImg.data[p + 1] = gg; dImg.data[p + 2] = b; dImg.data[p + 3] = 255 }
+    const dCanvas = document.createElement('canvas'); dCanvas.width = w; dCanvas.height = h
+    dCanvas.getContext('2d')!.putImageData(dImg, 0, 0)
+    const t0 = performance.now(), BAND = h * 0.22
+    const frame = () => {
+      if (!genActive || !previewCv) return
+      const p = ((performance.now() - t0) / 2600) % 1
+      const yl = p * (h + BAND) - BAND
+      g.clearRect(0, 0, w, h)
+      g.drawImage(img, 0, 0, w, h)                                    // the live frame
+      g.save(); g.beginPath(); g.rect(0, Math.max(0, yl), w, BAND); g.clip()
+      g.drawImage(dCanvas, 0, 0, w, h); g.restore()                  // depth revealed inside the band
+      g.fillStyle = 'rgba(120,224,255,0.85)'; g.fillRect(0, yl + BAND - 1.5, w, 2)
+      genRaf2 = requestAnimationFrame(frame)
+    }
+    frame()
+  }
+  let genRaf2 = 0
+  function stopGenPreview() {
+    genActive = false
+    if (genRaf) cancelAnimationFrame(genRaf)
+    if (genRaf2) cancelAnimationFrame(genRaf2)
+    genRaf = 0; genRaf2 = 0
   }
 
   function clearScene() {
@@ -151,14 +223,19 @@
     const bb = geo.boundingBox!
     const size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3())
     const diag = Math.max(size.length(), 1)
-    const mat = new THREE.PointsMaterial({ size: diag * 0.013, vertexColors: true, sizeAttenuation: true })
+    if (!pointTex) pointTex = makeDiscTexture()
+    // small crisp round points: big enough to close inter-sample gaps, small enough to keep
+    // texture detail instead of smearing into overlapping blobs. alphaTest crops each disc tight.
+    const mat = new THREE.PointsMaterial({
+      size: diag * 0.006, vertexColors: true, sizeAttenuation: true,
+      map: pointTex, alphaTest: 0.5, transparent: true, depthWrite: true })
     pointsObj = new THREE.Points(geo, mat)
     scene.add(pointsObj)
     entityCount = 0
-    // frame it (offset off-axis)
+    // frame it (offset off-axis), pulled back so the whole scene reads at once
     const vfov = camera!.fov * Math.PI / 180
-    const dist = Math.max((size.y / 2) / Math.tan(vfov / 2), (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect) * 1.15
-    const yaw = 16 * Math.PI / 180, pitch = 6 * Math.PI / 180
+    const dist = Math.max((size.y / 2) / Math.tan(vfov / 2), (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect) * 1.55
+    const yaw = 16 * Math.PI / 180, pitch = 8 * Math.PI / 180
     if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.2; controls.maxDistance = dist * 5 }
     camera!.position.set(c.x + dist * Math.sin(yaw) * Math.cos(pitch), c.y - dist * Math.sin(pitch), c.z + dist * Math.cos(yaw) * Math.cos(pitch))
     camera!.updateProjectionMatrix()
@@ -346,6 +423,18 @@
     return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))
   }
 
+  // soft radial disc used as the point sprite so splats are round with a feathered edge
+  function makeDiscTexture(): THREE.Texture {
+    const s = 64, cv = document.createElement('canvas'); cv.width = cv.height = s
+    const g = cv.getContext('2d')!
+    const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2)
+    grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.7, 'rgba(255,255,255,1)')
+    grad.addColorStop(1, 'rgba(255,255,255,0)')
+    g.fillStyle = grad; g.beginPath(); g.arc(s / 2, s / 2, s / 2, 0, Math.PI * 2); g.fill()
+    const tex = new THREE.CanvasTexture(cv); tex.needsUpdate = true
+    return tex
+  }
+
   function makeMarker(text: string, color: string): THREE.Sprite {
     const cw = 256, ch = 72
     const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch
@@ -392,6 +481,8 @@
   onDestroy(() => {
     window.removeEventListener('keydown', onkey, true)
     if (autoTimer) clearInterval(autoTimer)
+    stopGenPreview()
+    pointTex?.dispose()
     if (raf) cancelAnimationFrame(raf)
     ro?.disconnect()
     controls?.dispose()
@@ -423,9 +514,17 @@
   {#if loading && full}
     <div class="veil caps" class:lifting={phase === 'lift'}>
       <div class="reco">
-        <div class="genring"></div>
-        <div class="pl caps"><span class="pulse">{phase === 'lift' ? 'BUILDING POINT CLOUD' : 'GENERATING FULL 3D SCENE'}_</span></div>
-        <div class="gensub caps">inpainting occluded surfaces across novel views · ~15s</div>
+        <div class="preview show gen">
+          <canvas bind:this={previewCv}></canvas>
+        </div>
+        <div class="genbar"><span class="genfill" style="width:{genProgress}%"></span></div>
+        <div class="steps caps">
+          {#each GEN_STEPS as s, i}
+            <span class="step" class:on={genStage === i} class:done={genStage > i}><span class="dot"></span>{s}</span>
+          {/each}
+        </div>
+        <div class="pl caps"><span class="pulse">{GEN_STEPS[genStage] || 'RECONSTRUCTING'}_ · {Math.round(genProgress)}%</span></div>
+        <div class="gensub caps">generative full-3D · synthesizing occluded geometry across novel views · ~30s</div>
       </div>
     </div>
   {:else if loading}
@@ -479,7 +578,12 @@
   .preview { position: relative; width: 62%; aspect-ratio: 16/9; border: 1px solid var(--hairline); background: #04070a;
     overflow: hidden; opacity: 0; transform: scale(0.96); transition: opacity 300ms, transform 300ms; box-shadow: 0 0 40px rgba(0,0,0,0.6); }
   .preview.show { opacity: 1; transform: scale(1); }
+  .preview.gen { width: 88%; box-shadow: 0 0 60px rgba(0,0,0,0.7), 0 0 0 1px var(--cyan-dim, rgba(53,224,255,0.25)) inset; }
   .preview canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* progress bar for the generative reconstruction */
+  .genbar { width: 88%; height: 3px; background: rgba(120,224,255,0.12); overflow: hidden; }
+  .genfill { display: block; height: 100%; background: linear-gradient(90deg, #1c6b7e, var(--cyan)); box-shadow: 0 0 10px var(--cyan);
+    transition: width 240ms linear; }
   .scanbox { position: absolute; inset: 0; }
   .scanbox .scanline { position: absolute; left: 0; right: 0; height: 2px; background: var(--cyan); box-shadow: 0 0 12px var(--cyan);
     animation: sweep 1.1s ease-in-out infinite; }
@@ -490,8 +594,6 @@
   .step.on { color: var(--cyan); } .step.on .dot { border-color: var(--cyan); background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
   .step.done { color: var(--ink-dim); } .step.done .dot { border-color: var(--ink-dim); background: var(--ink-dim); box-shadow: none; }
   .pl { font-size: 10px; color: var(--cyan); letter-spacing: 0.2em; }
-  .genring { width: 54px; height: 54px; border: 2px solid var(--hairline); border-top-color: var(--cyan); border-radius: 50%; animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
   .gensub { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.1em; text-transform: none; }
   .uahead { color: var(--scarlet); font-size: 12px; letter-spacing: 0.2em; }
   .uasub { color: var(--ink-dim); font-size: 9px; letter-spacing: 0.06em; text-transform: none; }
