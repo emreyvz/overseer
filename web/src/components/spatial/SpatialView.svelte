@@ -158,6 +158,31 @@
     return ZNEAR + Math.pow(1 - disp01, GAMMA) * (ZFAR - ZNEAR)
   }
 
+  // Clean, smooth SILHOUETTE: morphologically tidy the "kept" (non-sky) mask so the mesh outline is
+  // a smooth, well-defined shape instead of a jagged per-pixel fringe — close small notches, open
+  // thin spikes, then trim a 1px border of unreliable edge pixels.
+  function cleanMask(disp: Float32Array, w: number, h: number): Uint8Array {
+    const base = new Uint8Array(w * h)
+    for (let i = 0; i < w * h; i++) base[i] = disp[i] >= SKYCULL ? 1 : 0
+    const morph = (m: Uint8Array, r: number, dilate: boolean): Uint8Array => {
+      const tmp = new Uint8Array(w * h), out = new Uint8Array(w * h)
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let v = dilate ? 0 : 1
+        for (let d = -r; d <= r; d++) { const xx = x + d; if (xx < 0 || xx >= w) continue; v = dilate ? (v | m[y * w + xx]) : (v & m[y * w + xx]) }
+        tmp[y * w + x] = v
+      }
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let v = dilate ? 0 : 1
+        for (let d = -r; d <= r; d++) { const yy = y + d; if (yy < 0 || yy >= h) continue; v = dilate ? (v | tmp[yy * w + x]) : (v & tmp[yy * w + x]) }
+        out[y * w + x] = v
+      }
+      return out
+    }
+    let m = morph(morph(base, 2, true), 2, false)   // close: fill small notches
+    m = morph(morph(m, 2, false), 2, true)          // open: drop thin spikes / specks
+    return morph(m, 1, false)                       // trim the 1px ragged fringe
+  }
+
   // Smooth the disparity grid (separable box blur, a few passes) so the meshed surface is smooth
   // rather than stair-stepped, and sharp depth jumps become gentle ramps instead of torn edges.
   function smoothDisp(disp: Float32Array, w: number, h: number, radius = 2, iters = 2): Float32Array {
@@ -311,11 +336,12 @@
     const pos: number[] = [], col: number[] = [], uv: number[] = []
     const vidx = new Int32Array(w * h).fill(-1)
     const vz: number[] = [], vpix: number[] = []
+    const keep = cleanMask(disp, w, h)   // smooth, well-defined silhouette
     let vn = 0
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = y * w + x
-        if (disp[i] < SKYCULL) continue
+        if (!keep[i]) continue
         vidx[i] = vn++
         const Z = zOf(disp[i])
         pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -(Z + zbias)); vz.push(Z); vpix.push(i)
