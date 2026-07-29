@@ -47,7 +47,11 @@ roster:
   # uncertain band (dedup_threshold down to the merge-center floor) still waits for manual review.
   auto_merge:
     enabled: true
-    threshold: 0.85         # appearance cosine at/above which a merge happens unattended
+    # Appearance cosine at/above which a merge happens unattended. Kept aggressive (fewer
+    # duplicates is better) so the same subject from a different angle — even back-facing —
+    # folds together; the learned ReID embedding (OSNet-AIN, cross-view) makes this safe-ish,
+    # and the same-time-different-camera shield still blocks the physically-impossible merges.
+    threshold: 0.78
 
 detectors:
   motion:

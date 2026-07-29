@@ -281,9 +281,12 @@ class Backend:
         from .ytstream import is_stream_url
         out = []
         for s in self.db.list_sources():
+            # Online = the active analysis source, OR a camera whose preview relay is currently
+            # producing frames (really reachable) — not merely "is this the active camera".
+            live = (s.id == self._source_id and self._conn == "online") or self.thumbs.is_live(s.id)
             item: dict[str, Any] = {
                 "id": str(s.id), "name": s.name, "url": s.url,
-                "health": "online" if s.id == self._source_id else "offline",
+                "health": "online" if live else "offline",
                 "coords": [s.map_x, s.map_y] if s.map_x is not None and s.map_y is not None else None,
                 "fps": 0.0,
             }
@@ -627,6 +630,36 @@ class Backend:
             "reason": f"BOLO subject {entry['id']} seen again — {entry.get('obs', 0)} sightings total",
         }})
 
+    def _live_journey(self, det_id: str) -> str | None:
+        """Fallback journey when a subject has no stored sighting clips yet: grab a fresh short
+        clip from each camera on its trail (most recent first, capped) so Play Journey always has
+        moving footage of where the subject was seen — never a dead button."""
+        e = self.roster.get(det_id)
+        if e is None:
+            return None
+        trail = e.get("trail") or []
+        cams = [t["cam"] for t in sorted(trail, key=lambda t: -float(t.get("last", 0))) if t.get("cam")][:3]
+        if not cams and e.get("cam"):
+            cams = [e["cam"]]
+        w, h = 480, 270
+        frames: list = []
+        for i, cam in enumerate(cams):
+            src = next((s for s in self.db.list_sources() if s.name == cam), None)
+            if src is None:
+                continue
+            try:
+                burst = self._grab_burst(src, int(self.config.get("roster.clip_frames", 16)))
+            except Exception:  # noqa: BLE001
+                burst = []
+            if not burst:
+                continue
+            frames += self._supercut_title(cam, i + 1, len(cams), w, h)
+            for f in burst:
+                frames.append(f if f.shape[:2] == (h, w) else cv2.resize(f, (w, h)))
+        if len(frames) < 4:
+            return None
+        return self._encode_clip(frames, fps=float(self.config.get("roster.clip_fps", 10.0)))
+
     @staticmethod
     def _supercut_title(cam: str, idx: int, total: int, w: int, h: int, n: int = 6) -> list:
         """A short title card announcing the next leg of a subject's journey."""
@@ -643,7 +676,7 @@ class Backend:
         each leg introduced by a camera title card. Cached until a new leg is captured."""
         segs = self.roster.clip_paths(det_id)
         if not segs:
-            return None
+            return self._live_journey(det_id)   # no stored legs yet -> capture fresh footage now
         cached = self._supercut_cache.get(det_id)
         if cached is not None and cached[0] == len(segs):
             return cached[1]

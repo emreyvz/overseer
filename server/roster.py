@@ -35,7 +35,7 @@ class SessionRoster:
                  *, min_area: int = 1400, refresh_ratio: float = 1.4,
                  shot_interval: float = 1.5, max_entries: int = 600,
                  dedup_threshold: float = 0.82,
-                 auto_merge: bool = True, auto_merge_threshold: float = 0.85) -> None:
+                 auto_merge: bool = True, auto_merge_threshold: float = 0.78) -> None:
         self._snap = snapshots
         self._dir = Path(snap_dir)
         self._seg = seg_backend

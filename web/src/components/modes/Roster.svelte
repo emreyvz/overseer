@@ -9,8 +9,7 @@
   import { sfx } from '../../lib/audio'
   import PoiDossier from '../roster/PoiDossier.svelte'
   import SocialGraph from '../roster/SocialGraph.svelte'
-  import MergeCenter from '../roster/MergeCenter.svelte'
-  import { graphOpen, mergeOpen } from '../../lib/stores'
+  import { graphOpen } from '../../lib/stores'
   import type { RosterEntry } from '../../lib/types'
 
   const API = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:8787'
@@ -90,7 +89,6 @@
       {/each}
       {#if nWatched > 0}<button class="chip caps bolo" class:on={bolo} onclick={() => (bolo = !bolo)}>◉ BOLO {nWatched}</button>{/if}
       <button class="chip caps net" onclick={() => graphOpen.set(true)}>◈ NETWORK</button>
-      <button class="chip caps net" onclick={() => mergeOpen.set(true)}>⧉ MERGE</button>
     </div>
     <div class="search">
       <span class="mag caps">⌕</span>
@@ -146,10 +144,6 @@
   {#if $graphOpen}
     <SocialGraph onclose={() => graphOpen.set(false)}
       onopen={(id) => { const e = entries.find((x) => x.id === id); if (e) { selected = e; graphOpen.set(false) } }} />
-  {/if}
-
-  {#if $mergeOpen}
-    <MergeCenter onclose={() => { mergeOpen.set(false); refresh() }} />
   {/if}
 
   {#if selected}
