@@ -25,6 +25,7 @@ export interface Detection {
   subtype?: string      // vehicles: fine COCO type — car / truck / bus / motorcycle / bicycle
   speed?: number        // vehicles: rough km/h estimate (uncalibrated → comparable, not exact)
   make?: string         // vehicles: estimated brand from the ViT classifier (confidence-gated)
+  intent?: { intent: string; confidence: number; why: string; alt?: string }  // people: estimated behaviour (probabilistic)
 }
 
 export interface FrameMeta {
