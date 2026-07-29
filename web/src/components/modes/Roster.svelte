@@ -72,6 +72,10 @@
   }
 
   const photo = (e: RosterEntry) => (e.snapshot ? API + e.snapshot : '')
+  const clipSrc = (e: RosterEntry) => (e.clip ? API + e.clip : '')
+  // play a card's sighting clip on hover only (autoplaying every card at once would be heavy)
+  function hoverPlay(ev: PointerEvent) { const v = (ev.currentTarget as HTMLElement).querySelector('video'); if (v) v.play().catch(() => {}) }
+  function hoverStop(ev: PointerEvent) { const v = (ev.currentTarget as HTMLElement).querySelector('video'); if (v) { v.pause(); v.currentTime = 0 } }
   // compact combined line for the small gallery cards
   const attrLine = (e: RosterEntry) =>
     [e.attrs?.make, e.attrs?.subtype, e.attrs?.upper_color, e.cls === 'person' ? e.attrs?.height : undefined]
@@ -125,9 +129,12 @@
     <div class="grid">
       {#each shown as e (e.id)}
         {@const a = $annotations[e.id] ?? {}}
-        <button class="card" class:sel={selected?.id === e.id} class:watched={e.watched} onclick={() => open(e)}>
+        <button class="card" class:sel={selected?.id === e.id} class:watched={e.watched} onclick={() => open(e)}
+          onpointerenter={hoverPlay} onpointerleave={hoverStop}>
           <div class="ph">
             {#if photo(e)}<img src={photo(e)} alt="" />{:else}<div class="noimg caps">NO IMG</div>{/if}
+            {#if clipSrc(e)}<!-- svelte-ignore a11y_media_has_caption --><video class="clipv" src={clipSrc(e)} muted loop playsinline preload="none"></video>{/if}
+            {#if clipSrc(e)}<span class="vtag caps">▶</span>{/if}
             <span class="badge caps">{e.cls === 'vehicle' ? '🚗' : '👤'}</span>
             {#if e.watched}<span class="bolo caps">◉ BOLO</span>{/if}
           </div>
@@ -202,6 +209,11 @@
   .card:hover, .card.sel { border-color: var(--scarlet); }
   .ph { position: relative; aspect-ratio: 3 / 4; background: #05070a; overflow: hidden; }
   .ph img { width: 100%; height: 100%; object-fit: cover; filter: saturate(0.6) contrast(1.05); }
+  /* sighting clip fades in over the still on hover — the card comes alive as a short video */
+  .clipv { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 180ms; }
+  .card:hover .clipv { opacity: 1; }
+  .vtag { position: absolute; bottom: 4px; left: 4px; font-size: 8px; color: var(--cyan); text-shadow: 0 0 4px #000; opacity: 0.8; }
+  .card:hover .vtag { opacity: 0; }
   .noimg { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--ink-ghost); font-size: var(--fs-micro); }
   .badge { position: absolute; top: 4px; right: 4px; font-size: 12px; text-shadow: 0 0 4px #000; }
   .card.watched { border-color: var(--scarlet); }

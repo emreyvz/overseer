@@ -235,6 +235,18 @@ class Backend:
         threading.Thread(target=self._start_roster_harvester, name="RosterBoot", daemon=True).start()
 
     def _emit(self, msg: dict[str, Any]) -> None:
+        # Safety net: an incident alert must never reach the operator empty. If it carries
+        # neither a still nor a clip, backfill from the current frame / rolling buffer so the
+        # alert card (and any case opened from it) always has footage.
+        if msg.get("t") == "alert" and isinstance(msg.get("d"), dict):
+            d = msg["d"]
+            if not d.get("snapshot") and not d.get("clip"):
+                snap = self._alert_snapshot()
+                if snap:
+                    d["snapshot"] = snap
+                clip = self._save_clip()
+                if clip:
+                    d["clip"] = clip
         if self._loop is None or self._broadcast is None:
             return
         try:
