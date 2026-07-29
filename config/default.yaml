@@ -241,6 +241,11 @@ alerts:
   cooldown_seconds: 60.0
   crowd_min: 8
   incident_window_minutes: 15
+# Investigation cases: an alert can open a Case whose timeline gathers the scene events from
+# the log within a window around the incident (seconds before/after the triggering moment).
+cases:
+  window_before: 90.0
+  window_after: 120.0
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT

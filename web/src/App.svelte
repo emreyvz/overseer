@@ -25,6 +25,7 @@
   import Forensic from './components/modes/Forensic.svelte'
   import Archive from './components/modes/Archive.svelte'
   import Roster from './components/modes/Roster.svelte'
+  import Case from './components/modes/Case.svelte'
   import ZoneEditor from './components/pov/ZoneEditor.svelte'
   import ObjectRegister from './components/pov/ObjectRegister.svelte'
   import AlertRules from './components/AlertRules.svelte'
@@ -33,7 +34,7 @@
   import Watchlist from './components/Watchlist.svelte'
   import AiConsole from './components/AiConsole.svelte'
 
-  const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive' }
+  const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case' }
 
   onMount(() => { startZoneEngine(); startAnomalyEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus() } })
 
@@ -172,6 +173,7 @@
   {#if $mode === 'forensic'}<Forensic />{/if}
   {#if $mode === 'archive'}<Archive />{/if}
   {#if $mode === 'roster'}<Roster />{/if}
+  {#if $mode === 'case'}<Case />{/if}
   {#if $zoneEditor}<ZoneEditor />{/if}
   {#if $objectRegister}<ObjectRegister />{/if}
   {#if $alertRules}<AlertRules />{/if}

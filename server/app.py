@@ -718,7 +718,8 @@ async def api_cases() -> Any:
         return []
     return [
         {"id": c.id, "name": c.name, "threat": c.threat_level, "notes": c.notes,
-         "created": c.created_at * 1000, "targets": len(backend.db.list_case_targets(c.id))}
+         "status": c.status, "created": c.created_at * 1000,
+         "targets": len(backend.db.list_case_targets(c.id))}
         for c in backend.db.list_cases()
     ]
 
@@ -731,6 +732,53 @@ async def api_add_case(payload: dict[str, str]) -> Any:
         payload["name"], threat_level=payload.get("threat", "low"), notes=payload.get("notes", ""),
     )
     return {"id": cid}
+
+
+@app.post("/api/cases/from-alert")
+async def api_case_from_alert(payload: dict) -> Any:
+    """Open an investigation case seeded with an alert as its incident. Returns the case id."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    alert = payload.get("alert") or payload
+    cid = await asyncio.to_thread(backend.open_case_from_alert, alert)
+    return {"id": cid}
+
+
+@app.get("/api/cases/{case_id}")
+async def api_case_detail(case_id: int) -> Any:
+    """A case as an investigation: incident, timeline of scene events around it, and AI summary."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    detail = await asyncio.to_thread(backend.case_detail, case_id)
+    return detail if detail else JSONResponse({"error": "not found"}, status_code=404)
+
+
+@app.post("/api/cases/{case_id}/status")
+async def api_case_status(case_id: int, payload: dict) -> Any:
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    backend.db.set_case_status(case_id, str(payload.get("status", "open")))
+    return {"ok": True}
+
+
+@app.put("/api/cases/{case_id}")
+async def api_case_update(case_id: int, payload: dict) -> Any:
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    c = backend.db.get_case(case_id)
+    if c is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    backend.db.update_case(case_id, payload.get("name", c.name),
+                           payload.get("threat", c.threat_level), payload.get("notes", c.notes))
+    return {"ok": True}
+
+
+@app.delete("/api/cases/{case_id}")
+async def api_case_delete(case_id: int) -> Any:
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    backend.db.delete_case(case_id)
+    return {"ok": True}
 
 
 # Serve alert/snapshot images (must be mounted before the "/" catch-all).

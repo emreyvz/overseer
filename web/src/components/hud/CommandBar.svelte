@@ -11,13 +11,14 @@
   $effect(() => { if ($commandOpen) { value = ''; sel = 0; queueMicrotask(() => el?.focus()) } })
 
   const MODE_WORDS: Record<string, Mode> = {
-    forensic: 'forensic', archive: 'archive', pov: 'pov', roster: 'roster',
+    forensic: 'forensic', archive: 'archive', pov: 'pov', roster: 'roster', case: 'case', cases: 'case',
   }
 
   interface Sug { v: string; d: string }
   const BASE: Sug[] = [
     { v: 'sources', d: 'SOURCE PICKER' },
     { v: 'map', d: 'CAMERA MAP' },
+    { v: 'cases', d: 'INVESTIGATION CASES' },
     { v: 'forensic', d: 'FORENSIC SEARCH' },
     { v: 'watchlist', d: 'WATCHLIST · TARGETS' },
     { v: 'roster', d: 'ROSTER · PEOPLE & VEHICLES' },

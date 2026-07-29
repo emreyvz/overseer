@@ -20,6 +20,7 @@
     { label: 'POV', key: '1-9', mode: 'pov', act: () => mode.set('pov') },
     { label: 'SOURCES', key: 'C', mode: '', act: () => { pickerView.set('grid'); stage.set('select') } },
     { label: 'FORENSIC', key: 'A', mode: 'forensic', act: () => mode.set('forensic') },
+    { label: 'CASES', key: 'K', mode: 'case', act: () => mode.set('case') },
     { label: 'WATCHLIST', key: 'W', mode: '', act: () => watchlistOpen.set(true) },
     { label: 'ASSISTANT', key: 'I', mode: '', act: () => aiOpen.set(true) },
     { label: 'ARCHIVE', key: 'R', mode: 'archive', act: () => mode.set('archive') },
