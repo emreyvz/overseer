@@ -29,6 +29,8 @@ export interface CameraDna { id: number | string; name?: string | null; dna: str
 export interface CaseRow { id: number; name: string; threat: string; notes: string; status?: string; created: number; targets: number }
 export interface CaseEventRow { ts: number; kind: string; type: string; cam: string; severity: string; summary: string; snapshot?: string | null; clip?: string | null }
 export interface CaseDetail { id: number; name: string; threat: string; notes: string; status: string; created: number; cameras: string[]; events: CaseEventRow[]; aiSummary: string | null }
+export interface SuggestRule { name: string; event_type: string; source_id: number; severity: string }
+export interface Suggestion { kind: 'alert' | 'camera'; cam: string; title: string; why: string; count?: number; rule?: SuggestRule }
 
 export const api = {
   base: API_BASE,
@@ -74,6 +76,8 @@ export const api = {
   entityRelationships: (id: string) => get<{ associates: Associate[] }>(`/api/roster/${id}/relationships`),
   relationships: () => get<SocialGraph>(`/api/relationships`),
   cameraDna: () => get<{ cameras: CameraDna[] }>(`/api/cameras/dna`),
+  suggestions: () => get<{ suggestions: Suggestion[] }>(`/api/suggestions`),
+  addAlertRule: (rule: SuggestRule) => post<{ id: number }>(`/api/alerts/rules`, rule),
   mergeCandidates: () => get<{ candidates: MergeCandidate[] }>(`/api/roster/merge-candidates`),
   mergeRoster: (keep: string, drop: string) => post<import('./types').RosterEntry>(`/api/roster/merge`, { keep, drop }),
   mergeReject: (a: string, b: string) => post<{ ok: boolean }>(`/api/roster/merge-reject`, { a, b }),
