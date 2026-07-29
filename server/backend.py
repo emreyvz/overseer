@@ -153,7 +153,8 @@ class Backend:
         from .depth import DepthEstimator
         self._depth = DepthEstimator(
             model_name=str(self.config.get("spatial.model",
-                                           "depth-anything/Depth-Anything-V2-Small-hf")))
+                                           "depth-anything/Depth-Anything-V2-Large-hf")),
+            input_size=self.config.get("spatial.depth_res"))
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
