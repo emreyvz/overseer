@@ -873,6 +873,48 @@ class Backend:
                         "plate": e.get("plate"), "cam": e.get("cam")})
         return out
 
+    def entity_ego_graph(self, eid: str, limit1: int = 8, limit2: int = 5) -> dict:
+        """The subject's local relationship network for the profile page: the subject at the
+        centre, the people/vehicles they're most associated with (1 hop), and in turn WHO THOSE
+        are linked to (2 hops) — so an investigator sees not just direct contacts but the circle
+        around them. Nodes carry a photo; edges carry co-occurrence strength."""
+        nodes: dict[str, dict] = {}
+        edges: list[dict] = []
+        seen_edges: set = set()
+
+        def add_node(nid: str, hop: int) -> None:
+            if nid in nodes:
+                nodes[nid]["hop"] = min(nodes[nid]["hop"], hop)
+                return
+            e = self.roster.get(nid)
+            nodes[nid] = {"id": nid, "hop": hop,
+                          "cls": e["cls"] if e else "person",
+                          "snapshot": e["snapshot"] if e else None,
+                          "plate": e.get("plate") if e else None}
+
+        def add_edge(a: str, b: str, r: dict) -> None:
+            if a == b:
+                return
+            k = frozenset((a, b))
+            if k in seen_edges:
+                return
+            seen_edges.add(k)
+            edges.append({"a": a, "b": b, "count": r.get("count", 0),
+                          "confidence": r.get("confidence", 0), "cameras": r.get("cameras", [])})
+
+        add_node(eid, 0)
+        l1 = self.relationships.for_entity(eid, limit=limit1)
+        for r in l1:
+            add_node(r["id"], 1)
+            add_edge(eid, r["id"], r)
+        for r in l1:
+            for r2 in self.relationships.for_entity(r["id"], limit=limit2):
+                if r2["id"] == eid:
+                    continue
+                add_node(r2["id"], 2)
+                add_edge(r["id"], r2["id"], r2)
+        return {"center": eid, "nodes": list(nodes.values()), "edges": edges}
+
     def camera_dna(self) -> list[dict]:
         """Per-camera behavioural profile + reputation, one row per camera seen this session."""
         names = {s.id: s.name for s in self.db.list_sources()}
