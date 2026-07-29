@@ -237,6 +237,11 @@ class DioramaScene:
                 h_world = bh * zb / fx
                 # textured cutout (RGBA, alpha = component mask)
                 crop = rgb[y:y + bh, x:x + bw]
+                mean_b = float(crop[comp].mean()) if comp.any() else 0.0
+                if mean_b < 34.0:                        # near-black shadowed clutter reads as junk
+                    continue
+                if w_world < 0.28 and h_world < 0.28:    # slivers / specks at world scale
+                    continue
                 alpha = (comp.astype(np.uint8) * 255)
                 # feather 1px so edges aren't hard
                 alpha = cv2.erode(alpha, np.ones((2, 2), np.uint8), 1)

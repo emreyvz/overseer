@@ -255,9 +255,10 @@
     scene.fog = new THREE.FogExp2((sr << 16) | (sg << 8) | sb, 0.012)   // subtle atmosphere
     const { w, h, fov } = d
     const fx = 0.5 * w / Math.tan((fov * Math.PI) / 180 / 2), cx = w / 2, cy = h / 2
-    // ground: a solid textured surface over the ground-class pixels only
+    // ground: a solid textured surface over the ground-class pixels only (tight maxlen so the
+    // depth mesh doesn't throw long stretched "skirt" triangles across depth jumps)
     const g = await decodeLayer(d.ground_image, d.ground_disp, w, h)
-    dioGround = layerMesh(g.disp, g.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 3.5, 0)
+    dioGround = layerMesh(g.disp, g.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 1.6, 0)
     scene.add(dioGround)
     // objects: each thing stood up as an image-textured cutout (cross for round things)
     dioObjects = new THREE.Group()
