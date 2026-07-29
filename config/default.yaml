@@ -58,6 +58,8 @@ detectors:
     enabled: true
     min_area: 500
     event_threshold_percent: 0.5
+    diff_thresh: 16         # frame-diff sensitivity (grey delta/px). Lower = more sensitive; keeps
+                            # repetitive motion (sea waves, swaying) alive that MOG2 absorbs
   yolo:
     model: yolo11s.pt
     confidence: 0.25
