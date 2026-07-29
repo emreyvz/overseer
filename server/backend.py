@@ -141,6 +141,8 @@ class Backend:
         self._plate_watch: set[str] = set()
         self._plate_watch_last: dict[str, float] = {}
         self._plate_watch_cd = float(self.config.get("match.anpr.watch_cooldown", 30.0))
+        from .relationships import RelationshipGraph
+        self.relationships = RelationshipGraph()   # co-occurrence graph between roster subjects
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -457,6 +459,7 @@ class Backend:
                     clip_fn=self._roster_clip if bool(self.config.get("roster.clips", True)) else None,
                     watch_hit_fn=self._roster_watch_hit,
                     plate_hit_fn=self._roster_plate_hit,
+                    relate_fn=self.relationships.observe_together,
                     watch_cooldown=float(self.config.get("roster.watch_cooldown", 45.0)),
                     interval=float(self.config.get("roster.interval", 4.0)),
                 )
@@ -743,6 +746,31 @@ class Backend:
         return {"id": case.id, "name": case.name, "threat": case.threat_level, "notes": case.notes,
                 "status": case.status, "created": case.created_at * 1000,
                 "cameras": cams, "events": timeline, "aiSummary": ai_summary}
+
+    # ---- relationships -----------------------------------------------
+    def entity_relationships(self, eid: str, limit: int = 12) -> list[dict]:
+        """The subjects most associated with one roster entity, enriched with who they are."""
+        out: list[dict] = []
+        for r in self.relationships.for_entity(eid, limit=limit):
+            e = self.roster.get(r["id"])
+            if e is None:
+                continue
+            out.append({**r, "cls": e["cls"], "snapshot": e["snapshot"],
+                        "plate": e.get("plate"), "cam": e.get("cam")})
+        return out
+
+    def relationship_graph(self, min_count: int = 2, limit: int = 300) -> dict:
+        """The social graph: nodes (with a photo) and weighted association edges."""
+        g = self.relationships.graph(min_count=min_count, limit=limit)
+        nodes = []
+        for nid in g["nodes"]:
+            e = self.roster.get(nid)
+            if e is not None:
+                nodes.append({"id": nid, "cls": e["cls"], "snapshot": e["snapshot"],
+                              "plate": e.get("plate")})
+        valid = {n["id"] for n in nodes}
+        edges = [e for e in g["edges"] if e["a"] in valid and e["b"] in valid]
+        return {"nodes": nodes, "edges": edges}
 
     def _roster_embed(self, crop: Any, cls: str) -> Any:
         """A ReID appearance embedding for a crop, for roster de-duplication. Serialized so

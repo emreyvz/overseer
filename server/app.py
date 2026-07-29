@@ -488,6 +488,23 @@ async def api_plates_watch(payload: dict) -> Any:
     return {"plates": backend.watch_plate(plate, bool(payload.get("on", True)))}
 
 
+@app.get("/api/relationships")
+async def api_relationships() -> Any:
+    """The social graph — subjects and their discovered co-occurrence associations."""
+    if backend is None:
+        return {"nodes": [], "edges": []}
+    return await asyncio.to_thread(backend.relationship_graph)
+
+
+@app.get("/api/roster/{det_id}/relationships")
+async def api_entity_relationships(det_id: str) -> Any:
+    """Subjects most associated with this one (frequently seen together)."""
+    if backend is None:
+        return {"associates": []}
+    assoc = await asyncio.to_thread(backend.entity_relationships, det_id)
+    return {"associates": assoc}
+
+
 @app.post("/api/roster/{det_id}/find")
 async def api_roster_find(det_id: str) -> Any:
     """Find this roster subject across all cameras by appearance (ReID) — returns scored hits."""
