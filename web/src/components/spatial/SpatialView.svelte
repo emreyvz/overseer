@@ -38,8 +38,9 @@
 
   // Back-projection / depth-to-Z tuning (settled by visual iteration across cameras).
   const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6
-  const MESH_MAXLEN = 0.10    // cull mesh triangles whose 3D edge is longer than this (kills skirts)
-  const SKYCULL = 0.05        // drop the most-distant (sky / flat far background) points
+  const MESH_MAXLEN = 0.32    // cull only wildly-stretched triangles; loose so the surface stays
+                              // continuous (no torn gaps) — depth smoothing turns jumps into ramps
+  const SKYCULL = 0.015       // keep almost everything (fills the far field); drop only pure sky
   const CLS_COLOR: Record<string, string> = {
     person: '#35e0ff', vehicle: '#ffb038', animal: '#6be675', object: '#c9d4dc', weapon: '#ff3b3b',
   }
@@ -157,6 +158,27 @@
     return ZNEAR + Math.pow(1 - disp01, GAMMA) * (ZFAR - ZNEAR)
   }
 
+  // Smooth the disparity grid (separable box blur, a few passes) so the meshed surface is smooth
+  // rather than stair-stepped, and sharp depth jumps become gentle ramps instead of torn edges.
+  function smoothDisp(disp: Float32Array, w: number, h: number, radius = 2, iters = 2): Float32Array {
+    let src = disp
+    for (let it = 0; it < iters; it++) {
+      const tmp = new Float32Array(w * h), out = new Float32Array(w * h)
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let s = 0, n = 0
+        for (let d = -radius; d <= radius; d++) { const xx = x + d; if (xx < 0 || xx >= w) continue; s += src[y * w + xx]; n++ }
+        tmp[y * w + x] = s / n
+      }
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let s = 0, n = 0
+        for (let d = -radius; d <= radius; d++) { const yy = y + d; if (yy < 0 || yy >= h) continue; s += tmp[yy * w + x]; n++ }
+        out[y * w + x] = s / n
+      }
+      src = out
+    }
+    return src as Float32Array
+  }
+
   // Solve a 3x3 linear system (Gaussian elimination w/ partial pivot) for the quadratic ground fit.
   function solve3(A: number[][], b: number[]): [number, number, number] | null {
     const m = [[...A[0], b[0]], [...A[1], b[1]], [...A[2], b[2]]]
@@ -202,10 +224,13 @@
     // the completed background (computed backend-side) is decoded first: it's both the far-field
     // fill AND the back-cap that turns foreground objects into solid volumes.
     const bg = (bg_image && bg_depth) ? await decodeLayer(bg_image, bg_depth, w, h) : null
+    // smooth the depth so the surface is continuous & smooth (no stair-steps / torn skirts)
+    const fgDisp = smoothDisp(fg.disp, w, h)
+    const bgDisp = bg ? smoothDisp(bg.disp, w, h) : null
 
     // shared ground de-bow: fit the ground's height trend once so the mesh AND the markers flatten
     // together (monocular depth bows a flat road upward with distance — this straightens it).
-    const gy = fitGround(fg.disp, w, h, fx, cx, cy)
+    const gy = fitGround(fgDisp, w, h, fx, cx, cy)
     const deb = (Z: number) => gy ? gy[0] + gy[1] * Z + gy[2] * Z * Z : 0
 
     // full-res texture: a crisp copy of the frame UV-mapped onto the (coarse) mesh
@@ -221,14 +246,14 @@
     // foreground as a SOLID: each object is extruded back to the reconstructed background and its
     // silhouette stitched, so it's an opaque, textured VOLUME — not a see-through shell.
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
-    mesh = layerMesh(fg.disp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0,
-      { solid: true, bgdisp: bg ? bg.disp : null, maxT: 0.5, flattenCoef: gy, tex: fgTex })
+    mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0,
+      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex })
     scene.add(mesh)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
     if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
-    if (bg) {
-      bgMesh = layerMesh(bg.disp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04, { flattenCoef: gy })
+    if (bg && bgDisp) {
+      bgMesh = layerMesh(bgDisp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04, { flattenCoef: gy })
       scene.add(bgMesh)
     }
 
