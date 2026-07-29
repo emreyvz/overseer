@@ -194,6 +194,7 @@
         {#if t.d.speed !== undefined}<div class="trow caps"><span class="kk">SPEED</span><span class="vv">{t.d.speed === 0 ? 'STOPPED' : `${t.d.speed} KM/H`}{#if t.d.speed !== 0}<span class="est"> ~est</span>{/if}</span></div>{/if}
         {#if t.d.plate}<div class="trow caps"><span class="kk">PLATE</span><span class="vv plate">{t.d.plate}<span class="est"> ~est</span></span></div>{/if}
         {#if attrLine(t.d)}<div class="trow caps"><span class="kk">ATTR</span><span class="vv">{attrLine(t.d)}</span></div>{/if}
+        {#if t.d.intent}<div class="trow caps" title={t.d.intent.why}><span class="kk">INTENT</span><span class="vv intent">{trUpper(t.d.intent.intent)}<span class="est"> {Math.round(t.d.intent.confidence * 100)}%</span></span></div>{/if}
         {#if a.owner}<div class="trow caps"><span class="kk">OWNER</span><span class="vv">{trUpper(a.owner)}</span></div>{/if}
         {#if a.notes}<div class="tnote caps">“{a.notes}”</div>{/if}
         <div class="asep"></div>
@@ -270,6 +271,7 @@
   .trow .kk { color: var(--ink-dim); } .trow .vv { color: var(--ink); }
   .plate { font-weight: 700; letter-spacing: 0.14em; }
   .est { color: var(--ink-dim); font-weight: 400; letter-spacing: 0.06em; }
+  .vv.intent { color: var(--amber, #d8a200); }
   .tnote { font-size: 8px; color: var(--ink-dim); font-style: italic; }
   .asep { height: 1px; background: var(--hairline); margin: 3px 0; }
   .tbtns { display: flex; gap: 6px; margin-top: 4px; }

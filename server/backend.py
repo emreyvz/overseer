@@ -145,6 +145,8 @@ class Backend:
         self.relationships = RelationshipGraph()   # co-occurrence graph between roster subjects
         from .cameradna import CameraProfiles
         self.cam_profiles = CameraProfiles()       # per-camera DNA + reputation from observations
+        from trajectory.intent import IntentEstimator
+        self.intent = IntentEstimator()            # probabilistic behavioural intent per track
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -310,7 +312,7 @@ class Backend:
             self.trajectory.reset(); self.pose.reset(); self.objects.reset(); self.ooi.clear()
             self.speed.reset(); self.threat.reset(); self._last_threat_synth.clear()
             self.live_make.reset()
-            self.ego.reset(); self._cam_moving = False
+            self.ego.reset(); self._cam_moving = False; self.intent.reset()
             self.alert_engine.reset(); self.alert_engine.set_rules(self.db.list_alert_rules())
 
             self._buffer = FrameBuffer(maxsize=int(self.config.get("camera.buffer_size", 5)))
@@ -926,6 +928,12 @@ class Backend:
                 attrs = self._appearance(img, int(x1), int(y1), int(x2), int(y2), cls, h)
                 if attrs:
                     det["attrs"] = attrs
+                # behavioural intent (why) — estimated from motion, for people
+                if cls == "person" and d.track_id is not None:
+                    it = self.intent.update(d.track_id, (x1, y1, x2, y2), now,
+                                            frame_diag=float((w * w + h * h) ** 0.5))
+                    if it:
+                        det["intent"] = it
                 # vehicles: surface the fine COCO subtype (car / truck / bus / motorcycle),
                 # a rough km/h estimate, and — once ANPR agrees across frames — the voted plate
                 if cls == "vehicle":
@@ -961,6 +969,7 @@ class Backend:
         self.plates.prune(vehicle_ids)
         self.live_make.prune(vehicle_ids)
         self.speed.prune(now)
+        self.intent.prune(now)
         if self._source_id is not None:   # accumulate this camera's DNA / reputation
             self.cam_profiles.observe_frame(
                 self._source_id, brightness=float(getattr(r.metrics, "brightness", 0.0)),
