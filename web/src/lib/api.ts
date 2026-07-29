@@ -28,7 +28,8 @@ export interface MergeCandidate { a: import('./types').RosterEntry; b: import('.
 export interface CameraDna { id: number | string; name?: string | null; dna: string[]; reputation: number; frames: number; brightness?: number; motion?: number; fps?: number; reconnects?: number; person?: number; vehicle?: number }
 export interface CaseRow { id: number; name: string; threat: string; notes: string; status?: string; created: number; targets: number }
 export interface CaseEventRow { ts: number; kind: string; type: string; cam: string; severity: string; summary: string; snapshot?: string | null; clip?: string | null }
-export interface CaseDetail { id: number; name: string; threat: string; notes: string; status: string; created: number; cameras: string[]; events: CaseEventRow[]; aiSummary: string | null }
+export interface SceneSubject { id: string; cls: string; snapshot?: string | null; plate?: string | null; seen: number; associates: Associate[] }
+export interface CaseDetail { id: number; name: string; threat: string; notes: string; status: string; created: number; cameras: string[]; events: CaseEventRow[]; subjects: SceneSubject[]; aiSummary: string | null }
 export interface SpatialEntity { id: string; cls: string; cx: number; cy: number; depth: number; conf: number; label: string }
 export interface SpatialScene { cam: string; sid: string; w: number; h: number; fov: number; image: string; depth: string; entities: SpatialEntity[]; ts: number }
 export interface SuggestRule { name: string; event_type: string; source_id: number; severity: string }

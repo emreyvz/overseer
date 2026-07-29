@@ -146,7 +146,7 @@
     {@const m = markerOf(d)}
     {@const a = $annotations[d.id] ?? {}}
     <div
-      class="det" class:alarm={isAlarm(d) || a.threat === 'high'} class:sel={$selectedDetection?.id === d.id}
+      class="det" class:alarm={isAlarm(d) || a.threat === 'high'} class:sel={$selectedDetection?.id === d.id} class:coasting={d.coasting}
       role="button" tabindex="-1"
       style={`left:${pc(d.bbox[0])};top:${pc(d.bbox[1])};width:${pc(d.bbox[2])};height:${pc(d.bbox[3])}`}
       onclick={() => pick(d)} onkeydown={(e) => { if (e.key === 'Enter') pick(d) }} oncontextmenu={(e) => addCase(e, d)}>
@@ -228,6 +228,10 @@
   .d { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
   .det.alarm .cnr { border-color: var(--scarlet); }
   .det.sel .cnr { opacity: 0; }
+  /* coasting: last-known box held through a momentary detection drop — drawn faded + dashed so
+     it reads as "predicted, briefly holding" rather than a live lock. */
+  .det.coasting { opacity: 0.5; }
+  .det.coasting .cnr { border-style: dashed; }
 
   .marker { position: absolute; left: 50%; top: 50%; width: 60px; height: 60px; transform: translate(-50%, -50%); }
   .marker svg { width: 100%; height: 100%; overflow: visible; }

@@ -254,6 +254,8 @@ alerts:
 cases:
   window_before: 90.0
   window_after: 120.0
+  clip_frames: 16         # if an alert froze no incident clip, grab this many frames from its
+                          # camera when the case opens, so a case always has moving footage
 # Smart suggestions: propose an alert rule once a camera has logged a behaviour at least this
 # many times (over events.retention_days) without a rule covering it.
 suggestions:

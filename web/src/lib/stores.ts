@@ -17,6 +17,30 @@ export const mode = writable<Mode>('pov')
 export const conn = writable<ConnState>('offline')
 export const frame = writable<FrameMeta>({ fps: 0, res: [0, 0], inferenceMs: 0, brightness: 0, motionPct: 0 })
 export const detections = writable<Detection[]>([])
+
+// Track coasting: a tracked box that momentarily drops out of the detector (a swimmer going
+// under, a car behind a pillar, motion blur) would otherwise blink off and on. We hold its
+// last-known box for a short grace window and re-emit it as `coasting` (drawn faded) until it
+// reappears or the window lapses — so tracking stays visually continuous. Only real ByteTrack
+// ids are coasted (TK_<src>.<n>); per-frame recall extras (TK_<src>.x<n>) are not.
+const COAST_MS = 700
+const _coast = new Map<string, { det: Detection; ts: number }>()
+const _stableTrack = (id: string) => /^TK_\d+\.\d+$/.test(id)
+export function applyDetections(list: Detection[], now = Date.now()) {
+  const seen = new Set<string>()
+  for (const d of list) {
+    if (_stableTrack(d.id)) { _coast.set(d.id, { det: d, ts: now }); seen.add(d.id) }
+  }
+  const out = list.slice()
+  for (const [id, rec] of _coast) {
+    if (seen.has(id)) continue
+    if (now - rec.ts > COAST_MS) { _coast.delete(id); continue }
+    out.push({ ...rec.det, coasting: true })
+  }
+  detections.set(out)
+}
+export function resetCoast() { _coast.clear() }
+
 export const ooiTargets = writable<OOITarget[]>([])
 export const objectRegister = writable(false)  // OOI draw tool overlay
 export const petRegistry = writable(false)     // pet registry / find-my-pet overlay
@@ -88,6 +112,7 @@ activeCam.subscribe((id) => {
     selectedDetection.set(null)
     dossierOpen.set(false)
     enrollOpen.set(null)
+    resetCoast()   // don't carry the old feed's coasted boxes onto the new camera
   }
   _panelCam = id
 })

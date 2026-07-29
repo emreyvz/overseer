@@ -133,6 +133,28 @@
           </div>
         </div>
 
+        {#if d.subjects?.length}
+          <div class="panel">
+            <div class="ph caps"><span>◇ AT THE SCENE</span><span class="phc">{d.subjects.length}</span></div>
+            <div class="subs">
+              {#each d.subjects as s (s.id)}
+                <div class="sub">
+                  <div class="sface">{#if s.snapshot}<img src={src(s.snapshot)} alt="" />{:else}<div class="snone caps">{s.cls === 'vehicle' ? '🚗' : '👤'}</div>{/if}</div>
+                  <div class="smeta caps">
+                    <span class="sid">{s.id}{#if s.plate} · ▤ {s.plate}{/if}</span>
+                    <span class="sseen">SEEN {s.seen}× HERE</span>
+                    {#if s.associates.length}
+                      <span class="slinks" title="Frequently seen together">↔ {s.associates.map((a) => a.id).join(' · ')}</span>
+                    {:else}
+                      <span class="slinks off">NO KNOWN LINKS</span>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
         <div class="panel tlpanel">
           <div class="ph caps"><span>◇ TIMELINE</span><span class="phc">{d.events.length}</span></div>
           <ol class="timeline">
@@ -207,6 +229,17 @@
   .r { display: flex; justify-content: space-between; gap: 10px; font-size: 9px; }
   .r .k { color: var(--ink-dim); } .r .v { color: var(--ink); text-align: right; }
 
+  /* AT THE SCENE — roster subjects present at the incident + who they're linked to */
+  .subs { display: flex; flex-direction: column; gap: 6px; padding: 8px; max-height: 190px; overflow-y: auto; }
+  .sub { display: flex; gap: 8px; align-items: center; }
+  .sface { width: 38px; height: 38px; flex: none; background: #05070a; border: 1px solid var(--hairline); overflow: hidden; }
+  .sface img { width: 100%; height: 100%; object-fit: cover; }
+  .snone { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 15px; }
+  .smeta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .sid { font-size: 9px; color: var(--ink); letter-spacing: 0.06em; }
+  .sseen { font-size: 7px; color: var(--ink-dim); }
+  .slinks { font-size: 7px; color: var(--cyan); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .slinks.off { color: var(--ink-ghost); }
   .tlpanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .timeline { list-style: none; margin: 0; padding: 6px 8px; overflow-y: auto; }
   .tev { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px 7px 16px;

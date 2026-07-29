@@ -26,6 +26,7 @@ export interface Detection {
   speed?: number        // vehicles: rough km/h estimate (uncalibrated → comparable, not exact)
   make?: string         // vehicles: estimated brand from the ViT classifier (confidence-gated)
   intent?: { intent: string; confidence: number; why: string; alt?: string }  // people: estimated behaviour (probabilistic)
+  coasting?: boolean    // last-known box held briefly through a momentary detection drop (predicted, not fresh)
 }
 
 export interface FrameMeta {
