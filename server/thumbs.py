@@ -166,6 +166,7 @@ class ThumbHub:
         # evictions and even across app restarts — instead of dropping to NO SIGNAL.
         self._last: dict[int, bytes] = {}
         self._saved: dict[int, float] = {}
+        self._seen: dict[int, float] = {}   # time of the most recent LIVE frame (reachability)
         self._dir = cache_dir
         self._lock = threading.RLock()
         if cache_dir is not None:
@@ -181,6 +182,7 @@ class ThumbHub:
 
     def _remember(self, sid: int, jpeg: bytes) -> None:
         self._last[sid] = jpeg
+        self._seen[sid] = time.time()       # a live frame arrived -> camera reachable right now
         if self._dir is not None and time.time() - self._saved.get(sid, 0.0) > 8.0:
             self._saved[sid] = time.time()
             try:
@@ -214,6 +216,12 @@ class ThumbHub:
         still (down)loading so the map shows its last frame instead of NO SIGNAL."""
         with self._lock:
             return self._last.get(source_id)
+
+    def is_live(self, source_id: int, max_age: float = 15.0) -> bool:
+        """True if a live frame arrived for this camera within max_age seconds — i.e. it is
+        really reachable right now. Central signal (updated by any worker for any request), so
+        it's robust to workers being retired/swapped as sources move between URL and local file."""
+        return (time.time() - self._seen.get(source_id, 0.0)) <= max_age
 
     def _evict_lru(self) -> None:
         while len(self._workers) > self.max_workers:

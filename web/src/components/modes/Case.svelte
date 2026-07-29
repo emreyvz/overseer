@@ -19,6 +19,12 @@
     try { const { id } = await api.addCase(name.trim()); name = ''; await load(); open(id) } catch { offline = true }
   }
   function open(id: number) { sfx('ping', { volume: 0.3 }); investigateCase.set(id) }
+  async function del(e: MouseEvent, c: CaseRow) {
+    e.stopPropagation()
+    if (!confirm(`Delete case "${c.name}"? This cannot be undone.`)) return
+    sfx('click')
+    try { await api.deleteCase(c.id); await load() } catch { offline = true }
+  }
   function toMap() { sfx('whoosh'); triggerGlitch(160); mode.set('pov'); pickerView.set('map'); stage.set('select') }
   onMount(load)
   const threatTr = (t: string) => ({ low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as Record<string, string>)[t] ?? t.toUpperCase()
@@ -40,6 +46,9 @@
     {#each cases as c}
       <button class="file panel" onclick={() => open(c.id)}>
         <header class="tab caps" class:hot={c.threat === 'high'}>/// {c.name}</header>
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <span class="del caps" role="button" tabindex="0" title="Delete case"
+          onclick={(e) => del(e, c)} onkeydown={(e) => { if (e.key === 'Enter') del(e as unknown as MouseEvent, c) }}>✕</span>
         <div class="rows caps">
           <div class="r"><span class="k">STATUS</span><span class="v st-{c.status ?? 'open'}">{(c.status ?? 'open').toUpperCase()}</span></div>
           <div class="r"><span class="k">THREAT</span><span class="chip" class:chip--alarm={c.threat === 'high'} class:chip--invert={c.threat !== 'high'}>{threatTr(c.threat)}</span></div>
@@ -79,6 +88,10 @@
   .empty { grid-column: 1 / -1; color: var(--ink-ghost); font-size: var(--fs-label); padding: 30px 0; text-align: center; }
   .file { padding: 0; text-align: left; cursor: pointer; transition: border-color 140ms; position: relative; }
   .file:hover { border-color: var(--scarlet); }
+  .del { position: absolute; top: 5px; right: 7px; z-index: 2; width: 18px; height: 18px; display: flex; align-items: center;
+    justify-content: center; color: var(--ink-ghost); font-size: 11px; cursor: pointer; opacity: 0; transition: opacity 120ms; }
+  .file:hover .del { opacity: 1; }
+  .del:hover { color: var(--scarlet); }
   .tab { padding: 6px 10px; background: #000; border-bottom: 1px solid var(--hairline); font-size: var(--fs-label); letter-spacing: var(--tracking); }
   .tab.hot { background: var(--scarlet); color: #fff; }
   .rows { padding: 10px; display: flex; flex-direction: column; gap: 6px; }

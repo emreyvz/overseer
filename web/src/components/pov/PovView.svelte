@@ -217,7 +217,8 @@
   .inspectbtn { position: absolute; left: 62px; bottom: 52px; z-index: var(--z-overlay); padding: 4px 10px; border: 1px solid var(--ink-dim);
     background: rgba(0,0,0,0.5); color: var(--ink-dim); font-size: var(--fs-micro); letter-spacing: var(--tracking); cursor: pointer; }
   .inspectbtn:hover { border-color: var(--cyan); color: var(--cyan); }
-  .spatialbtn { position: absolute; left: 168px; bottom: 52px; z-index: var(--z-overlay); padding: 4px 10px; border: 1px solid var(--ink-dim);
+  /* stacked directly above LOOK CLOSER so it never overlaps it regardless of that label's width */
+  .spatialbtn { position: absolute; left: 62px; bottom: 82px; z-index: var(--z-overlay); padding: 4px 10px; border: 1px solid var(--ink-dim);
     background: rgba(0,0,0,0.5); color: var(--ink-dim); font-size: var(--fs-micro); letter-spacing: var(--tracking); cursor: pointer; }
   .spatialbtn:hover { border-color: var(--cyan); color: var(--cyan); }
   .inspectbtn.on { border-color: var(--cyan); color: var(--cyan); background: rgba(56,208,227,0.12); }
