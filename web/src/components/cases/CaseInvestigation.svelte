@@ -4,7 +4,7 @@
   // review each), an AI narrative summary, evidence, a status lifecycle and notes.
   import { onMount, onDestroy } from 'svelte'
   import { api, type CaseDetail, type CaseEventRow } from '../../lib/api'
-  import { cameras, activeCam, mode, flashBanner, triggerGlitch } from '../../lib/stores'
+  import { cameras, activeCam, mode, stage, pickerView, flashBanner, triggerGlitch } from '../../lib/stores'
   import { sendCommand } from '../../lib/ws'
   import { SIM } from '../../lib/sim'
   import { sfx } from '../../lib/audio'
@@ -56,6 +56,8 @@
     flashBanner(`OBSERVING ${c.name}`, false, 1200); mode.set('pov')
   }
   const sevClass = (s: string) => (s === 'critical' ? 'crit' : s === 'warning' ? 'warn' : 'info')
+  // leave the investigation and go straight back to the world map
+  function toMap() { sfx('whoosh'); triggerGlitch(160); onclose(); mode.set('pov'); pickerView.set('map'); stage.set('select') }
 </script>
 
 <div class="inv" role="dialog" aria-label="Investigation">
@@ -69,6 +71,7 @@
         <button class="st" class:on={d?.status === s} onclick={() => setStatus(s)}>{s}</button>
       {/each}
     </div>
+    <button class="map caps" onclick={toMap} title="Back to the map">◄ MAP</button>
     <button class="x caps" onclick={onclose}>✕ CLOSE</button>
   </header>
 
@@ -195,6 +198,8 @@
   .st:hover { color: var(--ink); } .st.on { background: var(--cyan); color: #04070a; }
   .x { padding: 6px 12px; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: none; cursor: pointer; font-size: 9px; letter-spacing: var(--tracking); }
   .x:hover { border-color: var(--scarlet); color: var(--scarlet); }
+  .map { padding: 6px 12px; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: none; cursor: pointer; font-size: 9px; letter-spacing: var(--tracking); }
+  .map:hover { border-color: var(--cyan); color: var(--cyan); }
   .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--ink-dim); letter-spacing: 0.2em; }
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; padding: 14px; }

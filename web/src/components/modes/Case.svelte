@@ -3,7 +3,7 @@
   import { onMount } from 'svelte'
   import { sfx } from '../../lib/audio'
   import { api, type CaseRow } from '../../lib/api'
-  import { investigateCase } from '../../lib/stores'
+  import { investigateCase, mode, stage, pickerView, triggerGlitch } from '../../lib/stores'
   import CaseInvestigation from '../cases/CaseInvestigation.svelte'
 
   let cases = $state<CaseRow[]>([])
@@ -19,13 +19,16 @@
     try { const { id } = await api.addCase(name.trim()); name = ''; await load(); open(id) } catch { offline = true }
   }
   function open(id: number) { sfx('ping', { volume: 0.3 }); investigateCase.set(id) }
+  function toMap() { sfx('whoosh'); triggerGlitch(160); mode.set('pov'); pickerView.set('map'); stage.set('select') }
   onMount(load)
   const threatTr = (t: string) => ({ low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as Record<string, string>)[t] ?? t.toUpperCase()
   const d = (ms: number) => new Date(ms).toLocaleDateString('en-GB')
 </script>
 
 <section class="case">
-  <div class="hdr caps">/// CASE FILES {#if offline}<span class="off">· OFFLINE</span>{/if} <span class="hint">ESC · POV</span></div>
+  <div class="hdr caps">/// CASE FILES {#if offline}<span class="off">· OFFLINE</span>{/if}
+    <button class="mapbtn caps" onclick={toMap} title="Back to the map">◄ MAP</button>
+    <span class="hint">ESC · POV</span></div>
 
   <div class="new">
     <span class="lead caps hot">NEW CASE_</span>
@@ -59,6 +62,9 @@
   .case { position: absolute; inset: 0; z-index: var(--z-boot); background: #050607; color: var(--ink); padding: 22px 30px; overflow: auto; }
   .hdr { font-size: var(--fs-title); letter-spacing: var(--tracking); margin-bottom: 16px; }
   .hdr .hint { float: right; font-size: var(--fs-micro); color: var(--ink-ghost); }
+  .hdr .mapbtn { float: right; margin-left: 12px; padding: 4px 12px; border: 1px solid var(--ink-dim); background: none;
+    color: var(--ink-dim); cursor: pointer; font-size: var(--fs-micro); letter-spacing: var(--tracking); vertical-align: middle; }
+  .hdr .mapbtn:hover { border-color: var(--cyan); color: var(--cyan); }
   .hdr .off { font-size: var(--fs-micro); color: var(--scarlet); }
 
   .new { display: flex; align-items: center; gap: 12px; background: #000; border: 1px solid var(--ink); padding: 10px 14px; margin-bottom: 16px; }
