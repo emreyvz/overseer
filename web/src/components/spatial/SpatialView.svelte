@@ -242,8 +242,11 @@
     const vfov = camera!.fov * Math.PI / 180
     let dist: number, yaw: number, pitch: number
     if (isMV) {
-      dist = (diag / 2) / Math.tan(vfov / 2) * 1.15
-      yaw = 24 * Math.PI / 180; pitch = 26 * Math.PI / 180
+      // ground is PCA-aligned to the X-Z plane, so establish from high above (near top-down) to
+      // reveal the layout; fit the ground footprint (X-Z), not the thin vertical extent.
+      const foot = Math.max(size.x, size.z)
+      dist = (foot / 2) / Math.tan(vfov / 2) * 1.15
+      yaw = 20 * Math.PI / 180; pitch = 44 * Math.PI / 180
     } else {
       dist = Math.max((size.y / 2) / Math.tan(vfov / 2), (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect) * 1.55
       yaw = 16 * Math.PI / 180; pitch = 8 * Math.PI / 180

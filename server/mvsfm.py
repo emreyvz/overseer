@@ -144,7 +144,12 @@ class MultiViewScene:
                 return None
             pts = np.concatenate(P).astype(np.float32)
             col = np.concatenate(C).astype(np.uint8)
-            pts = self._orient(pts)
+            try:
+                poses = scene.get_im_poses().detach().cpu().numpy()
+                cam_center = poses[:, :3, 3].mean(0).astype(np.float32)
+            except Exception:  # noqa: BLE001
+                cam_center = None
+            pts = self._orient(pts, cam_center)
             # trim far outliers (sky / low-parallax background stretch far away and bloat the
             # scene bounds, shrinking the real geometry in view) — keep the compact 97% core
             r = np.linalg.norm(pts, axis=1)
@@ -159,11 +164,24 @@ class MultiViewScene:
             return {"points": pts, "colors": col, "fov": 60.0}
 
     @staticmethod
-    def _orient(pts: np.ndarray) -> np.ndarray:
-        """Recenter to the scene centroid and scale to a stable size for the renderer (fog / near-
-        far / point-size heuristics assume a scene a few units across). DUSt3R's axes already match
-        the app's image convention (x right, y down, z forward), so only translate + scale."""
+    def _orient(pts: np.ndarray, cam_center: np.ndarray | None = None) -> np.ndarray:
+        """Canonicalise the cloud so the renderer's fixed camera reads well for ANY scene: recenter,
+        PCA-align the dominant plane (ground) to X-Z with its normal as +Y (up), and scale to a few
+        units. DUSt3R's world frame is arbitrary per reconstruction — an aerial pool and a forward
+        dashcam come out tilted differently — so without this a single default view is edge-on for
+        one and top-down for the other. Up is disambiguated toward the cameras (they sit above the
+        ground); if poses are unavailable the sign is arbitrary (fine for a near-flat scene)."""
         c = np.median(pts, axis=0)
-        p = pts - c
+        p = (pts - c).astype(np.float64)
+        try:
+            evals, evecs = np.linalg.eigh(np.cov(p.T))     # ascending eigenvalues
+            normal = evecs[:, 0]                            # thinnest axis = ground-plane normal
+            ax1, ax2 = evecs[:, 2], evecs[:, 1]            # two widest axes span the ground
+            if cam_center is not None and np.dot(normal, (cam_center - c)) < 0:
+                normal = -normal                            # +Y points up toward the cameras
+            R = np.stack([ax1, normal, ax2], axis=0)        # world -> aligned (x, up, z)
+            p = p @ R.T
+        except np.linalg.LinAlgError:
+            pass
         r = float(np.percentile(np.linalg.norm(p, axis=1), 90)) or 1.0
         return (p * (3.0 / r)).astype(np.float32)
