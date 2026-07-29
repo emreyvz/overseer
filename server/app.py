@@ -525,22 +525,14 @@ async def api_spatial(sid: str, grid: int = 320) -> Any:
     return await asyncio.to_thread(backend.spatial_scene, sid, grid)
 
 
-@app.get("/api/spatial3d/{sid}")
-async def api_spatial3d(sid: str) -> Any:
-    """Full generative 3D reconstruction of a camera's scene (heavy). Always 200 with
-    {"scene": {...}} or {"scene": null, "reason": ...} (incl. insufficient_vram + have/need)."""
+@app.get("/api/worldmodel/{sid}")
+async def api_worldmodel(sid: str) -> Any:
+    """Semantic world model: scene-parsing + depth -> an editable Scene-Graph IR of independent 3D
+    objects on an inferred ground. Always 200 with {"scene": {...}} or {"scene": null, "reason": ...}
+    (incl. insufficient_vram + have/need)."""
     if backend is None:
         return {"scene": None, "reason": "backend_down"}
-    return await asyncio.to_thread(backend.spatial_scene_full, sid)
-
-
-@app.get("/api/diorama/{sid}")
-async def api_diorama(sid: str) -> Any:
-    """Semantic 3D diorama: scene-parsing + depth -> textured ground, sky, and stood-up object
-    cutouts. Always 200 with {"scene": {...}} or {"scene": null, "reason": ...}."""
-    if backend is None:
-        return {"scene": None, "reason": "backend_down"}
-    return await asyncio.to_thread(backend.spatial_scene_diorama, sid)
+    return await asyncio.to_thread(backend.build_world_model, sid)
 
 
 @app.get("/api/suggestions")
