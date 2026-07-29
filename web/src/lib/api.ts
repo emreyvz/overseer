@@ -20,7 +20,9 @@ const del = <T>(p: string) => send<T>('DELETE', p)
 
 export interface SearchHit { kind: string; ts: number; type: string; label: string; snapshot?: string | null }
 export interface EventRow { id: number; ts: number; type: string; label: string; conf?: number | null; snapshot?: string | null }
-export interface CaseRow { id: number; name: string; threat: string; notes: string; created: number; targets: number }
+export interface CaseRow { id: number; name: string; threat: string; notes: string; status?: string; created: number; targets: number }
+export interface CaseEventRow { ts: number; kind: string; type: string; cam: string; severity: string; summary: string; snapshot?: string | null; clip?: string | null }
+export interface CaseDetail { id: number; name: string; threat: string; notes: string; status: string; created: number; cameras: string[]; events: CaseEventRow[]; aiSummary: string | null }
 
 export const api = {
   base: API_BASE,
@@ -39,6 +41,11 @@ export const api = {
   storageCleanup: (what: 'snapshots' | 'clips' | 'recordings') => post<{ ok: boolean; removed: number }>(`/api/storage/cleanup`, { what }),
   cases: () => get<CaseRow[]>(`/api/cases`),
   addCase: (name: string) => post<{ id: number }>(`/api/cases`, { name }),
+  caseDetail: (id: number) => get<CaseDetail>(`/api/cases/${id}`),
+  caseFromAlert: (alert: unknown) => post<{ id: number }>(`/api/cases/from-alert`, { alert }),
+  caseStatus: (id: number, status: string) => post<{ ok: boolean }>(`/api/cases/${id}/status`, { status }),
+  updateCase: (id: number, patch: { name?: string; threat?: string; notes?: string }) => put<{ ok: boolean }>(`/api/cases/${id}`, patch),
+  deleteCase: (id: number) => del<{ ok: boolean }>(`/api/cases/${id}`),
   addSource: (name: string, url: string) => post<{ id: number }>(`/api/sources`, { name, url }),
   discover: (user?: string, password?: string, timeout?: number) =>
     post<{ devices: { ip: string; name?: string; hardware?: string; location?: string; xaddr?: string; rtsp?: string | null }[] }>(`/api/discover`, { user, password, timeout }),

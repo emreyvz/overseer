@@ -143,6 +143,20 @@ CREATE TABLE IF NOT EXISTS case_targets (
     added_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_case_targets_case ON case_targets(case_id);
+CREATE TABLE IF NOT EXISTS case_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL,
+    ts REAL NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'event',
+    event_type TEXT NOT NULL DEFAULT '',
+    cam TEXT NOT NULL DEFAULT '',
+    severity TEXT NOT NULL DEFAULT 'info',
+    summary TEXT NOT NULL DEFAULT '',
+    snapshot TEXT,
+    clip TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_case_events_case ON case_events(case_id);
 """
 
 
@@ -233,6 +247,22 @@ class Case:
     threat_level: str
     notes: str
     created_at: float
+    status: str = "open"
+
+
+@dataclass(frozen=True)
+class CaseEvent:
+    id: int
+    case_id: int
+    ts: float
+    kind: str
+    event_type: str
+    cam: str
+    severity: str
+    summary: str
+    snapshot: str | None
+    clip: str | None
+    created_at: float
 
 
 @dataclass(frozen=True)
@@ -268,6 +298,10 @@ class Database:
             self._conn.execute("ALTER TABLE sources ADD COLUMN map_x REAL")
         if "map_y" not in source_cols:
             self._conn.execute("ALTER TABLE sources ADD COLUMN map_y REAL")
+        case_cols = {r[1] for r in
+                     self._conn.execute("PRAGMA table_info(cases)").fetchall()}
+        if "status" not in case_cols:  # investigation lifecycle
+            self._conn.execute("ALTER TABLE cases ADD COLUMN status TEXT NOT NULL DEFAULT 'open'")
 
     # -- sources -------------------------------------------------------------
     def add_source(self, name: str, url: str) -> int:
@@ -961,9 +995,42 @@ class Database:
     def list_cases(self) -> list[Case]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, name, threat_level, notes, created_at FROM cases ORDER BY id"
+                "SELECT id, name, threat_level, notes, created_at, status FROM cases ORDER BY id DESC"
             ).fetchall()
         return [Case(*row) for row in rows]
+
+    def get_case(self, case_id: int) -> Case | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, name, threat_level, notes, created_at, status FROM cases WHERE id=?",
+                (case_id,),
+            ).fetchone()
+        return Case(*row) if row else None
+
+    def set_case_status(self, case_id: int, status: str) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE cases SET status=? WHERE id=?", (status, case_id))
+            self._conn.commit()
+
+    def add_case_event(self, case_id: int, ts: float, kind: str, *, event_type: str = "",
+                       cam: str = "", severity: str = "info", summary: str = "",
+                       snapshot: str | None = None, clip: str | None = None) -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO case_events (case_id, ts, kind, event_type, cam, severity, summary,"
+                " snapshot, clip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (case_id, ts, kind, event_type, cam, severity, summary, snapshot, clip, time.time()),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def list_case_events(self, case_id: int) -> list[CaseEvent]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, case_id, ts, kind, event_type, cam, severity, summary, snapshot,"
+                " clip, created_at FROM case_events WHERE case_id=? ORDER BY ts", (case_id,),
+            ).fetchall()
+        return [CaseEvent(*row) for row in rows]
 
     def update_case(self, case_id: int, name: str, threat_level: str, notes: str) -> None:
         with self._lock:

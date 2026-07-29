@@ -690,6 +690,60 @@ class Backend:
     def _roster_plate_hit(self, plate: str, cam: str | None) -> None:
         self._check_plate_watch(plate, cam)
 
+    # ---- investigation cases -----------------------------------------
+    def open_case_from_alert(self, alert: dict) -> int:
+        """Create an investigation case seeded with an alert as its incident; returns its id."""
+        typ = str(alert.get("type", "INCIDENT"))
+        cam = str(alert.get("cam", "") or "")
+        sev = str(alert.get("severity", "info"))
+        ts = float(alert.get("ts", time.time() * 1000)) / 1000.0
+        threat = {"critical": "high", "warning": "medium"}.get(sev, "low")
+        name = (f"{typ} · {cam}".strip(" ·")) or typ
+        cid = self.db.add_case(name, threat_level=threat)
+        self.db.add_case_event(cid, ts, "alert", event_type=typ, cam=cam, severity=sev,
+                               summary=str(alert.get("summary", "")),
+                               snapshot=alert.get("snapshot"), clip=alert.get("clip"))
+        return cid
+
+    def case_detail(self, case_id: int) -> dict | None:
+        """A case as an investigation: its own incident events plus the surrounding scene events
+        from the log in a window around the incident, ordered into a timeline, with a gated AI
+        summary. This is what the investigation workspace renders."""
+        case = self.db.get_case(case_id)
+        if case is None:
+            return None
+        cevents = self.db.list_case_events(case_id)
+        anchor = min((e.ts for e in cevents), default=case.created_at)
+        pre = float(self.config.get("cases.window_before", 90.0))
+        post = float(self.config.get("cases.window_after", 120.0))
+        names = {s.id: s.name for s in self.db.list_sources()}
+        timeline: list[dict] = []
+        for e in cevents:
+            timeline.append({"ts": e.ts * 1000, "kind": e.kind, "type": e.event_type, "cam": e.cam,
+                             "severity": e.severity, "summary": e.summary,
+                             "snapshot": e.snapshot, "clip": e.clip})
+        try:
+            for ev in self.db.search_events(anchor - pre, anchor + post, limit=150):
+                snap = ev.snapshot_path if (ev.snapshot_path and "/snapshots/" in ev.snapshot_path) else None
+                timeline.append({"ts": ev.timestamp * 1000, "kind": "event", "type": ev.type,
+                                 "cam": names.get(ev.source_id, str(ev.source_id or "")),
+                                 "severity": "info", "summary": ev.label or ev.type,
+                                 "snapshot": snap, "clip": None})
+        except Exception:  # noqa: BLE001
+            pass
+        timeline.sort(key=lambda x: x["ts"])
+        ai_summary = None
+        try:
+            evs = [{"type": t["type"], "cam": t["cam"], "label": t.get("summary", "")}
+                   for t in timeline if t["type"]][:40]
+            ai_summary = self.ai.summarize(evs) if evs else None
+        except Exception:  # noqa: BLE001
+            ai_summary = None
+        cams = sorted({t["cam"] for t in timeline if t["cam"]})
+        return {"id": case.id, "name": case.name, "threat": case.threat_level, "notes": case.notes,
+                "status": case.status, "created": case.created_at * 1000,
+                "cameras": cams, "events": timeline, "aiSummary": ai_summary}
+
     def _roster_embed(self, crop: Any, cls: str) -> Any:
         """A ReID appearance embedding for a crop, for roster de-duplication. Serialized so
         the harvester thread doesn't race a concurrent visual search on the same encoder."""

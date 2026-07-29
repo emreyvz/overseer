@@ -3,6 +3,8 @@
   import { onMount } from 'svelte'
   import { sfx } from '../../lib/audio'
   import { api, type CaseRow } from '../../lib/api'
+  import { investigateCase } from '../../lib/stores'
+  import CaseInvestigation from '../cases/CaseInvestigation.svelte'
 
   let cases = $state<CaseRow[]>([])
   let name = $state('')
@@ -14,8 +16,9 @@
   async function add() {
     if (!name.trim()) return
     sfx('sonar')
-    try { await api.addCase(name.trim()); name = ''; await load() } catch { offline = true }
+    try { const { id } = await api.addCase(name.trim()); name = ''; await load(); open(id) } catch { offline = true }
   }
+  function open(id: number) { sfx('ping', { volume: 0.3 }); investigateCase.set(id) }
   onMount(load)
   const threatTr = (t: string) => ({ low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as Record<string, string>)[t] ?? t.toUpperCase()
   const d = (ms: number) => new Date(ms).toLocaleDateString('en-GB')
@@ -32,20 +35,25 @@
 
   <div class="grid">
     {#each cases as c}
-      <article class="file panel">
+      <button class="file panel" onclick={() => open(c.id)}>
         <header class="tab caps" class:hot={c.threat === 'high'}>/// {c.name}</header>
         <div class="rows caps">
+          <div class="r"><span class="k">STATUS</span><span class="v st-{c.status ?? 'open'}">{(c.status ?? 'open').toUpperCase()}</span></div>
           <div class="r"><span class="k">THREAT</span><span class="chip" class:chip--alarm={c.threat === 'high'} class:chip--invert={c.threat !== 'high'}>{threatTr(c.threat)}</span></div>
-          <div class="r"><span class="k">TARGETS</span><span class="v">{c.targets}</span></div>
           <div class="r"><span class="k">OPENED</span><span class="v">{d(c.created)}</span></div>
         </div>
-      </article>
+        <span class="openhint caps">OPEN INVESTIGATION ▸</span>
+      </button>
     {/each}
     {#if cases.length === 0}
-      <div class="empty caps">NO CASES · RIGHT-CLICK A TRACKLET IN POV → ADD TO CASE</div>
+      <div class="empty caps">NO CASES · AN ALERT OPENS A CASE, OR CREATE ONE ABOVE</div>
     {/if}
   </div>
 </section>
+
+{#if $investigateCase != null}
+  <CaseInvestigation caseId={$investigateCase} onclose={() => investigateCase.set(null)} />
+{/if}
 
 <style>
   .case { position: absolute; inset: 0; z-index: var(--z-boot); background: #050607; color: var(--ink); padding: 22px 30px; overflow: auto; }
@@ -63,9 +71,15 @@
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
   .empty { grid-column: 1 / -1; color: var(--ink-ghost); font-size: var(--fs-label); padding: 30px 0; text-align: center; }
+  .file { padding: 0; text-align: left; cursor: pointer; transition: border-color 140ms; position: relative; }
+  .file:hover { border-color: var(--scarlet); }
   .tab { padding: 6px 10px; background: #000; border-bottom: 1px solid var(--hairline); font-size: var(--fs-label); letter-spacing: var(--tracking); }
   .tab.hot { background: var(--scarlet); color: #fff; }
   .rows { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
   .r { display: flex; justify-content: space-between; align-items: center; font-size: var(--fs-label); }
   .k { color: var(--ink-dim); } .v { color: var(--ink); }
+  .v.st-open { color: var(--cyan); } .v.st-investigating { color: var(--amber, #d8a200); }
+  .v.st-resolved, .v.st-archived { color: var(--ink-dim); }
+  .openhint { display: block; padding: 6px 10px; border-top: 1px solid var(--hairline); font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.14em; }
+  .file:hover .openhint { color: var(--scarlet); }
 </style>

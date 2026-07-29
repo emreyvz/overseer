@@ -73,6 +73,7 @@ export const matchHighlight = writable<{ camId: string; bbox: [number, number, n
 export const enrollOpen = writable<Detection | null>(null)  // detection being enrolled to the watchlist
 export const watchlistOpen = writable(false)                 // watchlist browser screen
 export const aiOpen = writable(false)                        // AI assistant console
+export const investigateCase = writable<number | null>(null) // open case id in the investigation workspace
 export const dossierOpen = writable(false)  // stationary editor panel for the selected tracklet
 
 // Switching cameras clears the previous camera's transient panels (selection,

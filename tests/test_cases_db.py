@@ -4,7 +4,7 @@ from typing import Iterator
 
 import pytest
 
-from storage.database import Case, CaseTarget, Database
+from storage.database import Case, CaseEvent, CaseTarget, Database
 
 
 @pytest.fixture()
@@ -109,3 +109,25 @@ def test_delete_case_keeps_pin_if_tracklet_referenced_by_other_case(db: Database
 
     assert db.get_tracklet(tid).pinned == 1
     assert len(db.list_case_targets(case2)) == 1
+
+
+def test_case_status_lifecycle(db: Database) -> None:
+    cid = db.add_case("Incident A")
+    assert db.get_case(cid).status == "open"          # default
+    db.set_case_status(cid, "investigating")
+    assert db.get_case(cid).status == "investigating"
+    db.set_case_status(cid, "resolved")
+    assert db.get_case(cid).status == "resolved"
+    assert db.get_case(99999) is None
+
+
+def test_case_events_ordered(db: Database) -> None:
+    cid = db.add_case("Incident B")
+    db.add_case_event(cid, ts=200.0, kind="event", event_type="RUNNING", cam="Gate")
+    db.add_case_event(cid, ts=100.0, kind="alert", event_type="RESTRICTED", cam="Gate",
+                      severity="critical", summary="zone breach", snapshot="/snapshots/a.jpg")
+    evs = db.list_case_events(cid)
+    assert [e.ts for e in evs] == [100.0, 200.0]      # ordered by ts
+    assert isinstance(evs[0], CaseEvent)
+    assert evs[0].kind == "alert" and evs[0].snapshot == "/snapshots/a.jpg"
+    assert db.list_case_events(99999) == []

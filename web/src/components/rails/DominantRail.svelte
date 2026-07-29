@@ -2,7 +2,7 @@
   // Focused incident panel (top-right). The latest unacknowledged alert drops in
   // as a single detailed card — where, when, threat no, details — with a jump to
   // the camera it happened on. De-dup lives in pushAlert, so it never re-drops.
-  import { alerts, cameras, activeCam, mode, stage, flashBanner } from '../../lib/stores'
+  import { alerts, cameras, activeCam, mode, stage, flashBanner, investigateCase } from '../../lib/stores'
   import { sendCommand } from '../../lib/ws'
   import { SIM } from '../../lib/sim'
   import { sfx } from '../../lib/audio'
@@ -76,6 +76,18 @@
   }
 
   function dismiss(a: Alert) { sfx('click'); alerts.update((l) => l.map((x) => (x.threat === a.threat ? { ...x, ack: true } : x))) }
+  // open an investigation case for this alert instead of jumping straight to the live feed
+  let opening = $state(false)
+  async function investigate(a: Alert) {
+    if (opening) return
+    opening = true; sfx('sonar')
+    try {
+      const { id } = await api.caseFromAlert({ type: a.type, cam: a.cam, severity: a.severity, ts: a.ts, summary: a.summary, snapshot: a.snapshot, clip: a.clip })
+      mode.set('case'); stage.set('live'); investigateCase.set(id)
+      dismiss(a)
+    } catch { flashBanner('COULD NOT OPEN CASE', true, 1400) }
+    opening = false
+  }
   function navigate(a: Alert) {
     const cam = $cameras.find((c) => c.name === a.cam) ?? $cameras.find((c) => c.id === a.cam)
     if (!cam) { flashBanner('CAMERA NOT AVAILABLE', true, 1400); dismiss(a); return }
@@ -119,7 +131,8 @@
         {#if active.reason}<div class="aireason caps">◇ {active.reason}</div>{/if}
         {#if active.action}<div class="aiaction caps">▸ {active.action}</div>{/if}
         <div class="btns">
-          <button class="go caps" onclick={() => navigate(active)}>▸ NAVIGATE</button>
+          <button class="go caps" onclick={() => investigate(active)} disabled={opening}>⊕ {opening ? 'OPENING…' : 'OPEN CASE'}</button>
+          <button class="rp caps" onclick={() => navigate(active)}>▸ LIVE</button>
           {#if active.clip}<button class="rp caps" onclick={() => openReplay(active)}>▶ REPLAY</button>{/if}
         </div>
         <div class="btns2">
