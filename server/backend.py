@@ -45,7 +45,7 @@ from vehicle.make import MakeClassifier
 from vision.egomotion import EgoMotion
 from vision.motion import MotionDetector
 from zones.monitor import ZoneMonitor
-from . import suggestions
+from . import spatial, suggestions
 from .clipenc import encode_clip
 from .media import MediaLibrary
 from .ooi import OOIManager
@@ -148,6 +148,12 @@ class Backend:
         self.cam_profiles = CameraProfiles()       # per-camera DNA + reputation from observations
         from trajectory.intent import IntentEstimator
         self.intent = IntentEstimator()            # probabilistic behavioural intent per track
+        # Monocular depth for the spatial 3D scene view (Feature 4). Lazy — the model loads on
+        # first request only, so a system that never opens the spatial view pays nothing.
+        from .depth import DepthEstimator
+        self._depth = DepthEstimator(
+            model_name=str(self.config.get("spatial.model",
+                                           "depth-anything/Depth-Anything-V2-Small-hf")))
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -1131,6 +1137,65 @@ class Backend:
                 "bbox": [fx1 / w, fy1 / h, (fx2 - fx1) / w, (fy2 - fy1) / h],
                 "conf": float(d.confidence), "severity": "info",
                 "klass": "WEAPON" if d.category == "weapon" else _CLS_KLASS.get(cls, "TRACKED"),
+            })
+        return out
+
+    def spatial_scene(self, sid: str, grid_w: int = 320) -> dict | None:
+        """Feature 4 — lift a camera's flat 2D frame into a navigable 3D point cloud.
+
+        Runs Depth Anything V2 on the latest frame, downsamples RGB + depth to a working grid
+        (bounded payload), and locates every detected entity in that same frame so the markers
+        line up with the cloud. The frontend back-projects the grid through a pinhole model and
+        renders it in three.js. Returns None when the source has no frame or depth is
+        unavailable (missing model/weights) — the endpoint reports "unavailable", never 5xx."""
+        if not self.config.get("spatial.enabled", True):
+            return None
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return None
+        frame = self._source_frame(src)
+        if frame is None:
+            return None
+        # Run depth on a moderate-resolution copy (quality vs. latency), then downscale to grid.
+        h0, w0 = frame.shape[:2]
+        work_w = int(self.config.get("spatial.input_width", 640))
+        if w0 > work_w:
+            work = cv2.resize(frame, (work_w, int(work_w * h0 / w0)), interpolation=cv2.INTER_AREA)
+        else:
+            work = frame
+        disp = self._depth.estimate(work)
+        if disp is None:
+            return None
+        grid_w = max(120, min(int(grid_w), 480))
+        gh = max(1, int(grid_w * work.shape[0] / work.shape[1]))
+        rgb_grid = cv2.resize(work, (grid_w, gh), interpolation=cv2.INTER_AREA)
+        disp_grid = cv2.resize(disp, (grid_w, gh), interpolation=cv2.INTER_AREA)
+        disp01, dmin, dmax = spatial.normalize_disparity(disp_grid)
+        entities = self._spatial_entities(work, disp, dmin, dmax)
+        return spatial.encode_scene(
+            rgb_grid, disp01, entities, fov=float(self.config.get("spatial.fov_deg", 60.0)),
+            cam=src.name, sid=str(sid), ts=time.time() * 1000.0)
+
+    def _spatial_entities(self, frame: Any, disp: Any, dmin: float, dmax: float) -> list[dict]:
+        """Detected people/vehicles/objects in `frame`, each with a normalized centre and a
+        depth sample (median disparity in its box) so it can be dropped into the 3D scene."""
+        det = self._yolo or self._roster_det
+        if det is None:
+            return []
+        h, w = frame.shape[:2]
+        try:
+            dets = det.detect_crop(frame, conf=float(self.config.get("spatial.detect_conf", 0.3)))
+        except Exception:  # noqa: BLE001
+            return []
+        out: list[dict] = []
+        for idx, d in enumerate(dets):
+            x1, y1, x2, y2 = d.bbox
+            cls = _CATEGORY_CLS.get(d.category, "object")
+            out.append({
+                "id": f"{cls[:2].upper()}{idx:02d}", "cls": cls,
+                "cx": (x1 + x2) / 2.0 / w, "cy": (y1 + y2) / 2.0 / h,
+                "depth": spatial.entity_depth(disp, (x1, y1, x2, y2), (w, h), dmin, dmax),
+                "conf": round(float(d.confidence), 2), "label": (d.label or cls).upper(),
             })
         return out
 
