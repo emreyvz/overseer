@@ -43,7 +43,7 @@ Lock onto any detection for a live target card with its class, attributes and pr
 
 ![Vehicle or person profile](demo/profile_tracking_when_where.png)
 
-Open any person or vehicle into a full profile: their photo and identity beside a clip of the sighting and the live feed of the camera they are on now, with an interactive map of where and when they were seen across every camera. Flag them to the watchlist, find them across all feeds, or replay their whole journey as one clip.
+Open any person or vehicle into a full profile. Where and when they were seen across every camera, on a live map. Flag them, find them across every feed, or replay their whole journey.
 
 ### Forensic search
 
