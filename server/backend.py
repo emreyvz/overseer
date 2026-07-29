@@ -156,6 +156,7 @@ class Backend:
                                            "depth-anything/Depth-Anything-V2-Small-hf")))
         self._scene3d = None   # monocular generative fallback (lazy, heavy — VRAM-gated)
         self._mvscene = None   # multi-view DUSt3R reconstruction (lazy, heavy — VRAM-gated)
+        self._diorama = None   # semantic 3D diorama (lazy, seg + depth — VRAM-gated)
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -1420,6 +1421,38 @@ class Backend:
             "points": base64.b64encode(pts.tobytes()).decode("ascii"),
             "colors": base64.b64encode(cols.tobytes()).decode("ascii"), "ts": time.time() * 1000.0,
         }}
+
+    def spatial_scene_diorama(self, sid: str) -> dict:
+        """Feature 4 — a semantic 3D DIORAMA of the camera scene. A scene-parsing model labels every
+        pixel and monocular depth places it, so we can build a clean, readable 3D world: a flat
+        textured ground, a sky backdrop, and every thing (tree, car, person, building, pole …) stood
+        up as an image-textured cutout at its real position. Reads as an actual 3D scene, not a
+        point fog. VRAM-gated. Returns the usual {"scene": ...} / {"scene": None, "reason": ...}."""
+        from . import diorama as _dio
+        if not self.config.get("spatial.enabled", True):
+            return {"scene": None, "reason": "disabled"}
+        have = _dio.vram_gb()
+        if have < _dio.MIN_VRAM_GB:
+            return {"scene": None, "reason": "insufficient_vram",
+                    "have_gb": round(have, 1), "need_gb": _dio.MIN_VRAM_GB}
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"scene": None, "reason": "no_source"}
+        frame = self._source_frame(src)
+        if frame is None:
+            return {"scene": None, "reason": "no_frame"}
+        if self._diorama is None:
+            self._diorama = _dio.DioramaScene(
+                self._depth, detector=self._yolo,
+                fov_deg=float(self.config.get("spatial.fov_deg", 60.0)),
+                model=str(self.config.get("spatial.seg_model", _dio._SEG_MODEL)))
+        out = self._diorama.build(frame, size=int(self.config.get("spatial.diorama_size", 640)))
+        if out is None:
+            return {"scene": None, "reason": "depth_unavailable"}
+        out["cam"] = src.name
+        out["sid"] = str(sid)
+        out["ts"] = time.time() * 1000.0
+        return {"scene": out}
 
     def _spatial_entities(self, frame: Any, disp: Any, dmin: float,
                           dmax: float) -> tuple[list[dict], list[tuple[float, float, float, float]]]:

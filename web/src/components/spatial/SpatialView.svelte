@@ -17,7 +17,8 @@
   let unavailable = $state(false)
   let reason = $state('')
   let camName = $state('')
-  let full = $state(true)    // FULL generative 3D (heavy, DEFAULT) vs fast depth-mesh
+  let dio = $state(true)     // semantic 3D DIORAMA (DEFAULT) — segmentation + depth object scene
+  let full = $state(false)   // FULL generative 3D point cloud (DUSt3R / monocular)
   // staged reconstruction so the user watches the process, not a spinner:
   //   capture (grab frame) -> depth (scan-sweep the depth field over the frame) -> lift (to 3D)
   let phase = $state<'' | 'capture' | 'depth' | 'lift'>('')
@@ -31,6 +32,8 @@
   let genProgress = $state(0)          // 0..100, eased toward ~94 until the real result lands
   let genStage = $state(0)
   const GEN_STEPS = ['CAPTURING VIEWPOINTS', 'MATCHING FEATURES', 'FUSING MULTI-VIEW GEOMETRY', 'BUILDING POINT CLOUD']
+  const DIO_STEPS = ['ACQUIRING FRAME', 'PARSING THE SCENE', 'PLACING OBJECTS', 'BUILDING DIORAMA']
+  const steps = $derived(dio ? DIO_STEPS : GEN_STEPS)
   let genRaf = 0
   let genActive = false
   let method = $state<'multiview' | 'monocular' | ''>('')
@@ -62,6 +65,9 @@
   let bgMesh: THREE.Mesh | null = null         // completed background reconstructed behind objects
   let pointsObj: THREE.Points | null = null    // FULL generative 3D reconstruction (point cloud)
   let markers: THREE.Group | null = null
+  let dioGround: THREE.Mesh | null = null      // diorama: flat textured ground surface
+  let dioObjects: THREE.Group | null = null    // diorama: stood-up object cutouts
+  let dioTex: THREE.Texture[] = []             // diorama textures to dispose
   let raf = 0
   let ro: ResizeObserver | null = null
   let autoTimer: ReturnType<typeof setInterval> | null = null
@@ -102,6 +108,7 @@
 
   async function loadScene(refresh = false) {
     if (refresh) sfx('sonar')
+    if (dio) { await loadDiorama(); return }
     if (full) { await loadFull(); return }
     loading = true; unavailable = false; reason = ''; phase = 'capture'
     let res: Awaited<ReturnType<typeof api.spatial>> | null = null
@@ -204,10 +211,100 @@
     genRaf = 0; genRaf2 = 0
   }
 
+  // Semantic DIORAMA: one request (~8 s) that parses the scene and returns a textured ground, a
+  // sky colour and stood-up object cutouts. Same watchable montage as the point-cloud path.
+  async function loadDiorama() {
+    loading = true; unavailable = false; reason = ''; phase = 'capture'
+    genProgress = 0; genStage = 0; method = ''
+    const dioP = api.diorama(cam).catch(() => null)
+    const fastP = api.spatial(cam, 256).catch(() => null)
+    startGenProgress()
+    fastP.then((fast) => { if (fast?.scene && genActive && loading) { if (!camName) camName = fast.scene.cam; startGenPreview(fast.scene) } })
+    const res = await dioP
+    stopGenPreview()
+    if (!res || !res.scene) {
+      if (res?.reason === 'insufficient_vram') {
+        reason = `The diorama needs a GPU with about ${res.need_gb} GB of VRAM, but only ${res.have_gb} GB is available.`
+      } else {
+        reason = REASON_TEXT[res?.reason ?? ''] ?? 'The 3D diorama is unavailable right now.'
+      }
+      loading = false; unavailable = true; phase = ''; return
+    }
+    camName = res.scene.cam
+    genProgress = 100; genStage = GEN_STEPS.length - 1
+    try { phase = 'lift'; await buildDiorama(res.scene); await wait(520) } catch (e) { console.error(e); unavailable = true }
+    loading = false; phase = ''
+  }
+
+  function texFromB64Png(b64: string): THREE.Texture {
+    const img = new Image(); img.src = 'data:image/png;base64,' + b64
+    const tex = new THREE.Texture(img)
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.minFilter = THREE.LinearFilter
+    img.decode().then(() => { tex.needsUpdate = true }).catch(() => {})
+    dioTex.push(tex)
+    return tex
+  }
+
+  async function buildDiorama(d: NonNullable<Awaited<ReturnType<typeof api.diorama>>['scene']>) {
+    if (!scene || !camera) return
+    clearScene()
+    entityCount = d.objects.length
+    const [sr, sg, sb] = d.sky
+    scene.background = new THREE.Color(`rgb(${sr},${sg},${sb})`)
+    scene.fog = new THREE.FogExp2((sr << 16) | (sg << 8) | sb, 0.012)   // subtle atmosphere
+    const { w, h, fov } = d
+    const fx = 0.5 * w / Math.tan((fov * Math.PI) / 180 / 2), cx = w / 2, cy = h / 2
+    // ground: a solid textured surface over the ground-class pixels only
+    const g = await decodeLayer(d.ground_image, d.ground_disp, w, h)
+    dioGround = layerMesh(g.disp, g.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 3.5, 0)
+    scene.add(dioGround)
+    // objects: each thing stood up as an image-textured cutout (cross for round things)
+    dioObjects = new THREE.Group()
+    for (const o of d.objects) {
+      const tex = texFromB64Png(o.tex)
+      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide })
+      const geo = new THREE.PlaneGeometry(Math.max(o.w, 0.02), Math.max(o.h, 0.02))
+      const mk = (ry: number) => {
+        const m = new THREE.Mesh(geo, mat)
+        m.position.set(o.pos[0], o.pos[1] + o.h / 2, o.pos[2]); m.rotation.y = ry; return m
+      }
+      dioObjects.add(mk(0))
+      if (o.role === 'cross') dioObjects.add(mk(Math.PI / 2))
+    }
+    scene.add(dioObjects)
+    // frame from a low 3/4 angle (the scene faces the original camera, like a stage)
+    const box = new THREE.Box3().setFromObject(dioGround)
+    if (dioObjects.children.length) box.expandByObject(dioObjects)
+    const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
+    const vfov = camera.fov * Math.PI / 180
+    const dist = Math.max((size.y / 2) / Math.tan(vfov / 2), (size.x / 2) / Math.tan(vfov / 2) / camera.aspect) * 1.2 + size.z * 0.35
+    const yaw = 14 * Math.PI / 180, pitch = 10 * Math.PI / 180
+    if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.1; controls.maxDistance = dist * 8 }
+    camera.position.set(
+      c.x + dist * Math.sin(yaw) * Math.cos(pitch),
+      c.y - dist * Math.sin(pitch),
+      c.z + dist * Math.cos(yaw) * Math.cos(pitch))
+    camera.updateProjectionMatrix()
+  }
+
   function clearScene() {
     if (mesh) { scene?.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose(); mesh = null }
     if (bgMesh) { scene?.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
     if (pointsObj) { scene?.remove(pointsObj); pointsObj.geometry.dispose(); (pointsObj.material as THREE.Material).dispose(); pointsObj = null }
+    clearDiorama()
+  }
+
+  function clearDiorama() {
+    if (dioGround) { scene?.remove(dioGround); dioGround.geometry.dispose(); (dioGround.material as THREE.Material).dispose(); dioGround = null }
+    if (dioObjects) {
+      scene?.remove(dioObjects)
+      dioObjects.traverse((o) => { const m = o as THREE.Mesh; m.geometry?.dispose?.(); const mm = m.material as THREE.Material | undefined; mm?.dispose?.() })
+      dioObjects = null
+    }
+    for (const t of dioTex) t.dispose()
+    dioTex = []
+    if (scene) { scene.background = null; scene.fog = new THREE.FogExp2(0x05070a, 0.045) }
   }
 
   function buildPointCloud(d: NonNullable<Awaited<ReturnType<typeof api.spatial3d>>['scene']>) {
@@ -478,6 +575,11 @@
     })
   }
 
+  function setMode(m: 'diorama' | 'points') {
+    dio = m === 'diorama'; full = m === 'points'; auto = false
+    sfx('click'); loadScene(true)
+  }
+
   function toggleAuto() {
     auto = !auto
     sfx('click')
@@ -505,6 +607,9 @@
     if (bgMesh) { bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose() }
     if (pointsObj) { pointsObj.geometry.dispose(); (pointsObj.material as THREE.Material).dispose() }
     if (markers) disposeGroup(markers)
+    if (dioGround) { dioGround.geometry.dispose(); (dioGround.material as THREE.Material).dispose() }
+    if (dioObjects) dioObjects.traverse((o) => { const m = o as THREE.Mesh; m.geometry?.dispose?.(); (m.material as THREE.Material | undefined)?.dispose?.() })
+    for (const t of dioTex) t.dispose()
     renderer?.dispose()
     if (renderer?.domElement && host?.contains(renderer.domElement)) host.removeChild(renderer.domElement)
   })
@@ -514,19 +619,20 @@
   <header class="top caps">
     <span class="eyebrow">⛶ SPATIAL RECONSTRUCTION</span>
     <span class="camn">{camName || '—'}</span>
-    <span class="mode">{full ? (method === 'multiview' ? 'MULTI-VIEW STEREO · FULL 3D' : method === 'monocular' ? 'MONOCULAR GEN · FULL 3D' : 'FULL 3D') : 'MONOCULAR DEPTH · 3D'}</span>
+    <span class="mode">{dio ? 'SEMANTIC DIORAMA · 3D' : full ? (method === 'multiview' ? 'MULTI-VIEW STEREO · 3D' : method === 'monocular' ? 'MONOCULAR GEN · 3D' : 'POINT CLOUD · 3D') : 'MONOCULAR DEPTH · 3D'}</span>
     <span class="spacer"></span>
-    {#if entityCount}<span class="ec caps">◈ {entityCount} ENTIT{entityCount === 1 ? 'Y' : 'IES'}</span>{/if}
-    <button class="ref caps" class:on={full} title="Generative full-3D reconstruction (heavy, fills every hole)"
-      onclick={() => { full = !full; if (!full) auto = false; loadScene(true) }}>{full ? '◉ FULL 3D' : '○ FULL 3D'}</button>
-    {#if !full}<button class="ref caps" class:on={auto} onclick={toggleAuto}>{auto ? '● LIVE' : '○ LIVE'}</button>{/if}
-    <button class="ref caps" onclick={() => loadScene(true)}>↻ {full ? 'REBUILD' : 'RECAPTURE'}</button>
+    {#if entityCount}<span class="ec caps">◈ {entityCount} {dio ? (entityCount === 1 ? 'OBJECT' : 'OBJECTS') : (entityCount === 1 ? 'ENTITY' : 'ENTITIES')}</span>{/if}
+    <button class="ref caps" class:on={dio} title="Semantic 3D diorama — objects detected, placed & textured from the frame"
+      onclick={() => { if (!dio) setMode('diorama') }}>{dio ? '◉ DIORAMA' : '○ DIORAMA'}</button>
+    <button class="ref caps" class:on={!dio && full} title="Full 3D point cloud (multi-view / generative)"
+      onclick={() => { if (dio || !full) setMode('points') }}>{(!dio && full) ? '◉ POINTS' : '○ POINTS'}</button>
+    <button class="ref caps" onclick={() => loadScene(true)}>↻ REBUILD</button>
     <button class="x caps" onclick={onclose}>✕ CLOSE</button>
   </header>
 
   <div class="stage" bind:this={host}></div>
 
-  {#if loading && full}
+  {#if loading && (full || dio)}
     <div class="veil caps" class:lifting={phase === 'lift'}>
       <div class="reco">
         <div class="preview show gen">
@@ -534,12 +640,12 @@
         </div>
         <div class="genbar"><span class="genfill" style="width:{genProgress}%"></span></div>
         <div class="steps caps">
-          {#each GEN_STEPS as s, i}
+          {#each steps as s, i}
             <span class="step" class:on={genStage === i} class:done={genStage > i}><span class="dot"></span>{s}</span>
           {/each}
         </div>
-        <div class="pl caps"><span class="pulse">{GEN_STEPS[genStage] || 'RECONSTRUCTING'}_ · {Math.round(genProgress)}%</span></div>
-        <div class="gensub caps">multi-view stereo · fusing camera viewpoints into real 3D geometry · ~25s</div>
+        <div class="pl caps"><span class="pulse">{steps[genStage] || 'RECONSTRUCTING'}_ · {Math.round(genProgress)}%</span></div>
+        <div class="gensub caps">{dio ? 'parsing the scene · detecting & placing objects in 3D · ~10s' : 'multi-view stereo · fusing camera viewpoints into real 3D geometry · ~25s'}</div>
       </div>
     </div>
   {:else if loading}

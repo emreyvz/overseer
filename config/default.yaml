@@ -292,6 +292,11 @@ spatial:
   mv_views: 4             # frames to capture for the burst (more = wider baseline, more VRAM/time)
   mv_gap_s: 0.35          # seconds between burst frames (sets the parallax baseline)
   mv_niter: 300           # global-alignment optimisation steps (quality vs time)
+  # Semantic 3D DIORAMA (default full-3D view): scene-parsing (SegFormer/ADE20K) + depth build a
+  # clean textured scene — flat ground, sky backdrop, and every thing stood up as an image-textured
+  # cutout. Best on eye-level scenes (street, etc.). Seg weights (~100 MB) download lazily.
+  seg_model: nvidia/segformer-b2-finetuned-ade-512-512
+  diorama_size: 640       # working resolution for parsing + cutouts (quality vs time)
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT

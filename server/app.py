@@ -534,6 +534,15 @@ async def api_spatial3d(sid: str) -> Any:
     return await asyncio.to_thread(backend.spatial_scene_full, sid)
 
 
+@app.get("/api/diorama/{sid}")
+async def api_diorama(sid: str) -> Any:
+    """Semantic 3D diorama: scene-parsing + depth -> textured ground, sky, and stood-up object
+    cutouts. Always 200 with {"scene": {...}} or {"scene": null, "reason": ...}."""
+    if backend is None:
+        return {"scene": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.spatial_scene_diorama, sid)
+
+
 @app.get("/api/suggestions")
 async def api_suggestions() -> Any:
     """Proactive smart suggestions — alert rules to add and camera improvements."""

@@ -35,6 +35,8 @@ export interface CaseDetail { id: number; name: string; threat: string; notes: s
 export interface SpatialEntity { id: string; cls: string; cx: number; cy: number; depth: number; conf: number; label: string }
 export interface SpatialScene { cam: string; sid: string; w: number; h: number; fov: number; image: string; depth: string; entities: SpatialEntity[]; ts: number; bg_image?: string; bg_depth?: string }
 export interface SpatialFull { mode: 'points'; method?: 'multiview' | 'monocular'; cam: string; sid: string; fov: number; count: number; points: string; colors: string; ts: number }
+export interface DioramaObject { cls: string; role: 'cross' | 'tall' | 'flat'; pos: [number, number, number]; w: number; h: number; tex: string; area: number }
+export interface DioramaScene { mode: 'diorama'; cam: string; sid: string; fov: number; w: number; h: number; ground_image: string; ground_disp: string; objects: DioramaObject[]; sky: [number, number, number]; ts: number }
 export interface SuggestRule { name: string; event_type: string; source_id: number; severity: string }
 export interface Suggestion { kind: 'alert' | 'camera'; cam: string; title: string; why: string; count?: number; rule?: SuggestRule }
 
@@ -85,6 +87,7 @@ export const api = {
   cameraDna: () => get<{ cameras: CameraDna[] }>(`/api/cameras/dna`),
   spatial: (sid: string, grid = 320) => get<{ scene: SpatialScene | null; reason?: string }>(`/api/spatial/${sid}?grid=${grid}`),
   spatial3d: (sid: string) => get<{ scene: SpatialFull | null; reason?: string; have_gb?: number; need_gb?: number }>(`/api/spatial3d/${sid}`),
+  diorama: (sid: string) => get<{ scene: DioramaScene | null; reason?: string; have_gb?: number; need_gb?: number }>(`/api/diorama/${sid}`),
   suggestions: () => get<{ suggestions: Suggestion[] }>(`/api/suggestions`),
   addAlertRule: (rule: SuggestRule) => post<{ id: number }>(`/api/alerts/rules`, rule),
   mergeCandidates: () => get<{ candidates: MergeCandidate[] }>(`/api/roster/merge-candidates`),
