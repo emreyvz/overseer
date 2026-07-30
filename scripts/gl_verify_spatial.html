@@ -59,8 +59,25 @@ function cleanMask(disp, w, h) {
   for (let i = 0; i < w * h; i++) base[i] = disp[i] >= SKYCULL ? 1 : 0
   let m = morph(morph(base, w, h, 2, true), w, h, 2, false)
   m = morph(morph(m, w, h, 2, false), w, h, 2, true)
+  m = keepBig(m, w, h)
   m = fillHoles(m, w, h)
   return morph(m, w, h, 5, false)
+}
+function keepBig(m, w, h) {
+  const lab = new Int32Array(w * h), sizes = [0]; let cur = 0; const stack = []
+  for (let i = 0; i < w * h; i++) {
+    if (m[i] !== 1 || lab[i]) continue
+    cur++; sizes.push(0); lab[i] = cur; stack.length = 0; stack.push(i)
+    while (stack.length) { const j = stack.pop(); sizes[cur]++; const x = j % w, y = (j / w) | 0
+      if (x > 0 && m[j - 1] === 1 && !lab[j - 1]) { lab[j - 1] = cur; stack.push(j - 1) }
+      if (x < w - 1 && m[j + 1] === 1 && !lab[j + 1]) { lab[j + 1] = cur; stack.push(j + 1) }
+      if (y > 0 && m[j - w] === 1 && !lab[j - w]) { lab[j - w] = cur; stack.push(j - w) }
+      if (y < h - 1 && m[j + w] === 1 && !lab[j + w]) { lab[j + w] = cur; stack.push(j + w) } }
+  }
+  let mx = 0; for (let c = 1; c <= cur; c++) if (sizes[c] > mx) mx = sizes[c]
+  const keepMin = mx * 0.12, out = new Uint8Array(w * h)
+  for (let i = 0; i < w * h; i++) out[i] = (lab[i] && sizes[lab[i]] >= keepMin) ? 1 : 0
+  return out
 }
 function medianDisp(disp, w, h) {
   const out = new Float32Array(w * h), win = []
@@ -118,10 +135,17 @@ function solve3(A, b) {
   return [m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]]
 }
 function fitGround(disp, w, h, fx, cx, cy) {
-  let n = 0, sZ = 0, sZ2 = 0, sZ3 = 0, sZ4 = 0, sY = 0, sZY = 0, sZ2Y = 0
-  for (let y = Math.floor(h * 0.5); y < h; y++) for (let x = 0; x < w; x++) { const dv = disp[y * w + x]; if (dv < SKYCULL) continue; const Z = zOf(dv), Y = -(y - cy) * Z / fx, Z2 = Z * Z; n++; sZ += Z; sZ2 += Z2; sZ3 += Z2 * Z; sZ4 += Z2 * Z2; sY += Y; sZY += Z * Y; sZ2Y += Z2 * Y }
-  if (n < 40) return null
-  return solve3([[n, sZ, sZ2], [sZ, sZ2, sZ3], [sZ2, sZ3, sZ4]], [sY, sZY, sZ2Y])
+  const Zs = [], Ys = []
+  for (let y = Math.floor(h * 0.5); y < h; y++) for (let x = 0; x < w; x++) { const dv = disp[y * w + x]; if (dv < SKYCULL) continue; const Z = zOf(dv); Zs.push(Z); Ys.push(-(y - cy) * Z / fx) }
+  const n = Zs.length; if (n < 40) return null
+  const quad = (idx) => { let N = 0, sZ = 0, sZ2 = 0, sZ3 = 0, sZ4 = 0, sY = 0, sZY = 0, sZ2Y = 0; for (const i of idx) { const Z = Zs[i], Y = Ys[i], Z2 = Z * Z; N++; sZ += Z; sZ2 += Z2; sZ3 += Z2 * Z; sZ4 += Z2 * Z2; sY += Y; sZY += Z * Y; sZ2Y += Z2 * Y } return N < 3 ? null : solve3([[N, sZ, sZ2], [sZ, sZ2, sZ3], [sZ2, sZ3, sZ4]], [sY, sZY, sZ2Y]) }
+  const THRESH = 0.3, rnd = () => (Math.random() * n) | 0
+  let best = null, bestCount = -1
+  for (let it = 0; it < 60; it++) { const c = quad([rnd(), rnd(), rnd(), rnd(), rnd()]); if (!c) continue; let cnt = 0; for (let i = 0; i < n; i++) { const Z = Zs[i]; if (Math.abs(Ys[i] - (c[0] + c[1] * Z + c[2] * Z * Z)) < THRESH) cnt++ } if (cnt > bestCount) { bestCount = cnt; best = c } }
+  const allIdx = Array.from({ length: n }, (_, i) => i)
+  if (!best) return quad(allIdx)
+  const inl = []; for (let i = 0; i < n; i++) { const Z = Zs[i]; if (Math.abs(Ys[i] - (best[0] + best[1] * Z + best[2] * Z * Z)) < THRESH) inl.push(i) }
+  return inl.length >= 20 ? (quad(inl) ?? best) : best
 }
 function layerMesh(disp, rgba, w, h, fx, cx, cy, opt) {
   const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null, maxT = opt.maxT ?? 0.35, minT = 0.03

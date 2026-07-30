@@ -258,8 +258,34 @@
     }
     let m = morph(morph(base, 2, true), 2, false)   // close: fill small notches
     m = morph(morph(m, 2, false), 2, true)          // open: drop thin spikes / specks
+    m = keepBig(m, w, h)                            // drop flyaway fragments (keep main body + sizable parts)
     m = fillHoles(m, w, h)                          // fill enclosed gaps -> solid, no black inside
     return morph(m, 5, false)                        // erode ~5px: trim the smear-prone boundary
+  }
+
+  // Keep only sizable connected regions of the mask (>=12% of the largest), dropping the little
+  // flyaway fragments that leave ragged spikes/islands around the silhouette. Stack flood-fill.
+  function keepBig(m: Uint8Array, w: number, h: number): Uint8Array {
+    const lab = new Int32Array(w * h), sizes = [0]
+    let cur = 0
+    const stack: number[] = []
+    for (let i = 0; i < w * h; i++) {
+      if (m[i] !== 1 || lab[i]) continue
+      cur++; sizes.push(0); lab[i] = cur; stack.length = 0; stack.push(i)
+      while (stack.length) {
+        const j = stack.pop()!; sizes[cur]++; const x = j % w, y = (j / w) | 0
+        if (x > 0 && m[j - 1] === 1 && !lab[j - 1]) { lab[j - 1] = cur; stack.push(j - 1) }
+        if (x < w - 1 && m[j + 1] === 1 && !lab[j + 1]) { lab[j + 1] = cur; stack.push(j + 1) }
+        if (y > 0 && m[j - w] === 1 && !lab[j - w]) { lab[j - w] = cur; stack.push(j - w) }
+        if (y < h - 1 && m[j + w] === 1 && !lab[j + w]) { lab[j + w] = cur; stack.push(j + w) }
+      }
+    }
+    let mx = 0
+    for (let c = 1; c <= cur; c++) if (sizes[c] > mx) mx = sizes[c]
+    const keepMin = mx * 0.12
+    const out = new Uint8Array(w * h)
+    for (let i = 0; i < w * h; i++) out[i] = (lab[i] && sizes[lab[i]] >= keepMin) ? 1 : 0
+    return out
   }
 
   // 3x3 median — knocks out isolated depth speckle spikes before the heavy blur.
@@ -393,17 +419,40 @@
   // Fit the ground's height trend Y = a + bZ + cZ² over the near/low image rows, so the same
   // correction can de-bow the mesh AND the entity markers consistently. Null if too few samples.
   function fitGround(disp: Float32Array, w: number, h: number, fx: number, cx: number, cy: number): [number, number, number] | null {
-    let n = 0, sZ = 0, sZ2 = 0, sZ3 = 0, sZ4 = 0, sY = 0, sZY = 0, sZ2Y = 0
+    const Zs: number[] = [], Ys: number[] = []
     for (let y = Math.floor(h * 0.5); y < h; y++) {
       for (let x = 0; x < w; x++) {
         const dv = disp[y * w + x]
         if (dv < SKYCULL) continue
-        const Z = zOf(dv), Y = -(y - cy) * Z / fx, Z2 = Z * Z
-        n++; sZ += Z; sZ2 += Z2; sZ3 += Z2 * Z; sZ4 += Z2 * Z2; sY += Y; sZY += Z * Y; sZ2Y += Z2 * Y
+        const Z = zOf(dv); Zs.push(Z); Ys.push(-(y - cy) * Z / fx)
       }
     }
+    const n = Zs.length
     if (n < 40) return null
-    return solve3([[n, sZ, sZ2], [sZ, sZ2, sZ3], [sZ2, sZ3, sZ4]], [sY, sZY, sZ2Y])
+    // least-squares quadratic Y=a+bZ+cZ² over an index subset
+    const quad = (idx: number[]): [number, number, number] | null => {
+      let N = 0, sZ = 0, sZ2 = 0, sZ3 = 0, sZ4 = 0, sY = 0, sZY = 0, sZ2Y = 0
+      for (const i of idx) { const Z = Zs[i], Y = Ys[i], Z2 = Z * Z; N++; sZ += Z; sZ2 += Z2; sZ3 += Z2 * Z; sZ4 += Z2 * Z2; sY += Y; sZY += Z * Y; sZ2Y += Z2 * Y }
+      if (N < 3) return null
+      return solve3([[N, sZ, sZ2], [sZ, sZ2, sZ3], [sZ2, sZ3, sZ4]], [sY, sZY, sZ2Y])
+    }
+    // RANSAC: standing objects/cars in the lower half pull a plain fit upward; robustly find the
+    // dominant ground trend by keeping the model with the most inliers, then refit on them.
+    const THRESH = 0.3
+    const rnd = () => (Math.random() * n) | 0
+    let best: [number, number, number] | null = null, bestCount = -1
+    for (let it = 0; it < 60; it++) {
+      const c = quad([rnd(), rnd(), rnd(), rnd(), rnd()])
+      if (!c) continue
+      let cnt = 0
+      for (let i = 0; i < n; i++) { const Z = Zs[i]; if (Math.abs(Ys[i] - (c[0] + c[1] * Z + c[2] * Z * Z)) < THRESH) cnt++ }
+      if (cnt > bestCount) { bestCount = cnt; best = c }
+    }
+    const allIdx = Array.from({ length: n }, (_, i) => i)
+    if (!best) return quad(allIdx)
+    const inl: number[] = []
+    for (let i = 0; i < n; i++) { const Z = Zs[i]; if (Math.abs(Ys[i] - (best[0] + best[1] * Z + best[2] * Z * Z)) < THRESH) inl.push(i) }
+    return inl.length >= 20 ? (quad(inl) ?? best) : best
   }
 
   async function buildCloud(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>) {
