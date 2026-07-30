@@ -511,12 +511,27 @@
     // foreground as a SOLID: each object is extruded back to the reconstructed background and its
     // silhouette stitched, so it's an opaque, textured VOLUME — not a see-through shell.
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
+    // Class-aware back depth: give each DETECTED object a body depth from its class + apparent size,
+    // so its occluded back is shaped like the object (a vehicle its full length, a person thin)
+    // instead of a flat cap. Per-pixel map, 0 = use the default relief-based slab.
+    const objDepth = new Float32Array(w * h)
+    for (const b of (d.boxes ?? [])) {
+      const x1 = Math.max(0, Math.floor(b.x1 * w)), x2 = Math.min(w, Math.ceil(b.x2 * w))
+      const y1 = Math.max(0, Math.floor(b.y1 * h)), y2 = Math.min(h, Math.ceil(b.y2 * h))
+      if (x2 <= x1 || y2 <= y1) continue
+      const Zc = zOf(fgDisp[((y1 + y2) >> 1) * w + ((x1 + x2) >> 1)])
+      const worldW = (x2 - x1) * Zc / fx          // the object's width in world units, at its depth
+      const T = b.cls === 'vehicle' ? Math.min(1.6, Math.max(0.5, 1.5 * worldW))   // length ~ 1.5x width
+        : b.cls === 'person' ? 0.15                                                // people are thin
+          : Math.min(0.9, Math.max(0.3, worldW))                                   // generic object
+      for (let y = y1; y < y2; y++) for (let x = x1; x < x2; x++) objDepth[y * w + x] = T
+    }
     // no world-length cull (that tears far ground into holes); instead cut only triangles that
     // span a depth discontinuity (DISP_JUMP) -> crisp object silhouettes that stand up, while the
     // continuous ground stays a solid, gap-free surface. Culled boundaries are closed by the solid
     // side-walls (below), so no see-through black behind objects.
     mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, 1e9, 0,
-      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep, dispJump: DISP_JUMP, zrange: ZRANGE })
+      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep, dispJump: DISP_JUMP, zrange: ZRANGE, objDepth })
     scene.add(mesh)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
@@ -590,7 +605,7 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number; zrange?: number; dim?: number } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number; zrange?: number; dim?: number; objDepth?: Float32Array | null } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
     const maxT = opt.maxT ?? 0.35, minT = 0.03, dim = opt.dim ?? 1   // dim<1 fades a guessed layer
     const pos: number[] = [], col: number[] = [], uv: number[] = []
@@ -645,9 +660,12 @@
       }
     }
     if (solid) {
-      for (let j = 0; j < nF; j++) {   // back vertices: thickness grows with RELIEF (flattened height)
-        const relief = Math.max(0, pos[j * 3 + 1])   // -> tall objects become rounded volumes, ground
-        const T = Math.min(maxT, minT + 0.45 * relief)  // stays a thin slab (was a flat cap to the bg)
+      for (let j = 0; j < nF; j++) {   // back vertices: DETECTED objects extrude to a class-appropriate
+        const relief = Math.max(0, pos[j * 3 + 1])       // body depth (a vehicle its full length, a
+        const od = opt.objDepth ? opt.objDepth[vpix[j]] : 0   // person thin); elsewhere the ground stays
+        // only STANDING pixels (relief above the ground) get the object depth, so the ground/road
+        // inside a detection box is not slabbed back with it.
+        const T = (od > 0 && relief > 0.15) ? od : Math.min(maxT, minT + 0.45 * relief)
         pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T)
         col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82)
         uv.push(uv[j * 2], uv[j * 2 + 1])           // back vertices reuse the front UV

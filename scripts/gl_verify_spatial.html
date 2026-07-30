@@ -175,7 +175,7 @@ function layerMesh(disp, rgba, w, h, fx, cx, cy, opt) {
   for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) { const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1; tri(tl, bl, tr); tri(tr, bl, br) }
   if (opt.flattenCoef) { const [a, b, c] = opt.flattenCoef; for (let j = 0; j < nF; j++) { const Z = vz[j]; let r = pos[j * 3 + 1] - (a + b * Z + c * Z * Z); r = Math.max(-0.6, Math.min(2.2, r)); pos[j * 3 + 1] = r * RELIEF } }
   if (solid) {
-    for (let j = 0; j < nF; j++) { const relief = Math.max(0, pos[j * 3 + 1]); const T = Math.min(maxT, minT + 0.45 * relief); pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T); col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82); uv.push(uv[j * 2], uv[j * 2 + 1]) }
+    for (let j = 0; j < nF; j++) { const relief = Math.max(0, pos[j * 3 + 1]); const od = opt.objDepth ? opt.objDepth[vpix[j]] : 0; const T = (od > 0 && relief > 0.15) ? od : Math.min(maxT, minT + 0.45 * relief); pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T); col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82); uv.push(uv[j * 2], uv[j * 2 + 1]) }
     const nFrontIdx = idx.length
     for (let t = 0; t < nFrontIdx; t += 3) idx.push(idx[t] + nF, idx[t + 2] + nF, idx[t + 1] + nF)
     for (const [k, c] of edge) { if (c !== 1) continue; const [a, b] = k.split('_').map(Number); idx.push(a, b, b + nF, a, b + nF, a + nF) }
@@ -309,7 +309,17 @@ async function main() {
   if (s.tex_image) { const t = new Image(); t.src = 'data:image/jpeg;base64,' + s.tex_image; await t.decode(); tex = new THREE.Texture(t); tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); tex.needsUpdate = true }
 
   const lit = MODE === 'lit'
-  const mesh = layerMesh(fgDisp, rgba, W, H, fx, cx, cy, { solid: true, bgdisp: null, maxT: 0.5, flattenCoef: gy, tex, keep, dispJump: DISP_JUMP, maxlen: MAXLEN, zrange: ZRANGE, lit })
+  const objDepth = new Float32Array(W * H)
+  for (const b of (s.boxes || [])) {
+    const x1 = Math.max(0, Math.floor(b.x1 * W)), x2 = Math.min(W, Math.ceil(b.x2 * W))
+    const y1 = Math.max(0, Math.floor(b.y1 * H)), y2 = Math.min(H, Math.ceil(b.y2 * H))
+    if (x2 <= x1 || y2 <= y1) continue
+    const Zc = zOf(fgDisp[((y1 + y2) >> 1) * W + ((x1 + x2) >> 1)])
+    const worldW = (x2 - x1) * Zc / fx
+    const T = b.cls === 'vehicle' ? Math.min(1.6, Math.max(0.5, 1.5 * worldW)) : b.cls === 'person' ? 0.15 : Math.min(0.9, Math.max(0.3, worldW))
+    for (let y = y1; y < y2; y++) for (let x = x1; x < x2; x++) objDepth[y * W + x] = T
+  }
+  const mesh = layerMesh(fgDisp, rgba, W, H, fx, cx, cy, { solid: true, bgdisp: null, maxT: 0.5, flattenCoef: gy, tex, keep, dispJump: DISP_JUMP, maxlen: MAXLEN, zrange: ZRANGE, objDepth, lit })
   scene.add(mesh)
 
   // framing (same as SpatialView)
@@ -318,8 +328,16 @@ async function main() {
   const vfov = camera.fov * Math.PI / 180, foot = Math.max(size.x, size.z)
   const dist = (foot / 2) / Math.tan(vfov / 2) * 0.92 + size.y * 0.5
   const yaw = (+(P.get('yaw') || 22)) * Math.PI / 180, pitch = (+(P.get('pitch') || 16)) * Math.PI / 180
-  camera.position.set(c.x + dist * Math.sin(yaw) * Math.cos(pitch), c.y + dist * Math.sin(pitch), c.z + dist * Math.cos(yaw) * Math.cos(pitch))
-  camera.lookAt(c); camera.updateProjectionMatrix()
+  let tgt = c, fdist = dist
+  if (P.get('focus') && (s.boxes || []).length) {   // frame close on the first vehicle, to inspect its body
+    const vb = (s.boxes || []).find(b => b.cls === 'vehicle') || s.boxes[0]
+    const px = ((vb.x1 + vb.x2) / 2) * W, py = ((vb.y1 + vb.y2) / 2) * H
+    const Zc = zOf(fgDisp[Math.floor(py) * W + Math.floor(px)])
+    tgt = new THREE.Vector3((px - cx) * Zc / fx, 0.25, -Zc)
+    fdist = Math.max(1.6, Zc * 0.55)
+  }
+  camera.position.set(tgt.x + fdist * Math.sin(yaw) * Math.cos(pitch), tgt.y + fdist * Math.sin(pitch), tgt.z + fdist * Math.cos(yaw) * Math.cos(pitch))
+  camera.lookAt(tgt); camera.updateProjectionMatrix()
 
   // GENTLE scene-adaptive exposure from the SUBJECT (kept pixels only, so a dark/black sky doesn't
   // skew it). Tight clamp around the base 1.15 -> dark scenes stay dark-ish, bright ones don't blow.
