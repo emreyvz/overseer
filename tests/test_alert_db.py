@@ -39,6 +39,19 @@ def test_alert_crud_and_ack(tmp_path: Path) -> None:
     assert db.list_alerts(unacked_only=True) == []
 
 
+def test_alert_persists_clip_path(tmp_path: Path) -> None:
+    # the alert's video clip URL must round-trip so history can replay it
+    db = _db(tmp_path)
+    alert = Alert(rule_id=1, rule_name="Terk", event_type="ABANDONED_OBJECT",
+                  source_id=2, severity="critical", summary="Abandoned object.",
+                  timestamp=100.0, snapshot_path="/snapshots/a.jpg",
+                  clip_path="/snapshots/clips/a.webm", metadata={})
+    db.add_alert(alert)
+    got = db.list_alerts()[0]
+    assert got.clip_path == "/snapshots/clips/a.webm"
+    assert got.snapshot_path == "/snapshots/a.jpg"
+
+
 def test_seed_default_alert_rules_is_once(tmp_path: Path) -> None:
     db = _db(tmp_path)
     db.seed_default_alert_rules(crowd_min=8, cooldown_s=60.0)

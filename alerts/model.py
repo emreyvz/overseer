@@ -36,6 +36,7 @@ class Alert:
     summary: str
     timestamp: float
     snapshot_path: str | None = None
+    clip_path: str | None = None   # short video clip around the alert (URL under /snapshots)
     metadata: dict = field(default_factory=dict)
     acknowledged: bool = False
     id: int = 0                # DB row id; 0 = not yet persisted

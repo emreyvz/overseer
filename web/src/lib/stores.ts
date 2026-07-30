@@ -5,6 +5,7 @@ import type {
 } from './types'
 import { MODULES } from './lexicon'
 import { fpRate } from './feedback'
+import { api } from './api'
 
 export type Mode = 'pov' | 'montage' | 'topology' | 'forensic' | 'archive' | 'case' | 'roster'
 
@@ -153,6 +154,25 @@ export function pushAlert(a: Alert) {
 }
 export function pushEvent(e: TimelineEvent) {
   timeline.update((list) => [e, ...list].slice(0, 500))
+}
+
+/** Load persisted alert history from the backend and merge it into the live list (newest first),
+ * so past alerts — with their snapshot + replayable clip — are visible after a restart / on load. */
+export async function hydrateAlerts() {
+  try {
+    const rows = await api.alerts()
+    alerts.update((live) => {
+      const seen = new Set(live.map((a) => `${a.ts}|${a.type}|${a.cam}`))
+      const hist = rows
+        .filter((r) => !seen.has(`${r.ts}|${r.type}|${r.cam}`))
+        .map((r): Alert => ({
+          ts: r.ts, severity: r.severity as Alert['severity'], type: r.type, summary: r.summary,
+          cam: r.cam, ack: true, snapshot: r.snapshot ?? undefined, clip: r.clip ?? undefined,
+          threat: `THR-${Math.round(r.ts) % 100000}`, hits: 1,
+        }))   // history is acknowledged (goes to RECENT, never re-features as an active incident)
+      return [...live, ...hist].sort((a, b) => b.ts - a.ts).slice(0, 200)
+    })
+  } catch { /* offline — keep whatever the WS delivered */ }
 }
 
 /** Flash a status banner for `ms`. */

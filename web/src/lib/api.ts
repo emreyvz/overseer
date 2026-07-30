@@ -20,6 +20,7 @@ const del = <T>(p: string) => send<T>('DELETE', p)
 
 export interface SearchHit { kind: string; ts: number; type: string; label: string; snapshot?: string | null }
 export interface EventRow { id: number; ts: number; type: string; label: string; conf?: number | null; snapshot?: string | null }
+export interface AlertRow { id: number; ts: number; severity: string; type: string; summary: string; cam: string; ack: boolean; snapshot?: string | null; clip?: string | null }
 export interface Associate { id: string; count: number; cameras: string[]; first: number; last: number; confidence: number; cls: string; snapshot?: string | null; plate?: string | null; cam?: string | null }
 export interface GraphNode { id: string; cls: string; snapshot?: string | null; plate?: string | null }
 export interface GraphEdge { a: string; b: string; count: number; confidence: number; cameras: string[] }
@@ -47,6 +48,7 @@ export const api = {
     return get<{ hits: SearchHit[]; deferred?: string[]; unmatched?: string[] }>(`/api/search?${p}`)
   },
   events: (limit = 200) => get<EventRow[]>(`/api/events?limit=${limit}`),
+  alerts: (limit = 200) => get<AlertRow[]>(`/api/alerts?limit=${limit}`),
   stats: (start: number, end: number) => get<Record<string, number>>(`/api/stats?start=${start}&end=${end}`),
   storage: () => get<{ recordings: number; sizeGB: number; oldest: number; recent: { kind: string; start: number; end: number; sizeMB: number; mode: string }[] }>(`/api/storage`),
   recordings: () => get<{ id: number; kind: string; mode: string; start: number; end: number; sizeMB: number; url: string | null }[]>(`/api/recordings`),

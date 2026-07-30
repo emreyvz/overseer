@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     severity TEXT NOT NULL,
     summary TEXT NOT NULL,
     snapshot_path TEXT,
+    clip_path TEXT,
     acknowledged INTEGER NOT NULL DEFAULT 0,
     metadata TEXT NOT NULL DEFAULT '{}'
 );
@@ -302,6 +303,10 @@ class Database:
                      self._conn.execute("PRAGMA table_info(cases)").fetchall()}
         if "status" not in case_cols:  # investigation lifecycle
             self._conn.execute("ALTER TABLE cases ADD COLUMN status TEXT NOT NULL DEFAULT 'open'")
+        alert_cols = {r[1] for r in
+                      self._conn.execute("PRAGMA table_info(alerts)").fetchall()}
+        if "clip_path" not in alert_cols:  # persist the alert's video clip so history can replay it
+            self._conn.execute("ALTER TABLE alerts ADD COLUMN clip_path TEXT")
 
     # -- sources -------------------------------------------------------------
     def add_source(self, name: str, url: str) -> int:
@@ -938,11 +943,11 @@ class Database:
         with self._lock:
             cur = self._conn.execute(
                 "INSERT INTO alerts (ts, rule_id, rule_name, event_type, source_id,"
-                " severity, summary, snapshot_path, acknowledged, metadata)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " severity, summary, snapshot_path, clip_path, acknowledged, metadata)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (alert.timestamp, alert.rule_id, alert.rule_name, alert.event_type,
                  alert.source_id, alert.severity, alert.summary, alert.snapshot_path,
-                 int(alert.acknowledged), json.dumps(alert.metadata)),
+                 alert.clip_path, int(alert.acknowledged), json.dumps(alert.metadata)),
             )
             self._conn.commit()
             return int(cur.lastrowid)
@@ -950,7 +955,7 @@ class Database:
     def list_alerts(self, limit: int = 200, since: float | None = None,
                     unacked_only: bool = False) -> list[Alert]:
         query = ("SELECT id, ts, rule_id, rule_name, event_type, source_id, severity,"
-                 " summary, snapshot_path, acknowledged, metadata FROM alerts")
+                 " summary, snapshot_path, acknowledged, metadata, clip_path FROM alerts")
         clauses: list[str] = []
         params: list[object] = []
         if since is not None:
@@ -967,7 +972,7 @@ class Database:
         return [Alert(id=r[0], timestamp=r[1], rule_id=r[2], rule_name=r[3],
                       event_type=r[4], source_id=r[5], severity=r[6], summary=r[7],
                       snapshot_path=r[8], acknowledged=bool(r[9]),
-                      metadata=json.loads(r[10])) for r in rows]
+                      metadata=json.loads(r[10]), clip_path=r[11]) for r in rows]
 
     def acknowledge_alert(self, alert_id: int) -> None:
         with self._lock:
