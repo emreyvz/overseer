@@ -31,7 +31,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
 const P = new URLSearchParams(location.search)
 const MODE = P.get('mode') || 'after'
 const SID = P.get('sid') || '8'
-const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6, SKYCULL = 0.015, RELIEF = 1.0, DISP_JUMP = 0.055
+const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6, SKYCULL = 0.015, RELIEF = 0.6, DISP_JUMP = 0.045, MAXLEN = 1e9
 
 const fail = (e) => { window.__error = String(e && e.stack || e); window.__done = true }
 window.onerror = (m, s, l, c, e) => fail(e || m)
@@ -79,9 +79,9 @@ function keepBig(m, w, h) {
   for (let i = 0; i < w * h; i++) out[i] = (lab[i] && sizes[lab[i]] >= keepMin) ? 1 : 0
   return out
 }
-function medianDisp(disp, w, h) {
+function medianDisp(disp, w, h, r = 1) {
   const out = new Float32Array(w * h), win = []
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { win.length = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && xx < w && yy >= 0 && yy < h) win.push(disp[yy * w + xx]) } win.sort((p, q) => p - q); out[y * w + x] = win[win.length >> 1] }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { win.length = 0; for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && xx < w && yy >= 0 && yy < h) win.push(disp[yy * w + xx]) } win.sort((p, q) => p - q); out[y * w + x] = win[win.length >> 1] }
   return out
 }
 function fillDepth(disp, keep, w, h) {
@@ -158,7 +158,7 @@ function layerMesh(disp, rgba, w, h, fx, cx, cy, opt) {
   const dj = opt.dispJump ?? Infinity
   const tri = (a, b, c) => { const va = vidx[a], vb = vidx[b], vc = vidx[c]; if (va < 0 || vb < 0 || vc < 0) return; if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > (opt.maxlen ?? Infinity)) return; const da = disp[a], db = disp[b], dc = disp[c]; if (Math.max(Math.abs(da - db), Math.abs(db - dc), Math.abs(da - dc)) > dj) return; idx.push(va, vb, vc); if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) } }
   for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) { const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1; tri(tl, bl, tr); tri(tr, bl, br) }
-  if (opt.flattenCoef) { const [a, b, c] = opt.flattenCoef; for (let j = 0; j < nF; j++) { const Z = vz[j]; pos[j * 3 + 1] = (pos[j * 3 + 1] - (a + b * Z + c * Z * Z)) * RELIEF } }
+  if (opt.flattenCoef) { const [a, b, c] = opt.flattenCoef; for (let j = 0; j < nF; j++) { const Z = vz[j]; let r = pos[j * 3 + 1] - (a + b * Z + c * Z * Z); r = Math.max(-0.6, Math.min(2.2, r)); pos[j * 3 + 1] = r * RELIEF } }
   if (solid) {
     for (let j = 0; j < nF; j++) { const T = bgdisp ? Math.max(minT, Math.min(maxT, zOf(bgdisp[vpix[j]]) - vz[j])) : Math.min(maxT, minT + 0.12); pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T); col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82); uv.push(uv[j * 2], uv[j * 2 + 1]) }
     const nFrontIdx = idx.length
@@ -238,7 +238,7 @@ function buildComposer(renderer, scene, camera, w, h) {
   gtao.updateGtaoMaterial({ radius: 0.5, distanceExponent: 1.0, thickness: 0.7, scale: 1.0, samples: 16, distanceFallOff: 1.0, screenSpaceRadius: false })
   gtao.blendIntensity = 1.0
   composer.addPass(gtao)
-  composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.75, 0.8))
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.22, 0.7, 0.9))
   composer.addPass(new OutputPass())
   // vignette LAST, in sRGB/LDR: mixing toward black (darkness<1) — if run before ACES it feeds
   // negatives to the tone-mapper and the corners turn orange.
@@ -286,14 +286,14 @@ async function main() {
   const fx = 0.5 * W / Math.tan((fov * Math.PI) / 180 / 2), cx = W / 2, cy = H / 2
 
   const keep = cleanMask(disp, W, H)
-  const fgDisp = bilateralDisp(medianDisp(fillDepth(disp, keep, W, H), W, H), rgba, keep, W, H, 3, 0.09, 0.04, 2)
+  const fgDisp = bilateralDisp(medianDisp(fillDepth(disp, keep, W, H), W, H, 2), rgba, keep, W, H, 3, 0.09, 0.04, 2)
   const gy = fitGround(fgDisp, W, H, fx, cx, cy)
 
   let tex = null
   if (s.tex_image) { const t = new Image(); t.src = 'data:image/jpeg;base64,' + s.tex_image; await t.decode(); tex = new THREE.Texture(t); tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); tex.needsUpdate = true }
 
   const lit = MODE === 'lit'
-  const mesh = layerMesh(fgDisp, rgba, W, H, fx, cx, cy, { solid: true, bgdisp: null, maxT: 0.5, flattenCoef: gy, tex, keep, dispJump: DISP_JUMP, lit })
+  const mesh = layerMesh(fgDisp, rgba, W, H, fx, cx, cy, { solid: true, bgdisp: null, maxT: 0.5, flattenCoef: gy, tex, keep, dispJump: DISP_JUMP, maxlen: MAXLEN, lit })
   scene.add(mesh)
 
   // framing (same as SpatialView)
@@ -301,7 +301,7 @@ async function main() {
   const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
   const vfov = camera.fov * Math.PI / 180, foot = Math.max(size.x, size.z)
   const dist = (foot / 2) / Math.tan(vfov / 2) * 0.92 + size.y * 0.5
-  const yaw = 22 * Math.PI / 180, pitch = 16 * Math.PI / 180
+  const yaw = 22 * Math.PI / 180, pitch = (+(P.get('pitch') || 16)) * Math.PI / 180
   camera.position.set(c.x + dist * Math.sin(yaw) * Math.cos(pitch), c.y + dist * Math.sin(pitch), c.z + dist * Math.cos(yaw) * Math.cos(pitch))
   camera.lookAt(c); camera.updateProjectionMatrix()
 
