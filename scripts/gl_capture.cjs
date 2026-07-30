@@ -13,6 +13,8 @@ const sidArg = process.argv.find((a) => a.startsWith('--sid='))
 const SID = sidArg ? sidArg.split('=')[1] : '8'
 const pitchArg = process.argv.find((a) => a.startsWith('--pitch='))
 const PITCH = pitchArg ? pitchArg.split('=')[1] : ''
+const yawArg = process.argv.find((a) => a.startsWith('--yaw='))
+const YAW = yawArg ? yawArg.split('=')[1] : ''
 
 async function shot(mode, out) {
   const win = new BrowserWindow({
@@ -23,7 +25,7 @@ async function shot(mode, out) {
   win.webContents.on('console-message', (_e, _l, msg) => { if (/error|Error|undefined/.test(msg)) errs.push(msg) })
   let loaded = false
   for (let attempt = 0; attempt < 4 && !loaded; attempt++) {
-    try { await win.loadURL(`${PAGE}?mode=${mode}&sid=${SID}${PITCH ? '&pitch=' + PITCH : ''}`); loaded = true }
+    try { await win.loadURL(`${PAGE}?mode=${mode}&sid=${SID}${PITCH ? '&pitch=' + PITCH : ''}${YAW ? '&yaw=' + YAW : ''}`); loaded = true }
     catch (e) { await new Promise((r) => setTimeout(r, 600)) }
   }
   if (!loaded) { console.log(`[${mode}] load failed`); win.destroy(); return }
