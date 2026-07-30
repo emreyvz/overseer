@@ -180,7 +180,51 @@
     }
     let m = morph(morph(base, 2, true), 2, false)   // close: fill small notches
     m = morph(morph(m, 2, false), 2, true)          // open: drop thin spikes / specks
-    return morph(m, 1, false)                       // trim the 1px ragged fringe
+    m = morph(m, 1, false)                          // trim the 1px ragged fringe
+    return fillHoles(m, w, h)                        // fill enclosed gaps -> solid, no black inside
+  }
+
+  // Fill enclosed holes: any 0-region NOT connected to the frame border is an interior gap in the
+  // surface — flood-fill the background from the border, then set every unreached 0 to 1. Result
+  // is a simply-connected silhouette (a solid shape, no black patches inside the ground).
+  function fillHoles(m: Uint8Array, w: number, h: number): Uint8Array {
+    const out = Uint8Array.from(m)
+    const reach = new Uint8Array(w * h)
+    const stack: number[] = []
+    const push = (x: number, y: number) => {
+      if (x < 0 || x >= w || y < 0 || y >= h) return
+      const i = y * w + x
+      if (!reach[i] && m[i] === 0) { reach[i] = 1; stack.push(i) }
+    }
+    for (let x = 0; x < w; x++) { push(x, 0); push(x, h - 1) }
+    for (let y = 0; y < h; y++) { push(0, y); push(w - 1, y) }
+    while (stack.length) { const i = stack.pop()!; const x = i % w, y = (i / w) | 0; push(x - 1, y); push(x + 1, y); push(x, y - 1); push(x, y + 1) }
+    for (let i = 0; i < w * h; i++) if (m[i] === 0 && !reach[i]) out[i] = 1
+    return out
+  }
+
+  // Inpaint depth into the kept holes (pixels newly filled by fillHoles have no real disparity):
+  // diffuse valid neighbouring depth inward so the filled area sits FLUSH with the surface
+  // (borrowed "from other parts"), not as a far spike showing through as black.
+  function fillDepth(disp: Float32Array, keep: Uint8Array, w: number, h: number): Float32Array {
+    const out = Float32Array.from(disp)
+    let todo: number[] = []
+    for (let i = 0; i < w * h; i++) if (keep[i] && out[i] < SKYCULL) todo.push(i)
+    for (let iter = 0; iter < 64 && todo.length; iter++) {
+      const next: number[] = []
+      for (const i of todo) {
+        const x = i % w, y = (i / w) | 0
+        let s = 0, n = 0
+        if (x > 0 && out[i - 1] >= SKYCULL) { s += out[i - 1]; n++ }
+        if (x < w - 1 && out[i + 1] >= SKYCULL) { s += out[i + 1]; n++ }
+        if (y > 0 && out[i - w] >= SKYCULL) { s += out[i - w]; n++ }
+        if (y < h - 1 && out[i + w] >= SKYCULL) { s += out[i + w]; n++ }
+        if (n > 0) out[i] = s / n; else next.push(i)
+      }
+      if (next.length === todo.length) break
+      todo = next
+    }
+    return out
   }
 
   // Smooth the disparity grid (separable box blur, a few passes) so the meshed surface is smooth
@@ -249,8 +293,10 @@
     // the completed background (computed backend-side) is decoded first: it's both the far-field
     // fill AND the back-cap that turns foreground objects into solid volumes.
     const bg = (bg_image && bg_depth) ? await decodeLayer(bg_image, bg_depth, w, h) : null
-    // smooth the depth so the surface is continuous & smooth (no stair-steps / torn skirts)
-    const fgDisp = smoothDisp(fg.disp, w, h)
+    // solid, gap-free surface: clean the silhouette + FILL enclosed holes, inpaint depth into those
+    // holes from surrounding surface, then smooth. No black patches in the ground.
+    const keep = cleanMask(fg.disp, w, h)
+    const fgDisp = smoothDisp(fillDepth(fg.disp, keep, w, h), w, h)
     const bgDisp = bg ? smoothDisp(bg.disp, w, h) : null
 
     // shared ground de-bow: fit the ground's height trend once so the mesh AND the markers flatten
@@ -272,7 +318,7 @@
     // silhouette stitched, so it's an opaque, textured VOLUME — not a see-through shell.
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0,
-      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex })
+      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep })
     scene.add(mesh)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
@@ -330,13 +376,13 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
     const maxT = opt.maxT ?? 0.35, minT = 0.03
     const pos: number[] = [], col: number[] = [], uv: number[] = []
     const vidx = new Int32Array(w * h).fill(-1)
     const vz: number[] = [], vpix: number[] = []
-    const keep = cleanMask(disp, w, h)   // smooth, well-defined silhouette
+    const keep = opt.keep ?? cleanMask(disp, w, h)   // smooth, well-defined silhouette
     let vn = 0
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
