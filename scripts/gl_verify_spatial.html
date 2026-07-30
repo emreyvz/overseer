@@ -1,0 +1,216 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<!-- machine-independent local three via relative importmap (page lives in scripts/, three in web/node_modules) -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "../web/node_modules/three/build/three.module.js",
+    "three/addons/": "../web/node_modules/three/examples/jsm/"
+  }
+}
+</script>
+<style>html,body{margin:0;height:100%;background:#04060a;overflow:hidden}#c{width:100vw;height:100vh;display:block}</style>
+</head>
+<body>
+<div id="c"></div>
+<script type="module">
+import * as THREE from 'three'
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js'
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
+
+const P = new URLSearchParams(location.search)
+const MODE = P.get('mode') || 'after'
+const SID = P.get('sid') || '8'
+const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6, SKYCULL = 0.015, RELIEF = 1.0, DISP_JUMP = 0.055
+
+const fail = (e) => { window.__error = String(e && e.stack || e); window.__done = true }
+window.onerror = (m, s, l, c, e) => fail(e || m)
+
+// ---- ported mesh pipeline (verbatim logic from SpatialView.svelte) ----
+const zOf = (d) => ZNEAR + Math.pow(1 - d, GAMMA) * (ZFAR - ZNEAR)
+
+function morph(m, w, h, r, dilate) {
+  const tmp = new Uint8Array(w * h), out = new Uint8Array(w * h)
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = dilate ? 0 : 1; for (let d = -r; d <= r; d++) { const xx = x + d; if (xx < 0 || xx >= w) continue; v = dilate ? (v | m[y * w + xx]) : (v & m[y * w + xx]) } tmp[y * w + x] = v }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = dilate ? 0 : 1; for (let d = -r; d <= r; d++) { const yy = y + d; if (yy < 0 || yy >= h) continue; v = dilate ? (v | tmp[yy * w + x]) : (v & tmp[yy * w + x]) } out[y * w + x] = v }
+  return out
+}
+function fillHoles(m, w, h) {
+  const out = Uint8Array.from(m), reach = new Uint8Array(w * h), stack = []
+  const push = (x, y) => { if (x < 0 || x >= w || y < 0 || y >= h) return; const i = y * w + x; if (!reach[i] && m[i] === 0) { reach[i] = 1; stack.push(i) } }
+  for (let x = 0; x < w; x++) { push(x, 0); push(x, h - 1) }
+  for (let y = 0; y < h; y++) { push(0, y); push(w - 1, y) }
+  while (stack.length) { const i = stack.pop(); const x = i % w, y = (i / w) | 0; push(x - 1, y); push(x + 1, y); push(x, y - 1); push(x, y + 1) }
+  for (let i = 0; i < w * h; i++) if (m[i] === 0 && !reach[i]) out[i] = 1
+  return out
+}
+function cleanMask(disp, w, h) {
+  const base = new Uint8Array(w * h)
+  for (let i = 0; i < w * h; i++) base[i] = disp[i] >= SKYCULL ? 1 : 0
+  let m = morph(morph(base, w, h, 2, true), w, h, 2, false)
+  m = morph(morph(m, w, h, 2, false), w, h, 2, true)
+  m = fillHoles(m, w, h)
+  return morph(m, w, h, 5, false)
+}
+function medianDisp(disp, w, h) {
+  const out = new Float32Array(w * h), win = []
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { win.length = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && xx < w && yy >= 0 && yy < h) win.push(disp[yy * w + xx]) } win.sort((p, q) => p - q); out[y * w + x] = win[win.length >> 1] }
+  return out
+}
+function fillDepth(disp, keep, w, h) {
+  const out = Float32Array.from(disp); let todo = []
+  for (let i = 0; i < w * h; i++) if (keep[i] && out[i] < SKYCULL) todo.push(i)
+  for (let it = 0; it < 64 && todo.length; it++) {
+    const next = []
+    for (const i of todo) { const x = i % w, y = (i / w) | 0; let s = 0, n = 0; if (x > 0 && out[i - 1] >= SKYCULL) { s += out[i - 1]; n++ } if (x < w - 1 && out[i + 1] >= SKYCULL) { s += out[i + 1]; n++ } if (y > 0 && out[i - w] >= SKYCULL) { s += out[i - w]; n++ } if (y < h - 1 && out[i + w] >= SKYCULL) { s += out[i + w]; n++ } if (n > 0) out[i] = s / n; else next.push(i) }
+    if (next.length === todo.length) break; todo = next
+  }
+  return out
+}
+function smoothDisp(disp, w, h, radius, iters) {
+  let src = disp
+  for (let it = 0; it < iters; it++) {
+    const tmp = new Float32Array(w * h), out = new Float32Array(w * h)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let s = 0, n = 0; for (let d = -radius; d <= radius; d++) { const xx = x + d; if (xx < 0 || xx >= w) continue; s += src[y * w + xx]; n++ } tmp[y * w + x] = s / n }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let s = 0, n = 0; for (let d = -radius; d <= radius; d++) { const yy = y + d; if (yy < 0 || yy >= h) continue; s += tmp[yy * w + x]; n++ } out[y * w + x] = s / n }
+    src = out
+  }
+  return src
+}
+function solve3(A, b) {
+  const m = [[...A[0], b[0]], [...A[1], b[1]], [...A[2], b[2]]]
+  for (let i = 0; i < 3; i++) { let p = i; for (let r = i + 1; r < 3; r++) if (Math.abs(m[r][i]) > Math.abs(m[p][i])) p = r; if (Math.abs(m[p][i]) < 1e-9) return null;[m[i], m[p]] = [m[p], m[i]]; for (let r = 0; r < 3; r++) { if (r === i) continue; const f = m[r][i] / m[i][i]; for (let cc = i; cc < 4; cc++) m[r][cc] -= f * m[i][cc] } }
+  return [m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]]
+}
+function fitGround(disp, w, h, fx, cx, cy) {
+  let n = 0, sZ = 0, sZ2 = 0, sZ3 = 0, sZ4 = 0, sY = 0, sZY = 0, sZ2Y = 0
+  for (let y = Math.floor(h * 0.5); y < h; y++) for (let x = 0; x < w; x++) { const dv = disp[y * w + x]; if (dv < SKYCULL) continue; const Z = zOf(dv), Y = -(y - cy) * Z / fx, Z2 = Z * Z; n++; sZ += Z; sZ2 += Z2; sZ3 += Z2 * Z; sZ4 += Z2 * Z2; sY += Y; sZY += Z * Y; sZ2Y += Z2 * Y }
+  if (n < 40) return null
+  return solve3([[n, sZ, sZ2], [sZ, sZ2, sZ3], [sZ2, sZ3, sZ4]], [sY, sZY, sZ2Y])
+}
+function layerMesh(disp, rgba, w, h, fx, cx, cy, opt) {
+  const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null, maxT = opt.maxT ?? 0.35, minT = 0.03
+  const pos = [], col = [], uv = [], vidx = new Int32Array(w * h).fill(-1), vz = [], vpix = []
+  const keep = opt.keep; let vn = 0
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (!keep[i]) continue; vidx[i] = vn++; const Z = zOf(disp[i]); pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -Z); vz.push(Z); vpix.push(i); const p = i * 4; col.push(rgba[p] / 255, rgba[p + 1] / 255, rgba[p + 2] / 255); uv.push(x / (w - 1), 1 - y / (h - 1)) }
+  const nF = vn, idx = []
+  const el = (va, vb) => Math.hypot(pos[va * 3] - pos[vb * 3], pos[va * 3 + 1] - pos[vb * 3 + 1], pos[va * 3 + 2] - pos[vb * 3 + 2])
+  const edge = new Map(), bump = (a, b) => { const k = a < b ? a + '_' + b : b + '_' + a; edge.set(k, (edge.get(k) ?? 0) + 1) }
+  const dj = opt.dispJump ?? Infinity
+  const tri = (a, b, c) => { const va = vidx[a], vb = vidx[b], vc = vidx[c]; if (va < 0 || vb < 0 || vc < 0) return; if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > (opt.maxlen ?? Infinity)) return; const da = disp[a], db = disp[b], dc = disp[c]; if (Math.max(Math.abs(da - db), Math.abs(db - dc), Math.abs(da - dc)) > dj) return; idx.push(va, vb, vc); if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) } }
+  for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) { const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1; tri(tl, bl, tr); tri(tr, bl, br) }
+  if (opt.flattenCoef) { const [a, b, c] = opt.flattenCoef; for (let j = 0; j < nF; j++) { const Z = vz[j]; pos[j * 3 + 1] = (pos[j * 3 + 1] - (a + b * Z + c * Z * Z)) * RELIEF } }
+  if (solid) {
+    for (let j = 0; j < nF; j++) { const T = bgdisp ? Math.max(minT, Math.min(maxT, zOf(bgdisp[vpix[j]]) - vz[j])) : Math.min(maxT, minT + 0.12); pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T); col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82); uv.push(uv[j * 2], uv[j * 2 + 1]) }
+    const nFrontIdx = idx.length
+    for (let t = 0; t < nFrontIdx; t += 3) idx.push(idx[t] + nF, idx[t + 2] + nF, idx[t + 1] + nF)
+    for (const [k, c] of edge) { if (c !== 1) continue; const [a, b] = k.split('_').map(Number); idx.push(a, b, b + nF, a, b + nF, a + nF) }
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
+  geo.setIndex(idx)
+  geo.computeVertexNormals()   // needed for GTAO's normal prepass (and any lit material)
+  let mat
+  if (opt.lit) mat = new THREE.MeshStandardMaterial({ map: opt.tex || null, vertexColors: !opt.tex, roughness: 0.97, metalness: 0.0, side: THREE.DoubleSide })
+  else mat = opt.tex ? new THREE.MeshBasicMaterial({ map: opt.tex, side: THREE.DoubleSide }) : new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
+  return new THREE.Mesh(geo, mat)
+}
+
+// ---------- the NEW render stack (source of truth to port into SpatialView) ----------
+function addSky(scene) {
+  const uniforms = { top: { value: new THREE.Color(0x1b3350) }, bot: { value: new THREE.Color(0x0b131c) }, off: { value: 0.35 } }
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false, uniforms,
+    vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+    fragmentShader: 'varying vec3 vP; uniform vec3 top; uniform vec3 bot; uniform float off; void main(){ float h = clamp(normalize(vP).y*0.5+0.5+off,0.0,1.0); gl_FragColor = vec4(mix(bot,top,h),1.0); }',
+  })
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(140, 32, 16), mat)
+  scene.add(sky); return sky
+}
+function buildComposer(renderer, scene, camera, w, h) {
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.15
+  const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4 })
+  const composer = new EffectComposer(renderer, rt)
+  composer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  composer.setSize(w, h)
+  composer.addPass(new RenderPass(scene, camera))
+  const gtao = new GTAOPass(scene, camera, w, h)
+  gtao.updateGtaoMaterial({ radius: 0.5, distanceExponent: 1.0, thickness: 0.7, scale: 1.0, samples: 16, distanceFallOff: 1.0, screenSpaceRadius: false })
+  gtao.blendIntensity = 1.0
+  composer.addPass(gtao)
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.75, 0.8))
+  composer.addPass(new OutputPass())
+  return composer
+}
+
+async function main() {
+  const host = document.getElementById('c')
+  const w = host.clientWidth, h = host.clientHeight
+  const renderer = new THREE.WebGLRenderer({ antialias: true })
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); renderer.setSize(w, h)
+  renderer.setClearColor(0x04060a, 1)
+  host.appendChild(renderer.domElement)
+  const scene = new THREE.Scene()
+  scene.fog = new THREE.FogExp2(0x05070a, 0.045)
+  const camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 200)
+
+  const r = await fetch(`http://127.0.0.1:8787/api/spatial/${SID}?grid=384`).then(x => x.json())
+  const s = r.scene
+  const W = s.w, H = s.h, fov = s.fov
+  const bytes = Uint8Array.from(atob(s.depth), c => c.charCodeAt(0))
+  const disp = new Float32Array(bytes.buffer)
+  const img = new Image(); img.src = 'data:image/jpeg;base64,' + s.image; await img.decode()
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H
+  const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, W, H)
+  const rgba = ctx.getImageData(0, 0, W, H).data
+  const fx = 0.5 * W / Math.tan((fov * Math.PI) / 180 / 2), cx = W / 2, cy = H / 2
+
+  const keep = cleanMask(disp, W, H)
+  const fgDisp = smoothDisp(medianDisp(fillDepth(disp, keep, W, H), W, H), W, H, 2, 1)
+  const gy = fitGround(fgDisp, W, H, fx, cx, cy)
+
+  let tex = null
+  if (s.tex_image) { const t = new Image(); t.src = 'data:image/jpeg;base64,' + s.tex_image; await t.decode(); tex = new THREE.Texture(t); tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); tex.needsUpdate = true }
+
+  const lit = MODE === 'lit'
+  const mesh = layerMesh(fgDisp, rgba, W, H, fx, cx, cy, { solid: true, bgdisp: null, maxT: 0.5, flattenCoef: gy, tex, keep, dispJump: DISP_JUMP, lit })
+  scene.add(mesh)
+
+  // framing (same as SpatialView)
+  const box = new THREE.Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position'))
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
+  const vfov = camera.fov * Math.PI / 180, foot = Math.max(size.x, size.z)
+  const dist = (foot / 2) / Math.tan(vfov / 2) * 1.1 + size.y
+  const yaw = 22 * Math.PI / 180, pitch = 16 * Math.PI / 180
+  camera.position.set(c.x + dist * Math.sin(yaw) * Math.cos(pitch), c.y + dist * Math.sin(pitch), c.z + dist * Math.cos(yaw) * Math.cos(pitch))
+  camera.lookAt(c); camera.updateProjectionMatrix()
+
+  let composer = null
+  if (MODE === 'after' || MODE === 'lit') {
+    addSky(scene)
+    if (lit) {
+      // soft key + hemisphere fill + low ambient so geometry catches light and reads as form,
+      // without blowing out the already-lit texture (high roughness, modest intensities)
+      const hemi = new THREE.HemisphereLight(0xbcd3ea, 0x2a2620, 0.85); scene.add(hemi)
+      const key = new THREE.DirectionalLight(0xfff2e0, 1.15); key.position.set(c.x - size.x, c.y + size.y * 2 + 3, c.z + foot); scene.add(key)
+      scene.add(new THREE.AmbientLight(0x3a4658, 0.35))
+    }
+    composer = buildComposer(renderer, scene, camera, w, h)
+  }
+
+  for (let i = 0; i < 6; i++) { if (composer) composer.render(); else renderer.render(scene, camera); await new Promise(rf => requestAnimationFrame(rf)) }
+  window.__meshTris = mesh.geometry.index.count / 3
+  window.__done = true
+}
+main().catch(fail)
+</script>
+</body>
+</html>

@@ -6,6 +6,11 @@
   // distances, layering, who stands where. Drag to orbit, scroll to zoom.
   import * as THREE from 'three'
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
+  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
+  import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js'
+  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
+  import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
   import { onDestroy, onMount, tick } from 'svelte'
   import { api } from '../../lib/api'
   import { sfx } from '../../lib/audio'
@@ -54,6 +59,8 @@
   }
 
   let renderer: THREE.WebGLRenderer | null = null
+  let composer: EffectComposer | null = null   // post-processing: AO + bloom + ACES tone map
+  let sky: THREE.Mesh | null = null            // gradient atmosphere backdrop (no more black void)
   let scene: THREE.Scene | null = null
   let camera: THREE.PerspectiveCamera | null = null
   let controls: OrbitControls | null = null
@@ -71,9 +78,11 @@
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.setSize(w, h)
+    renderer.toneMapping = THREE.ACESFilmicToneMapping   // filmic highlight rolloff
+    renderer.toneMappingExposure = 1.15
     host.appendChild(renderer.domElement)
     scene = new THREE.Scene()
-    scene.fog = new THREE.FogExp2(0x05070a, 0.045)
+    scene.fog = new THREE.FogExp2(0x0b131c, 0.04)         // fog colour matches the sky horizon
     camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 200)
     camera.position.set(0, 0, 0.1)
     controls = new OrbitControls(camera, renderer.domElement)
@@ -81,10 +90,13 @@
     controls.dampingFactor = 0.08
     controls.rotateSpeed = 0.7
     controls.zoomSpeed = 0.9
+    addSky()
+    buildComposer(w, h)
     const loop = () => {
       raf = requestAnimationFrame(loop)
       controls?.update()
-      if (renderer && scene && camera) renderer.render(scene, camera)
+      if (composer) composer.render()
+      else if (renderer && scene && camera) renderer.render(scene, camera)
     }
     loop()
     ro = new ResizeObserver(() => {
@@ -93,8 +105,42 @@
       renderer.setSize(nw, nh)
       camera.aspect = nw / nh
       camera.updateProjectionMatrix()
+      composer?.setSize(nw, nh)
     })
     ro.observe(host)
+  }
+
+  // Gradient atmosphere dome so the scene sits in a sky instead of a black void — a large
+  // inverted sphere shaded top(sky)->horizon in the app's dark-tactical palette.
+  function addSky() {
+    if (!scene) return
+    const uniforms = { top: { value: new THREE.Color(0x1b3350) }, bot: { value: new THREE.Color(0x0b131c) }, off: { value: 0.35 } }
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false, fog: false, uniforms,
+      vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+      fragmentShader: 'varying vec3 vP; uniform vec3 top; uniform vec3 bot; uniform float off; void main(){ float h = clamp(normalize(vP).y*0.5+0.5+off,0.0,1.0); gl_FragColor = vec4(mix(bot,top,h),1.0); }',
+    })
+    sky = new THREE.Mesh(new THREE.SphereGeometry(140, 32, 16), mat)
+    sky.renderOrder = -1
+    scene.add(sky)
+  }
+
+  // Post-processing chain (verified via the offline Electron capture harness, scripts/gl_*):
+  // RenderPass -> GTAO (ground-object contact/crease occlusion) -> subtle bloom on highlights ->
+  // OutputPass (ACES tone map + sRGB). Kept unlit (texture carries the scene's real light).
+  function buildComposer(w: number, h: number) {
+    if (!renderer || !scene || !camera) return
+    const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4 })
+    composer = new EffectComposer(renderer, rt)
+    composer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    composer.setSize(w, h)
+    composer.addPass(new RenderPass(scene, camera))
+    const gtao = new GTAOPass(scene, camera, w, h)
+    gtao.updateGtaoMaterial({ radius: 0.5, distanceExponent: 1.0, thickness: 0.7, scale: 1.0, samples: 16, distanceFallOff: 1.0, screenSpaceRadius: false })
+    gtao.blendIntensity = 1.0
+    composer.addPass(gtao)
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.75, 0.8))
+    composer.addPass(new OutputPass())
   }
 
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -472,6 +518,7 @@
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
     geo.setIndex(idx)
+    geo.computeVertexNormals()   // GTAO's normal prepass (and any lit material) needs normals
     // full-res texture map when provided (crisp, mesh-independent); else per-vertex colour.
     const mat = opt.tex
       ? new THREE.MeshBasicMaterial({ map: opt.tex, side: THREE.DoubleSide })
@@ -492,6 +539,7 @@
     g.textBaseline = 'middle'
     g.fillText(text.slice(0, 14), 50, ch / 2)
     const tex = new THREE.CanvasTexture(cv)
+    tex.colorSpace = THREE.SRGBColorSpace   // keep label colours correct through the tone-map pass
     tex.minFilter = THREE.LinearFilter
     // always-visible (depthTest off) so a marker is never swallowed by the cloud it sits in
     const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }))
@@ -531,7 +579,9 @@
     if (mesh) { mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     if (bgMesh) { bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose() }
     if (markers) disposeGroup(markers)
+    if (sky) { sky.geometry.dispose(); (sky.material as THREE.Material).dispose() }
     fgTex?.dispose()
+    composer?.dispose()
     renderer?.dispose()
     if (renderer?.domElement && host?.contains(renderer.domElement)) host.removeChild(renderer.domElement)
   })
