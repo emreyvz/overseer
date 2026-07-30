@@ -146,16 +146,30 @@ function layerMesh(disp, rgba, w, h, fx, cx, cy, opt) {
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
   geo.setIndex(idx)
-  geo.computeVertexNormals()   // needed for GTAO's normal prepass (and any lit material)
-  let mat
-  if (opt.lit) mat = new THREE.MeshStandardMaterial({ map: opt.tex || null, vertexColors: !opt.tex, roughness: 0.97, metalness: 0.0, side: THREE.DoubleSide })
-  else mat = opt.tex ? new THREE.MeshBasicMaterial({ map: opt.tex, side: THREE.DoubleSide }) : new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
+  geo.computeVertexNormals()
+  // soft normal-based shading baked into vertex colours; MeshBasicMaterial multiplies map*colour,
+  // so 3D form reads (up-facing bright, sides/back darker) without PBR double-lighting the texture.
+  if (opt.tex) {
+    const nrm = geo.getAttribute('normal'), cattr = geo.getAttribute('color')
+    const L = new THREE.Vector3(0.35, 1.0, 0.45).normalize()
+    for (let j = 0; j < cattr.count; j++) {
+      const ndl = Math.max(0, nrm.getX(j) * L.x + nrm.getY(j) * L.y + nrm.getZ(j) * L.z)
+      const sh = Math.min(1.0, 0.55 + 0.5 * ndl)   // darken-only: up-faces ~full, sides/under darker
+      cattr.setXYZ(j, sh, sh, sh)
+    }
+    cattr.needsUpdate = true
+  }
+  const mat = opt.tex
+    ? new THREE.MeshBasicMaterial({ map: opt.tex, vertexColors: true, side: THREE.DoubleSide })
+    : new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
   return new THREE.Mesh(geo, mat)
 }
 
 // ---------- the NEW render stack (source of truth to port into SpatialView) ----------
-function addSky(scene) {
-  const uniforms = { top: { value: new THREE.Color(0x1b3350) }, bot: { value: new THREE.Color(0x0b131c) }, off: { value: 0.35 } }
+function addSky(scene, topColor) {
+  const top = (topColor ? topColor.clone() : new THREE.Color(0x1b3350))
+  const bot = top.clone().multiplyScalar(0.4)
+  const uniforms = { top: { value: top }, bot: { value: bot }, off: { value: 0.35 } }
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false, uniforms,
     vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
@@ -267,6 +281,13 @@ async function main() {
   camera.position.set(c.x + dist * Math.sin(yaw) * Math.cos(pitch), c.y + dist * Math.sin(pitch), c.z + dist * Math.cos(yaw) * Math.cos(pitch))
   camera.lookAt(c); camera.updateProjectionMatrix()
 
+  // GENTLE scene-adaptive exposure from the SUBJECT (kept pixels only, so a dark/black sky doesn't
+  // skew it). Tight clamp around the base 1.15 -> dark scenes stay dark-ish, bright ones don't blow.
+  let sum = 0, cnt = 0
+  for (let i = 0; i < keep.length; i++) { if (!keep[i]) continue; const p = i * 4; sum += 0.299 * rgba[p] + 0.587 * rgba[p + 1] + 0.114 * rgba[p + 2]; cnt++ }
+  const meanLum = cnt ? (sum / cnt) / 255 : 0.25
+  const exposure = Math.min(1.3, Math.max(0.9, 0.26 / Math.max(0.06, meanLum)))
+
   let composer = null
   if (MODE === 'after' || MODE === 'lit') {
     addSky(scene)
@@ -280,6 +301,7 @@ async function main() {
       scene.add(new THREE.AmbientLight(0x3a4658, 0.35))
     }
     composer = buildComposer(renderer, scene, camera, w, h)
+    renderer.toneMappingExposure = exposure   // scene-adaptive
   }
 
   // verify the click-to-measure raycasting hits the mesh and yields a sensible distance

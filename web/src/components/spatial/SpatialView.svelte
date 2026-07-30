@@ -422,6 +422,14 @@
     // solid, gap-free surface: clean the silhouette + FILL enclosed holes, inpaint depth into those
     // holes from surrounding surface, then smooth. No black patches in the ground.
     const keep = cleanMask(fg.disp, w, h)
+    // gentle scene-adaptive exposure from the SUBJECT (kept pixels): dark scenes stay dark-ish,
+    // bright ones don't blow out — a tight nudge around the 1.15 base (never normalises to grey).
+    if (renderer) {
+      let lsum = 0, lcnt = 0
+      for (let i = 0; i < keep.length; i++) { if (!keep[i]) continue; const p = i * 4; lsum += 0.299 * fg.rgba[p] + 0.587 * fg.rgba[p + 1] + 0.114 * fg.rgba[p + 2]; lcnt++ }
+      const meanLum = lcnt ? (lsum / lcnt) / 255 : 0.25
+      renderer.toneMappingExposure = Math.min(1.3, Math.max(0.9, 0.26 / Math.max(0.06, meanLum)))
+    }
     // median kills speckle, then an EDGE-AWARE joint-bilateral (guided by the RGB frame) smooths
     // surfaces while keeping object edges crisp — keeps relief intact, no box-blur edge rounding.
     // The depth-discontinuity cull still removes silhouette smears.
@@ -594,10 +602,23 @@
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
     geo.setIndex(idx)
-    geo.computeVertexNormals()   // GTAO's normal prepass (and any lit material) needs normals
-    // full-res texture map when provided (crisp, mesh-independent); else per-vertex colour.
+    geo.computeVertexNormals()   // GTAO's normal prepass needs normals; also drives the shading below
+    // Soft normal-based shading baked into vertex colours: MeshBasicMaterial multiplies map*colour,
+    // so 3D form reads (up-faces ~full brightness, sides/undersides darker) without PBR double-
+    // lighting the already-lit texture. DARKEN-ONLY (<=1) so it can never blow the scene out.
+    if (opt.tex) {
+      const nrm = geo.getAttribute('normal'), cattr = geo.getAttribute('color')
+      const L = new THREE.Vector3(0.35, 1.0, 0.45).normalize()
+      for (let j = 0; j < cattr.count; j++) {
+        const ndl = Math.max(0, nrm.getX(j) * L.x + nrm.getY(j) * L.y + nrm.getZ(j) * L.z)
+        const sh = Math.min(1.0, 0.55 + 0.5 * ndl)
+        cattr.setXYZ(j, sh, sh, sh)
+      }
+      cattr.needsUpdate = true
+    }
+    // full-res texture (crisp) modulated by the shading vertex-colour; else per-vertex colour.
     const mat = opt.tex
-      ? new THREE.MeshBasicMaterial({ map: opt.tex, side: THREE.DoubleSide })
+      ? new THREE.MeshBasicMaterial({ map: opt.tex, vertexColors: true, side: THREE.DoubleSide })
       : new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
     return new THREE.Mesh(geo, mat)
   }
