@@ -160,7 +160,7 @@ function layerMesh(disp, rgba, w, h, fx, cx, cy, opt) {
   for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) { const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1; tri(tl, bl, tr); tri(tr, bl, br) }
   if (opt.flattenCoef) { const [a, b, c] = opt.flattenCoef; for (let j = 0; j < nF; j++) { const Z = vz[j]; let r = pos[j * 3 + 1] - (a + b * Z + c * Z * Z); r = Math.max(-0.6, Math.min(2.2, r)); pos[j * 3 + 1] = r * RELIEF } }
   if (solid) {
-    for (let j = 0; j < nF; j++) { const T = bgdisp ? Math.max(minT, Math.min(maxT, zOf(bgdisp[vpix[j]]) - vz[j])) : Math.min(maxT, minT + 0.12); pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T); col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82); uv.push(uv[j * 2], uv[j * 2 + 1]) }
+    for (let j = 0; j < nF; j++) { const relief = Math.max(0, pos[j * 3 + 1]); const T = Math.min(maxT, minT + 0.45 * relief); pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T); col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82); uv.push(uv[j * 2], uv[j * 2 + 1]) }
     const nFrontIdx = idx.length
     for (let t = 0; t < nFrontIdx; t += 3) idx.push(idx[t] + nF, idx[t + 2] + nF, idx[t + 1] + nF)
     for (const [k, c] of edge) { if (c !== 1) continue; const [a, b] = k.split('_').map(Number); idx.push(a, b, b + nF, a, b + nF, a + nF) }
@@ -178,7 +178,8 @@ function layerMesh(disp, rgba, w, h, fx, cx, cy, opt) {
     const L = new THREE.Vector3(0.35, 1.0, 0.45).normalize()
     for (let j = 0; j < cattr.count; j++) {
       const ndl = Math.max(0, nrm.getX(j) * L.x + nrm.getY(j) * L.y + nrm.getZ(j) * L.z)
-      const sh = Math.min(1.0, 0.55 + 0.5 * ndl)   // darken-only: up-faces ~full, sides/under darker
+      let sh = Math.min(1.0, 0.55 + 0.5 * ndl)   // darken-only: up-faces ~full, sides/under darker
+      if (j >= nF) sh *= 0.5                       // back = GUESSED geometry -> fade it (honest cue)
       cattr.setXYZ(j, sh, sh, sh)
     }
     cattr.needsUpdate = true
@@ -301,7 +302,7 @@ async function main() {
   const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
   const vfov = camera.fov * Math.PI / 180, foot = Math.max(size.x, size.z)
   const dist = (foot / 2) / Math.tan(vfov / 2) * 0.92 + size.y * 0.5
-  const yaw = 22 * Math.PI / 180, pitch = (+(P.get('pitch') || 16)) * Math.PI / 180
+  const yaw = (+(P.get('yaw') || 22)) * Math.PI / 180, pitch = (+(P.get('pitch') || 16)) * Math.PI / 180
   camera.position.set(c.x + dist * Math.sin(yaw) * Math.cos(pitch), c.y + dist * Math.sin(pitch), c.z + dist * Math.cos(yaw) * Math.cos(pitch))
   camera.lookAt(c); camera.updateProjectionMatrix()
 

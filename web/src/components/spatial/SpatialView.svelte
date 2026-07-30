@@ -514,7 +514,7 @@
     // thin completed-background layer behind everything, filling the far field (correct parallax).
     if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
     if (bg && bgDisp) {
-      bgMesh = layerMesh(bgDisp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04, { flattenCoef: gy })
+      bgMesh = layerMesh(bgDisp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04, { flattenCoef: gy, dim: 0.6 })
       scene.add(bgMesh)
     }
 
@@ -584,9 +584,9 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number; dim?: number } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
-    const maxT = opt.maxT ?? 0.35, minT = 0.03
+    const maxT = opt.maxT ?? 0.35, minT = 0.03, dim = opt.dim ?? 1   // dim<1 fades a guessed layer
     const pos: number[] = [], col: number[] = [], uv: number[] = []
     const vidx = new Int32Array(w * h).fill(-1)
     const vz: number[] = [], vpix: number[] = []
@@ -600,7 +600,7 @@
         const Z = zOf(disp[i])
         pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -(Z + zbias)); vz.push(Z); vpix.push(i)
         const p = i * 4
-        col.push(rgba[p] / 255, rgba[p + 1] / 255, rgba[p + 2] / 255)
+        col.push(rgba[p] / 255 * dim, rgba[p + 1] / 255 * dim, rgba[p + 2] / 255 * dim)
         uv.push(x / (w - 1), 1 - y / (h - 1))     // UV into the full-res texture (flipY default)
       }
     }
@@ -637,8 +637,9 @@
       }
     }
     if (solid) {
-      for (let j = 0; j < nF; j++) {   // back vertices: extruded to the background, capped
-        const T = bgdisp ? Math.max(minT, Math.min(maxT, zOf(bgdisp[vpix[j]]) - vz[j])) : Math.min(maxT, minT + 0.12)
+      for (let j = 0; j < nF; j++) {   // back vertices: thickness grows with RELIEF (flattened height)
+        const relief = Math.max(0, pos[j * 3 + 1])   // -> tall objects become rounded volumes, ground
+        const T = Math.min(maxT, minT + 0.45 * relief)  // stays a thin slab (was a flat cap to the bg)
         pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T)
         col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82)
         uv.push(uv[j * 2], uv[j * 2 + 1])           // back vertices reuse the front UV
@@ -665,7 +666,8 @@
       const L = new THREE.Vector3(0.35, 1.0, 0.45).normalize()
       for (let j = 0; j < cattr.count; j++) {
         const ndl = Math.max(0, nrm.getX(j) * L.x + nrm.getY(j) * L.y + nrm.getZ(j) * L.z)
-        const sh = Math.min(1.0, 0.55 + 0.5 * ndl)
+        let sh = Math.min(1.0, 0.55 + 0.5 * ndl)
+        if (j >= nF) sh *= 0.5   // back vertices = GUESSED (unseen) geometry -> fade, honest cue
         cattr.setXYZ(j, sh, sh, sh)
       }
       cattr.needsUpdate = true
