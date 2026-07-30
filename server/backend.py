@@ -1366,6 +1366,10 @@ class Backend:
         ok_t, texjpg = cv2.imencode(".jpg", texframe, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if ok_t:
             scene["tex_image"] = _b64.b64encode(texjpg.tobytes()).decode("ascii")
+        # detected object boxes (normalized) with class, so the frontend can shape each object's
+        # occluded BACK per class (a vehicle as a full body, a person thin) instead of a flat cap.
+        scene["boxes"] = [{"x1": b[0], "y1": b[1], "x2": b[2], "y2": b[3], "cls": e["cls"]}
+                          for b, e in zip(boxes, entities)]
         return {"scene": scene}
 
     def _spatial_entities(self, frame: Any, disp: Any, dmin: float,
