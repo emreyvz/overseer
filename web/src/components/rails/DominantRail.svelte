@@ -154,7 +154,10 @@
       </button>
       {#if showHist}
         {#each history as a (a.threat)}
-          <div class="hrow caps sev-{a.severity}"><span class="ht">[{hhmmss(a.ts)}]</span> {a.type} · {a.cam}</div>
+          <div class="hrow caps sev-{a.severity}">
+            <span class="htx"><span class="ht">[{hhmmss(a.ts)}]</span> {a.type} · {a.cam}</span>
+            {#if a.clip}<button class="hrp" title="REPLAY CLIP" onclick={() => openReplay(a)}>▶</button>{/if}
+          </div>
         {/each}
       {/if}
     </div>
@@ -252,7 +255,11 @@
   .hhdr { display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
     font-size: var(--fs-micro); color: var(--ink-dim); letter-spacing: var(--tracking); padding: 2px 0; }
   .hhdr:hover { color: var(--ink); }
-  .hrow { font-size: var(--fs-micro); color: var(--ink-dim); line-height: 1.5; border-left: 2px solid var(--ink-ghost); padding-left: 6px; opacity: 0.75; }
+  .hrow { font-size: var(--fs-micro); color: var(--ink-dim); line-height: 1.5; border-left: 2px solid var(--ink-ghost); padding-left: 6px; opacity: 0.75;
+    display: flex; align-items: center; gap: 6px; }
+  .hrow .htx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hrow .ht { color: var(--ink-ghost); }
+  .hrp { flex: none; border: 1px solid var(--cyan); color: var(--cyan); background: none; cursor: pointer; font-size: 8px; line-height: 1; padding: 2px 5px; opacity: 0.85; }
+  .hrp:hover { background: var(--cyan); color: #04070a; opacity: 1; }
   .hrow.sev-critical, .hrow.sev-warning { border-left-color: var(--scarlet); }
 </style>

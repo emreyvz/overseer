@@ -1582,6 +1582,12 @@ class Backend:
         alert = self.alert_engine.evaluate(ev)
         if alert is not None:
             snap_url = self._alert_snapshot()
+            clip_url = self._save_clip()
+            # persist BOTH the snapshot and the video clip on the alert row, so history/replay works
+            # for past alerts (previously the clip lived only in the transient WS message).
+            alert.clip_path = clip_url
+            if not alert.snapshot_path:
+                alert.snapshot_path = snap_url
             try:
                 self.db.add_alert(alert)
             except Exception:  # noqa: BLE001
@@ -1598,7 +1604,7 @@ class Backend:
                 "ts": alert.timestamp * 1000, "severity": severity,
                 "type": type_en, "summary": f"{type_en} · {self._source_name(alert.source_id)}",
                 "cam": self._source_name(alert.source_id), "ack": False,
-                "snapshot": snap_url, "clip": self._save_clip(), "mark": mark,
+                "snapshot": snap_url, "clip": clip_url, "mark": mark,
                 **({"reason": reason} if reason else {}),
             }})
         elif threat.combo and threat.level in ("high", "critical"):

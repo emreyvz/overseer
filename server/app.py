@@ -675,9 +675,11 @@ async def api_events(limit: int = 200) -> Any:
 async def api_alerts(limit: int = 200) -> Any:
     if backend is None:
         return []
+    names = {s.id: s.name for s in backend.db.list_sources()}
     return [
-        {"ts": a.timestamp * 1000, "severity": a.severity, "type": a.event_type,
-         "summary": a.summary, "ack": a.acknowledged}
+        {"id": a.id, "ts": a.timestamp * 1000, "severity": a.severity, "type": a.event_type,
+         "summary": a.summary, "cam": names.get(a.source_id, ""), "ack": a.acknowledged,
+         "snapshot": _snap_url(a.snapshot_path), "clip": a.clip_path}
         for a in backend.db.list_alerts(limit=limit)
     ]
 
