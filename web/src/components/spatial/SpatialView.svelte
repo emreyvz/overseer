@@ -41,6 +41,8 @@
   const MESH_MAXLEN = 0.32    // cull only wildly-stretched triangles; loose so the surface stays
                               // continuous (no torn gaps) — depth smoothing turns jumps into ramps
   const SKYCULL = 0.015       // keep almost everything (fills the far field); drop only pure sky
+  const GROUND_DAMP = 0.16    // flatten height toward the fitted ground plane (verified via the
+                              // offline render harness) — smooth, no near-edge "drape" smears
   const CLS_COLOR: Record<string, string> = {
     person: '#35e0ff', vehicle: '#ffb038', animal: '#6be675', object: '#c9d4dc', weapon: '#ff3b3b',
   }
@@ -180,8 +182,22 @@
     }
     let m = morph(morph(base, 2, true), 2, false)   // close: fill small notches
     m = morph(morph(m, 2, false), 2, true)          // open: drop thin spikes / specks
-    m = morph(m, 1, false)                          // trim the 1px ragged fringe
-    return fillHoles(m, w, h)                        // fill enclosed gaps -> solid, no black inside
+    m = fillHoles(m, w, h)                          // fill enclosed gaps -> solid, no black inside
+    return morph(m, 5, false)                        // erode ~5px: trim the smear-prone boundary
+  }
+
+  // 3x3 median — knocks out isolated depth speckle spikes before the heavy blur.
+  function medianDisp(disp: Float32Array, w: number, h: number): Float32Array {
+    const out = new Float32Array(w * h), win: number[] = []
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      win.length = 0
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx, yy = y + dy
+        if (xx >= 0 && xx < w && yy >= 0 && yy < h) win.push(disp[yy * w + xx])
+      }
+      win.sort((p, q) => p - q); out[y * w + x] = win[win.length >> 1]
+    }
+    return out
   }
 
   // Fill enclosed holes: any 0-region NOT connected to the frame border is an interior gap in the
@@ -296,8 +312,10 @@
     // solid, gap-free surface: clean the silhouette + FILL enclosed holes, inpaint depth into those
     // holes from surrounding surface, then smooth. No black patches in the ground.
     const keep = cleanMask(fg.disp, w, h)
-    const fgDisp = smoothDisp(fillDepth(fg.disp, keep, w, h), w, h)
-    const bgDisp = bg ? smoothDisp(bg.disp, w, h) : null
+    // heavy regularisation (verified in the render harness): median kills speckle, strong box blur
+    // makes the surface smooth so no near-edge triangles stretch into smears.
+    const fgDisp = smoothDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h), w, h, 6, 4)
+    const bgDisp = bg ? smoothDisp(bg.disp, w, h, 6, 4) : null
 
     // shared ground de-bow: fit the ground's height trend once so the mesh AND the markers flatten
     // together (monocular depth bows a flat road upward with distance — this straightens it).
@@ -317,7 +335,9 @@
     // foreground as a SOLID: each object is extruded back to the reconstructed background and its
     // silhouette stitched, so it's an opaque, textured VOLUME — not a see-through shell.
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
-    mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0,
+    // no maxlen cull on the foreground: the cleaned+hole-filled mask already defines a clean
+    // silhouette, so mesh EVERY interior quad -> a solid, gap-free surface (no black inside).
+    mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, 1e9, 0,
       { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep })
     scene.add(mesh)
 
@@ -335,7 +355,7 @@
     for (const e of entities) {
       const Z = zOf(e.depth)
       const u = e.cx * w, v = e.cy * h
-      const X = (u - cx) * Z / fx, Y = -(v - cy) * Z / fx - deb(Z)
+      const X = (u - cx) * Z / fx, Y = (-(v - cy) * Z / fx - deb(Z)) * GROUND_DAMP
       const spr = makeMarker(e.label || e.cls, CLS_COLOR[e.cls] || '#c9d4dc')
       spr.position.set(X, Y, -Z)
       markers.add(spr)
@@ -415,9 +435,9 @@
         tri(tl, bl, tr); tri(tr, bl, br)
       }
     }
-    if (opt.flattenCoef) {   // de-bow: subtract the shared ground trend so the ground reads flat
+    if (opt.flattenCoef) {   // de-bow + damp height toward the ground plane -> smooth, no drapes
       const [a, b, c] = opt.flattenCoef
-      for (let j = 0; j < nF; j++) { const Z = vz[j]; pos[j * 3 + 1] -= a + b * Z + c * Z * Z }
+      for (let j = 0; j < nF; j++) { const Z = vz[j]; pos[j * 3 + 1] = (pos[j * 3 + 1] - (a + b * Z + c * Z * Z)) * GROUND_DAMP }
     }
     if (solid) {
       for (let j = 0; j < nF; j++) {   // back vertices: extruded to the background, capped
