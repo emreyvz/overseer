@@ -113,7 +113,7 @@ def build_and_render(name, sid):
     if bg_rgb is not None:
         bgk = (bg_disp >= SKYCULL).astype(np.uint8)
         bgd = smooth(bg_disp)
-        Vb, Cb, Tb = build_layer(bg_rgb, bgd, bgk, False, 0.04, coef, w, h, fx, cx, cy, base)
+        Vb, Cb, Tb = build_layer(bg_rgb, bgd, bgk, True, 0.15, coef, w, h, fx, cx, cy, base)
         layers.append((Vb, Cb, Tb)); base += Vb.shape[0]
     Vf, Cf, Tf = build_layer(fg_rgb, fgd, keep, True, 0.0, coef, w, h, fx, cx, cy, base)
     layers.append((Vf, Cf, Tf))
