@@ -525,6 +525,8 @@ async def api_spatial(sid: str, grid: int = 320) -> Any:
     return await asyncio.to_thread(backend.spatial_scene, sid, grid)
 
 
+
+
 @app.get("/api/suggestions")
 async def api_suggestions() -> Any:
     """Proactive smart suggestions — alert rules to add and camera improvements."""

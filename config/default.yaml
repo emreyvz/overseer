@@ -269,14 +269,20 @@ suggestions:
 # weights can't be fetched the view simply reports "unavailable". CUDA inference ~30 ms.
 spatial:
   enabled: true
-  model: depth-anything/Depth-Anything-V2-Small-hf
-  input_width: 640        # frame is resized to this width before depth (quality vs latency)
+  # Monocular depth model — the 3D "perception". Large gives markedly sharper, more accurate
+  # geometry than Small/Base (~1.3 GB, downloads lazily; fits a >=8 GB GPU). Drop to
+  # depth-anything/Depth-Anything-V2-Base-hf (or -Small-hf) on tighter VRAM.
+  model: depth-anything/Depth-Anything-V2-Large-hf
+  depth_res: 700          # depth inference resolution (px, /14). Higher = sharper 3D, more VRAM/time
+  input_width: 768        # frame is resized to this width before depth (quality vs latency)
   grid: 320               # point-cloud grid width sent to the browser (bounds payload size)
   fov_deg: 60.0           # assumed horizontal field of view for back-projection
   detect_conf: 0.3        # confidence floor for the entities placed as 3D markers
   complete: true          # geometric scene completion: reconstruct the occluded background behind
                           # foreground objects (inpainted depth+texture) as a second mesh layer,
                           # so disocclusion holes are filled with real surface, not black voids
+  texture_width: 960      # a crisp copy of the frame is sent alongside the coarse mesh and
+                          # UV-mapped onto it — full-detail texture without a heavy mesh
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT

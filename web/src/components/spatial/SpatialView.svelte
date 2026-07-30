@@ -38,8 +38,17 @@
 
   // Back-projection / depth-to-Z tuning (settled by visual iteration across cameras).
   const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6
-  const MESH_MAXLEN = 0.13    // cull mesh triangles whose 3D edge is longer than this (kills skirts)
-  const SKYCULL = 0.03        // drop the most-distant (sky / flat far background) points
+  const MESH_MAXLEN = 0.32    // cull only wildly-stretched triangles; loose so the surface stays
+                              // continuous (no torn gaps) — depth smoothing turns jumps into ramps
+  const SKYCULL = 0.015       // keep almost everything (fills the far field); drop only pure sky
+  const RELIEF = 1.0          // KEEP full height above the fitted ground trend, so objects (people,
+                              // vehicles, walls) stand up as real volumes — the ground itself
+                              // flattens because its residual is ~0 once the trend is subtracted.
+                              // (Was a 0.16 "damp" that squashed everything flat — a photo on the floor.)
+  const DISP_JUMP = 0.055     // cull triangles that straddle a depth discontinuity (an object's
+                              // silhouette): its 3 disparities differ by more than this. Standing
+                              // objects then get crisp edges instead of smearing down into the ground;
+                              // continuous ground has tiny jumps and stays fully meshed (no gaps).
   const CLS_COLOR: Record<string, string> = {
     person: '#35e0ff', vehicle: '#ffb038', animal: '#6be675', object: '#c9d4dc', weapon: '#ff3b3b',
   }
@@ -51,6 +60,7 @@
   let mesh: THREE.Mesh | null = null           // foreground: the directly-observed surface
   let bgMesh: THREE.Mesh | null = null         // completed background reconstructed behind objects
   let markers: THREE.Group | null = null
+  let fgTex: THREE.Texture | null = null       // full-res texture map for the foreground mesh
   let raf = 0
   let ro: ResizeObserver | null = null
   let autoTimer: ReturnType<typeof setInterval> | null = null
@@ -93,7 +103,7 @@
     if (refresh) sfx('sonar')
     loading = true; unavailable = false; reason = ''; phase = 'capture'
     let res: Awaited<ReturnType<typeof api.spatial>> | null = null
-    try { res = await api.spatial(cam, 320) } catch { res = null }
+    try { res = await api.spatial(cam, 384) } catch { res = null }
     if (!res || !res.scene) {
       reason = REASON_TEXT[res?.reason ?? ''] ?? 'The spatial view is unavailable right now.'
       loading = false; unavailable = true; phase = ''; return
@@ -156,6 +166,143 @@
     return ZNEAR + Math.pow(1 - disp01, GAMMA) * (ZFAR - ZNEAR)
   }
 
+  // Clean, smooth SILHOUETTE: morphologically tidy the "kept" (non-sky) mask so the mesh outline is
+  // a smooth, well-defined shape instead of a jagged per-pixel fringe — close small notches, open
+  // thin spikes, then trim a 1px border of unreliable edge pixels.
+  function cleanMask(disp: Float32Array, w: number, h: number): Uint8Array {
+    const base = new Uint8Array(w * h)
+    for (let i = 0; i < w * h; i++) base[i] = disp[i] >= SKYCULL ? 1 : 0
+    const morph = (m: Uint8Array, r: number, dilate: boolean): Uint8Array => {
+      const tmp = new Uint8Array(w * h), out = new Uint8Array(w * h)
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let v = dilate ? 0 : 1
+        for (let d = -r; d <= r; d++) { const xx = x + d; if (xx < 0 || xx >= w) continue; v = dilate ? (v | m[y * w + xx]) : (v & m[y * w + xx]) }
+        tmp[y * w + x] = v
+      }
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let v = dilate ? 0 : 1
+        for (let d = -r; d <= r; d++) { const yy = y + d; if (yy < 0 || yy >= h) continue; v = dilate ? (v | tmp[yy * w + x]) : (v & tmp[yy * w + x]) }
+        out[y * w + x] = v
+      }
+      return out
+    }
+    let m = morph(morph(base, 2, true), 2, false)   // close: fill small notches
+    m = morph(morph(m, 2, false), 2, true)          // open: drop thin spikes / specks
+    m = fillHoles(m, w, h)                          // fill enclosed gaps -> solid, no black inside
+    return morph(m, 5, false)                        // erode ~5px: trim the smear-prone boundary
+  }
+
+  // 3x3 median — knocks out isolated depth speckle spikes before the heavy blur.
+  function medianDisp(disp: Float32Array, w: number, h: number): Float32Array {
+    const out = new Float32Array(w * h), win: number[] = []
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      win.length = 0
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx, yy = y + dy
+        if (xx >= 0 && xx < w && yy >= 0 && yy < h) win.push(disp[yy * w + xx])
+      }
+      win.sort((p, q) => p - q); out[y * w + x] = win[win.length >> 1]
+    }
+    return out
+  }
+
+  // Fill enclosed holes: any 0-region NOT connected to the frame border is an interior gap in the
+  // surface — flood-fill the background from the border, then set every unreached 0 to 1. Result
+  // is a simply-connected silhouette (a solid shape, no black patches inside the ground).
+  function fillHoles(m: Uint8Array, w: number, h: number): Uint8Array {
+    const out = Uint8Array.from(m)
+    const reach = new Uint8Array(w * h)
+    const stack: number[] = []
+    const push = (x: number, y: number) => {
+      if (x < 0 || x >= w || y < 0 || y >= h) return
+      const i = y * w + x
+      if (!reach[i] && m[i] === 0) { reach[i] = 1; stack.push(i) }
+    }
+    for (let x = 0; x < w; x++) { push(x, 0); push(x, h - 1) }
+    for (let y = 0; y < h; y++) { push(0, y); push(w - 1, y) }
+    while (stack.length) { const i = stack.pop()!; const x = i % w, y = (i / w) | 0; push(x - 1, y); push(x + 1, y); push(x, y - 1); push(x, y + 1) }
+    for (let i = 0; i < w * h; i++) if (m[i] === 0 && !reach[i]) out[i] = 1
+    return out
+  }
+
+  // Inpaint depth into the kept holes (pixels newly filled by fillHoles have no real disparity):
+  // diffuse valid neighbouring depth inward so the filled area sits FLUSH with the surface
+  // (borrowed "from other parts"), not as a far spike showing through as black.
+  function fillDepth(disp: Float32Array, keep: Uint8Array, w: number, h: number): Float32Array {
+    const out = Float32Array.from(disp)
+    let todo: number[] = []
+    for (let i = 0; i < w * h; i++) if (keep[i] && out[i] < SKYCULL) todo.push(i)
+    for (let iter = 0; iter < 64 && todo.length; iter++) {
+      const next: number[] = []
+      for (const i of todo) {
+        const x = i % w, y = (i / w) | 0
+        let s = 0, n = 0
+        if (x > 0 && out[i - 1] >= SKYCULL) { s += out[i - 1]; n++ }
+        if (x < w - 1 && out[i + 1] >= SKYCULL) { s += out[i + 1]; n++ }
+        if (y > 0 && out[i - w] >= SKYCULL) { s += out[i - w]; n++ }
+        if (y < h - 1 && out[i + w] >= SKYCULL) { s += out[i + w]; n++ }
+        if (n > 0) out[i] = s / n; else next.push(i)
+      }
+      if (next.length === todo.length) break
+      todo = next
+    }
+    return out
+  }
+
+  // Smooth the disparity grid (separable box blur, a few passes) so the meshed surface is smooth
+  // rather than stair-stepped, and sharp depth jumps become gentle ramps instead of torn edges.
+  function smoothDisp(disp: Float32Array, w: number, h: number, radius = 2, iters = 2): Float32Array {
+    let src = disp
+    for (let it = 0; it < iters; it++) {
+      const tmp = new Float32Array(w * h), out = new Float32Array(w * h)
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let s = 0, n = 0
+        for (let d = -radius; d <= radius; d++) { const xx = x + d; if (xx < 0 || xx >= w) continue; s += src[y * w + xx]; n++ }
+        tmp[y * w + x] = s / n
+      }
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let s = 0, n = 0
+        for (let d = -radius; d <= radius; d++) { const yy = y + d; if (yy < 0 || yy >= h) continue; s += tmp[yy * w + x]; n++ }
+        out[y * w + x] = s / n
+      }
+      src = out
+    }
+    return src as Float32Array
+  }
+
+  // Solve a 3x3 linear system (Gaussian elimination w/ partial pivot) for the quadratic ground fit.
+  function solve3(A: number[][], b: number[]): [number, number, number] | null {
+    const m = [[...A[0], b[0]], [...A[1], b[1]], [...A[2], b[2]]]
+    for (let i = 0; i < 3; i++) {
+      let p = i
+      for (let r = i + 1; r < 3; r++) if (Math.abs(m[r][i]) > Math.abs(m[p][i])) p = r
+      if (Math.abs(m[p][i]) < 1e-9) return null
+      ;[m[i], m[p]] = [m[p], m[i]]
+      for (let r = 0; r < 3; r++) {
+        if (r === i) continue
+        const f = m[r][i] / m[i][i]
+        for (let cc = i; cc < 4; cc++) m[r][cc] -= f * m[i][cc]
+      }
+    }
+    return [m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]]
+  }
+
+  // Fit the ground's height trend Y = a + bZ + cZ² over the near/low image rows, so the same
+  // correction can de-bow the mesh AND the entity markers consistently. Null if too few samples.
+  function fitGround(disp: Float32Array, w: number, h: number, fx: number, cx: number, cy: number): [number, number, number] | null {
+    let n = 0, sZ = 0, sZ2 = 0, sZ3 = 0, sZ4 = 0, sY = 0, sZY = 0, sZ2Y = 0
+    for (let y = Math.floor(h * 0.5); y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dv = disp[y * w + x]
+        if (dv < SKYCULL) continue
+        const Z = zOf(dv), Y = -(y - cy) * Z / fx, Z2 = Z * Z
+        n++; sZ += Z; sZ2 += Z2; sZ3 += Z2 * Z; sZ4 += Z2 * Z2; sY += Y; sZY += Z * Y; sZ2Y += Z2 * Y
+      }
+    }
+    if (n < 40) return null
+    return solve3([[n, sZ, sZ2], [sZ, sZ2, sZ3], [sZ2, sZ3, sZ4]], [sY, sZY, sZ2Y])
+  }
+
   async function buildCloud(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>) {
     if (!scene) return
     const { w, h, fov, image, depth, entities, bg_image, bg_depth } = d
@@ -168,47 +315,74 @@
     // the completed background (computed backend-side) is decoded first: it's both the far-field
     // fill AND the back-cap that turns foreground objects into solid volumes.
     const bg = (bg_image && bg_depth) ? await decodeLayer(bg_image, bg_depth, w, h) : null
+    // solid, gap-free surface: clean the silhouette + FILL enclosed holes, inpaint depth into those
+    // holes from surrounding surface, then smooth. No black patches in the ground.
+    const keep = cleanMask(fg.disp, w, h)
+    // LIGHT regularisation: median kills speckle, a single gentle blur pass takes the stair-step
+    // off the surface — but keeps depth relief intact (heavy blur flattened people/cars into the
+    // ground). The depth-discontinuity cull, not blur, is what removes the silhouette smears.
+    const fgDisp = smoothDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h), w, h, 2, 1)
+    const bgDisp = bg ? smoothDisp(bg.disp, w, h, 4, 2) : null
+
+    // shared ground de-bow: fit the ground's height trend once so the mesh AND the markers flatten
+    // together (monocular depth bows a flat road upward with distance — this straightens it).
+    const gy = fitGround(fgDisp, w, h, fx, cx, cy)
+    const deb = (Z: number) => gy ? gy[0] + gy[1] * Z + gy[2] * Z * Z : 0
+
+    // full-res texture: a crisp copy of the frame UV-mapped onto the (coarse) mesh
+    if (fgTex) { fgTex.dispose(); fgTex = null }
+    if (d.tex_image) {
+      const timg = new Image(); timg.src = 'data:image/jpeg;base64,' + d.tex_image
+      try { await timg.decode() } catch { /* fall back to vertex colour */ }
+      fgTex = new THREE.Texture(timg); fgTex.colorSpace = THREE.SRGBColorSpace
+      fgTex.minFilter = THREE.LinearMipmapLinearFilter; fgTex.magFilter = THREE.LinearFilter
+      fgTex.anisotropy = renderer?.capabilities.getMaxAnisotropy() ?? 1; fgTex.needsUpdate = true
+    }
 
     // foreground as a SOLID: each object is extruded back to the reconstructed background and its
-    // silhouette stitched, so it's an opaque, textured volume — not a see-through shell.
+    // silhouette stitched, so it's an opaque, textured VOLUME — not a see-through shell.
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
-    mesh = layerMesh(fg.disp, fg.rgba, w, h, fx, cx, cy, MESH_MAXLEN, 0,
-      { solid: true, bgdisp: bg ? bg.disp : null, maxT: 0.35 })
+    // no world-length cull (that tears far ground into holes); instead cut only triangles that
+    // span a depth discontinuity (DISP_JUMP) -> crisp object silhouettes that stand up, while the
+    // continuous ground stays a solid, gap-free surface. Culled boundaries are closed by the solid
+    // side-walls (below), so no see-through black behind objects.
+    mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, 1e9, 0,
+      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep, dispJump: DISP_JUMP })
     scene.add(mesh)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
     if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
-    if (bg) {
-      bgMesh = layerMesh(bg.disp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04)
+    if (bg && bgDisp) {
+      bgMesh = layerMesh(bgDisp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04, { flattenCoef: gy })
       scene.add(bgMesh)
     }
 
-    // entity markers
+    // entity markers — de-bowed with the same trend so they sit on the flattened ground
     if (markers) { scene.remove(markers); disposeGroup(markers) }
     markers = new THREE.Group()
     entityCount = entities.length
     for (const e of entities) {
       const Z = zOf(e.depth)
       const u = e.cx * w, v = e.cy * h
-      const X = (u - cx) * Z / fx, Y = -(v - cy) * Z / fx
+      const X = (u - cx) * Z / fx, Y = (-(v - cy) * Z / fx - deb(Z)) * RELIEF + 0.12
       const spr = makeMarker(e.label || e.cls, CLS_COLOR[e.cls] || '#c9d4dc')
       spr.position.set(X, Y, -Z)
       markers.add(spr)
     }
     scene.add(markers)
 
-    // fit-to-bounds framing (on the foreground surface), offset off-axis so the 3D reads at once
+    // framing: the ground is now flat (X-Z plane), so establish from ABOVE at a 3/4 angle that
+    // reveals the layout, framed to the ground footprint.
     const box = new THREE.Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position') as THREE.BufferAttribute)
     const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
     const vfov = camera!.fov * Math.PI / 180
-    const fitH = (size.y / 2) / Math.tan(vfov / 2)
-    const fitW = (size.x / 2) / Math.tan(vfov / 2) / camera!.aspect
-    const dist = Math.max(fitH, fitW) * 1.08 + size.z * 0.4
-    const yaw = 18 * Math.PI / 180, pitch = 6 * Math.PI / 180
-    if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.25; controls.maxDistance = dist * 4 }
+    const foot = Math.max(size.x, size.z)
+    const dist = (foot / 2) / Math.tan(vfov / 2) * 1.1 + size.y
+    const yaw = 22 * Math.PI / 180, pitch = 16 * Math.PI / 180   // lower angle -> standing objects read as 3D
+    if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.15; controls.maxDistance = dist * 5 }
     camera!.position.set(
       c.x + dist * Math.sin(yaw) * Math.cos(pitch),
-      c.y - dist * Math.sin(pitch),
+      c.y + dist * Math.sin(pitch),
       c.z + dist * Math.cos(yaw) * Math.cos(pitch))
     camera!.updateProjectionMatrix()
   }
@@ -231,22 +405,24 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
     const maxT = opt.maxT ?? 0.35, minT = 0.03
-    const pos: number[] = [], col: number[] = []
+    const pos: number[] = [], col: number[] = [], uv: number[] = []
     const vidx = new Int32Array(w * h).fill(-1)
     const vz: number[] = [], vpix: number[] = []
+    const keep = opt.keep ?? cleanMask(disp, w, h)   // smooth, well-defined silhouette
     let vn = 0
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = y * w + x
-        if (disp[i] < SKYCULL) continue
+        if (!keep[i]) continue
         vidx[i] = vn++
         const Z = zOf(disp[i])
         pos.push((x - cx) * Z / fx, -(y - cy) * Z / fx, -(Z + zbias)); vz.push(Z); vpix.push(i)
         const p = i * 4
         col.push(rgba[p] / 255, rgba[p + 1] / 255, rgba[p + 2] / 255)
+        uv.push(x / (w - 1), 1 - y / (h - 1))     // UV into the full-res texture (flipY default)
       }
     }
     const nF = vn
@@ -255,10 +431,14 @@
       Math.hypot(pos[va * 3] - pos[vb * 3], pos[va * 3 + 1] - pos[vb * 3 + 1], pos[va * 3 + 2] - pos[vb * 3 + 2])
     const edge = new Map<string, number>()
     const bump = (a: number, b: number) => { const k = a < b ? a + '_' + b : b + '_' + a; edge.set(k, (edge.get(k) ?? 0) + 1) }
+    const dj = opt.dispJump ?? Infinity   // max disparity spread a triangle may span before it's a
+                                          // silhouette skirt (cut it -> objects don't smear to ground)
     const tri = (a: number, b: number, c: number) => {
       const va = vidx[a], vb = vidx[b], vc = vidx[c]
       if (va < 0 || vb < 0 || vc < 0) return
       if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > maxlen) return
+      const da = disp[a], db = disp[b], dc = disp[c]
+      if (Math.max(Math.abs(da - db), Math.abs(db - dc), Math.abs(da - dc)) > dj) return
       idx.push(va, vb, vc)
       if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) }
     }
@@ -268,11 +448,16 @@
         tri(tl, bl, tr); tri(tr, bl, br)
       }
     }
+    if (opt.flattenCoef) {   // de-bow: subtract the fitted ground trend so the GROUND flattens to a
+      const [a, b, c] = opt.flattenCoef   // plane, while each vertex keeps its RELIEF above that
+      for (let j = 0; j < nF; j++) { const Z = vz[j]; pos[j * 3 + 1] = (pos[j * 3 + 1] - (a + b * Z + c * Z * Z)) * RELIEF }
+    }                                      // plane -> objects (people, vehicles) rise as real volumes
     if (solid) {
       for (let j = 0; j < nF; j++) {   // back vertices: extruded to the background, capped
         const T = bgdisp ? Math.max(minT, Math.min(maxT, zOf(bgdisp[vpix[j]]) - vz[j])) : Math.min(maxT, minT + 0.12)
         pos.push(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2] - T)
         col.push(col[j * 3] * 0.82, col[j * 3 + 1] * 0.82, col[j * 3 + 2] * 0.82)
+        uv.push(uv[j * 2], uv[j * 2 + 1])           // back vertices reuse the front UV
       }
       const nFrontIdx = idx.length     // back shell (reversed winding)
       for (let t = 0; t < nFrontIdx; t += 3) idx.push(idx[t] + nF, idx[t + 2] + nF, idx[t + 1] + nF)
@@ -285,8 +470,13 @@
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
     geo.setIndex(idx)
-    return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))
+    // full-res texture map when provided (crisp, mesh-independent); else per-vertex colour.
+    const mat = opt.tex
+      ? new THREE.MeshBasicMaterial({ map: opt.tex, side: THREE.DoubleSide })
+      : new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })
+    return new THREE.Mesh(geo, mat)
   }
 
   function makeMarker(text: string, color: string): THREE.Sprite {
@@ -341,6 +531,7 @@
     if (mesh) { mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     if (bgMesh) { bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose() }
     if (markers) disposeGroup(markers)
+    fgTex?.dispose()
     renderer?.dispose()
     if (renderer?.domElement && host?.contains(renderer.domElement)) host.removeChild(renderer.domElement)
   })

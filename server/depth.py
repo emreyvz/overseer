@@ -1,8 +1,9 @@
 """Monocular depth estimation for the spatial 3D scene view (Feature 4).
 
-Wraps Depth Anything V2 (Small) — a DINOv2-backbone depth transformer — via `transformers`.
-A single RGB frame yields a dense relative-depth (disparity) map with no stereo, LiDAR or
-calibration. Runs on the existing CUDA torch stack in ~30 ms.
+Wraps Depth Anything V2 (Large by default) — a DINOv2-backbone depth transformer — via
+`transformers`. A single RGB frame yields a dense relative-depth (disparity) map with no stereo,
+LiDAR or calibration. The model and inference resolution are configurable (spatial.model /
+spatial.depth_res) to trade geometry quality against VRAM/latency.
 
 Design notes:
   * Lazy singleton — the model (and the `transformers` import) load on first use only, so a
@@ -26,10 +27,13 @@ log = logging.getLogger("overseer.depth")
 class DepthEstimator:
     """Depth Anything V2 wrapper. `estimate(bgr)` -> float32 disparity map (H×W), or None."""
 
-    def __init__(self, model_name: str = "depth-anything/Depth-Anything-V2-Small-hf",
-                 device: str | None = None) -> None:
+    def __init__(self, model_name: str = "depth-anything/Depth-Anything-V2-Large-hf",
+                 device: str | None = None, input_size: int | None = None) -> None:
         self.model_name = model_name
         self._device = device
+        # Inference resolution (px, multiple of 14). Higher = sharper geometry, more VRAM/time.
+        # None = the processor's trained default (518).
+        self._input_size = (int(input_size) // 14 * 14) if input_size else None
         self._lock = threading.Lock()
         self._model: Any = None
         self._proc: Any = None
@@ -76,8 +80,11 @@ class DepthEstimator:
                 # negative stride a `[:, :, ::-1]` view would produce.
                 rgb = np.ascontiguousarray(bgr[:, :, ::-1])  # BGR -> RGB
                 h, w = rgb.shape[:2]
+                proc_kw: dict[str, Any] = {"images": rgb, "return_tensors": "pt"}
+                if self._input_size:   # run depth at a higher resolution for sharper geometry
+                    proc_kw["size"] = {"height": self._input_size, "width": self._input_size}
                 with torch.no_grad():
-                    inp = self._proc(images=rgb, return_tensors="pt").to(self._device)
+                    inp = self._proc(**proc_kw).to(self._device)
                     pred = self._model(**inp).predicted_depth  # (1, h', w')
                     pred = torch.nn.functional.interpolate(
                         pred[:, None], size=(h, w), mode="bilinear", align_corners=False)
