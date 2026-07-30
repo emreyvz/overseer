@@ -220,6 +220,9 @@ class Backend:
 
         self._latest_jpeg: bytes | None = None
         self._latest_img: Any = None
+        self._bg_plate: Any = None       # running background estimate (EMA) of the active camera
+        self._bg_plate_sid: Any = None   # which camera the plate belongs to
+        self._bg_plate_n = 0             # frames accumulated (plate is only trusted once warmed up)
         self._last_frame_push = 0.0
 
         self._loop: Any = None
@@ -1066,6 +1069,13 @@ class Backend:
     def _on_result(self, r: AnalysisResult) -> None:
         img = r.frame.image
         self._latest_img = img
+        # Running background PLATE (EMA) for the active camera: moving objects average out, leaving
+        # the true static scene — so the spatial view can show what's really BEHIND them, not a guess.
+        sid = self._source_id
+        if (self._bg_plate is None or sid != self._bg_plate_sid or self._bg_plate.shape != img.shape):
+            self._bg_plate = img.astype(np.float32).copy(); self._bg_plate_sid = sid; self._bg_plate_n = 1
+        else:
+            self._bg_plate += 0.02 * (img.astype(np.float32) - self._bg_plate); self._bg_plate_n += 1
         h, w = img.shape[:2]
         ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         if ok:
@@ -1337,7 +1347,14 @@ class Backend:
             # layer is produced even with no detections (fills seams behind buildings/clutter).
             fgmask = spatial.foreground_mask(disp01)
             if boxes or bool(fgmask.any()):
-                bg_rgb, bg_disp = spatial.complete_background(rgb_grid, disp01, boxes, extra_mask=fgmask)
+                # a warmed-up background plate (same camera) supplies the REAL scene behind moving
+                # objects; the depth is filled by extending the ground plane (both in complete_background).
+                plate_grid = None
+                if (self._bg_plate is not None and str(self._bg_plate_sid) == str(sid)
+                        and self._bg_plate_n >= 60 and self._bg_plate.shape[:2] == frame.shape[:2]):
+                    plate_grid = cv2.resize(self._bg_plate.astype(np.uint8), (grid_w, gh), interpolation=cv2.INTER_AREA)
+                bg_rgb, bg_disp = spatial.complete_background(
+                    rgb_grid, disp01, boxes, extra_mask=fgmask, bg_texture=plate_grid)
         scene = spatial.encode_scene(
             rgb_grid, disp01, entities, fov=float(self.config.get("spatial.fov_deg", 60.0)),
             cam=src.name, sid=str(sid), ts=time.time() * 1000.0, bg_rgb=bg_rgb, bg_disp01=bg_disp)

@@ -49,15 +49,37 @@ def foreground_mask(disp01: np.ndarray, margin: float = 0.08) -> np.ndarray:
     return cv2.dilate(fg, np.ones((3, 3), np.uint8), iterations=2)
 
 
+def ground_fill_depth(disp01: np.ndarray, mask: np.ndarray) -> np.ndarray | None:
+    """Structure-aware depth for occluded (masked) pixels: fit a plane disp = a + b·y + c·x to the
+    VISIBLE surrounding disparity (lower region ~ ground) and extend it under the mask, so the floor
+    continues FLAT behind objects instead of the blurry TELEA diffusion. None if too few samples."""
+    h, w = disp01.shape
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    vis = (mask == 0) & (ys >= h * 0.3) & (disp01 > 0.02)
+    n = int(vis.sum())
+    if n < 60:
+        return None
+    A = np.stack([np.ones(n, np.float32), ys[vis], xs[vis]], axis=1)
+    coef, *_ = np.linalg.lstsq(A, disp01[vis].astype(np.float32), rcond=None)
+    plane = coef[0] + coef[1] * ys + coef[2] * xs
+    out = disp01.copy()
+    m = mask > 0
+    out[m] = np.clip(plane[m], 0.0, 1.0).astype(np.float32)
+    return out
+
+
 def complete_background(rgb_grid: np.ndarray, disp01: np.ndarray,
                         boxes_norm: list[tuple[float, float, float, float]],
-                        extra_mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+                        extra_mask: np.ndarray | None = None,
+                        bg_texture: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Reconstruct the OCCLUDED background as real geometry. Where a foreground object hides the
     scene — a detected person/vehicle box, and/or the depth-derived `extra_mask` of standing
-    objects — inpaint BOTH the depth and the texture from the surrounding background, so the
-    wall/floor/scene continues behind it. The frontend renders this as a second mesh layer at its
-    true depth — filling disocclusion holes with a plausible 3D surface (correct parallax), not a
-    flat backdrop. Returns (bg_rgb_bgr, bg_disp01)."""
+    objects — fill BOTH the depth and the texture behind it, so the wall/floor/scene continues.
+
+    Texture: if `bg_texture` (a learned background PLATE, same camera view so pixel-aligned) is
+    given, the occluded pixels are taken from the REAL background there; otherwise TELEA inpaint.
+    Depth: the ground plane is extended behind objects (structure-aware, flat floor); TELEA fallback.
+    The frontend renders this as a second mesh layer at its true depth. Returns (bg_rgb_bgr, bg_disp01)."""
     h, w = disp01.shape
     mask = np.zeros((h, w), np.uint8)
     for (nx1, ny1, nx2, ny2) in boxes_norm:
@@ -71,10 +93,18 @@ def complete_background(rgb_grid: np.ndarray, disp01: np.ndarray,
         return rgb_grid.copy(), disp01.copy()
     mask = cv2.dilate(mask, np.ones((3, 3), np.uint8), iterations=1)
     rad = max(4, w // 60)
-    bg_rgb = cv2.inpaint(rgb_grid, mask, rad, cv2.INPAINT_TELEA)
-    du8 = (np.clip(disp01, 0.0, 1.0) * 255.0).astype(np.uint8)
-    bg_du8 = cv2.inpaint(du8, mask, rad, cv2.INPAINT_TELEA)
-    return bg_rgb, (bg_du8.astype(np.float32) / 255.0)
+    # texture: real learned plate where available (pixel-aligned), else inpaint from surroundings
+    if bg_texture is not None and bg_texture.shape == rgb_grid.shape:
+        bg_rgb = rgb_grid.copy()
+        bg_rgb[mask > 0] = bg_texture[mask > 0]
+    else:
+        bg_rgb = cv2.inpaint(rgb_grid, mask, rad, cv2.INPAINT_TELEA)
+    # depth: extend the ground plane behind objects; fall back to TELEA diffusion
+    bg_disp = ground_fill_depth(disp01, mask)
+    if bg_disp is None:
+        du8 = (np.clip(disp01, 0.0, 1.0) * 255.0).astype(np.uint8)
+        bg_disp = cv2.inpaint(du8, mask, rad, cv2.INPAINT_TELEA).astype(np.float32) / 255.0
+    return bg_rgb, bg_disp
 
 
 def encode_scene(rgb_grid: np.ndarray, disp01: np.ndarray, entities: list[dict], *,
