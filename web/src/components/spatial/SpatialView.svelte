@@ -51,11 +51,11 @@
   const MESH_MAXLEN = 0.32    // cull only wildly-stretched triangles; loose so the surface stays
                               // continuous (no torn gaps) — depth smoothing turns jumps into ramps
   const SKYCULL = 0.015       // keep almost everything (fills the far field); drop only pure sky
-  const RELIEF = 1.0          // KEEP full height above the fitted ground trend, so objects (people,
-                              // vehicles, walls) stand up as real volumes — the ground itself
-                              // flattens because its residual is ~0 once the trend is subtracted.
-                              // (Was a 0.16 "damp" that squashed everything flat — a photo on the floor.)
-  const DISP_JUMP = 0.055     // cull triangles that straddle a depth discontinuity (an object's
+  const RELIEF = 0.6          // scale of height above the fitted ground trend: objects still stand up,
+                              // but MODERATELY — 1.0 exaggerated the protrusions; the ground stays flat
+                              // because its residual is ~0. (0.16 was the old over-flat "photo on floor".)
+  const RELIEF_CAP = 2.2      // clamp raw residual height before scaling -> kills shapeless noise spikes
+  const DISP_JUMP = 0.045     // cull triangles that straddle a depth discontinuity (an object's
                               // silhouette): its 3 disparities differ by more than this. Standing
                               // objects then get crisp edges instead of smearing down into the ground;
                               // continuous ground has tiny jumps and stays fully meshed (no gaps).
@@ -158,7 +158,7 @@
     gtao.updateGtaoMaterial({ radius: 0.5, distanceExponent: 1.0, thickness: 0.7, scale: 1.0, samples: 16, distanceFallOff: 1.0, screenSpaceRadius: false })
     gtao.blendIntensity = 1.0
     composer.addPass(gtao)
-    composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.75, 0.8))
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.22, 0.7, 0.9))   // gentler: don't explode blown highlights
     composer.addPass(new OutputPass())
     // subtle vignette LAST (sRGB/LDR): mixing toward black focuses the frame. Before the tone-map
     // it would feed negatives to ACES and orange the corners.
@@ -289,11 +289,11 @@
   }
 
   // 3x3 median — knocks out isolated depth speckle spikes before the heavy blur.
-  function medianDisp(disp: Float32Array, w: number, h: number): Float32Array {
+  function medianDisp(disp: Float32Array, w: number, h: number, r = 1): Float32Array {
     const out = new Float32Array(w * h), win: number[] = []
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       win.length = 0
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
         const xx = x + dx, yy = y + dy
         if (xx >= 0 && xx < w && yy >= 0 && yy < h) win.push(disp[yy * w + xx])
       }
@@ -482,7 +482,7 @@
     // median kills speckle, then an EDGE-AWARE joint-bilateral (guided by the RGB frame) smooths
     // surfaces while keeping object edges crisp — keeps relief intact, no box-blur edge rounding.
     // The depth-discontinuity cull still removes silhouette smears.
-    const fgDisp = bilateralDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h), fg.rgba, keep, w, h, 3, 0.09, 0.04, 2)
+    const fgDisp = bilateralDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h, 2), fg.rgba, keep, w, h, 3, 0.09, 0.04, 2)
     const bgDisp = bg ? smoothDisp(bg.disp, w, h, 4, 2) : null
 
     // shared ground de-bow: fit the ground's height trend once so the mesh AND the markers flatten
@@ -627,10 +627,15 @@
         tri(tl, bl, tr); tri(tr, bl, br)
       }
     }
-    if (opt.flattenCoef) {   // de-bow: subtract the fitted ground trend so the GROUND flattens to a
-      const [a, b, c] = opt.flattenCoef   // plane, while each vertex keeps its RELIEF above that
-      for (let j = 0; j < nF; j++) { const Z = vz[j]; pos[j * 3 + 1] = (pos[j * 3 + 1] - (a + b * Z + c * Z * Z)) * RELIEF }
-    }                                      // plane -> objects (people, vehicles) rise as real volumes
+    if (opt.flattenCoef) {   // de-bow: subtract the fitted ground trend so the GROUND flattens; each
+      const [a, b, c] = opt.flattenCoef   // vertex keeps a CLAMPED, scaled residual above it -> objects
+      for (let j = 0; j < nF; j++) {       // rise moderately and noise spikes can't shoot up (shapeless)
+        const Z = vz[j]
+        let r = pos[j * 3 + 1] - (a + b * Z + c * Z * Z)
+        r = Math.max(-0.6, Math.min(RELIEF_CAP, r))
+        pos[j * 3 + 1] = r * RELIEF
+      }
+    }
     if (solid) {
       for (let j = 0; j < nF; j++) {   // back vertices: extruded to the background, capped
         const T = bgdisp ? Math.max(minT, Math.min(maxT, zOf(bgdisp[vpix[j]]) - vz[j])) : Math.min(maxT, minT + 0.12)
