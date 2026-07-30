@@ -28,6 +28,7 @@
   //   capture (grab frame) -> depth (scan-sweep the depth field over the frame) -> lift (to 3D)
   let phase = $state<'' | 'capture' | 'depth' | 'lift'>('')
   let previewCv = $state<HTMLCanvasElement | null>(null)
+  let mapCv = $state<HTMLCanvasElement | null>(null)   // top-down mini-map canvas
   const PHASE_LABEL: Record<string, string> = {
     capture: 'ACQUIRING FRAME', depth: 'ESTIMATING DEPTH FIELD', lift: 'LIFTING TO 3D',
   }
@@ -75,6 +76,11 @@
   let raf = 0
   let ro: ResizeObserver | null = null
   let autoTimer: ReturnType<typeof setInterval> | null = null
+  // top-down mini-map data + temporal-stabilisation state
+  let mapPts: { x: number; z: number; color: string }[] = []
+  let mapBox: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null
+  let prevDisp: Float32Array | null = null     // previous LIVE-frame disparity (for EMA)
+  let prevKey = ''
 
   function initThree() {
     if (!host) return
@@ -101,6 +107,7 @@
       controls?.update()
       if (composer) composer.render()
       else if (renderer && scene && camera) renderer.render(scene, camera)
+      drawMinimap()
     }
     loop()
     ro = new ResizeObserver(() => {
@@ -400,6 +407,7 @@
     // foreground: the directly-observed surface — a continuous triangle mesh with sharp
     // silhouettes (stretched skirts culled).
     const fg = await decodeLayer(image, depth, w, h)
+    if (auto) applyTemporal(fg.disp, `${cam}:${w}x${h}`)   // LIVE: stabilise depth vs last frame
     // the completed background (computed backend-side) is decoded first: it's both the far-field
     // fill AND the back-cap that turns foreground objects into solid volumes.
     const bg = (bg_image && bg_depth) ? await decodeLayer(bg_image, bg_depth, w, h) : null
@@ -449,6 +457,7 @@
     if (markers) { scene.remove(markers); disposeGroup(markers) }
     markers = new THREE.Group()
     entityCount = entities.length
+    mapPts = []
     for (const e of entities) {
       const Z = zOf(e.depth)
       const u = e.cx * w, v = e.cy * h
@@ -456,6 +465,7 @@
       const spr = makeMarker(e.label || e.cls, CLS_COLOR[e.cls] || '#c9d4dc')
       spr.position.set(X, Y, -Z)
       markers.add(spr)
+      mapPts.push({ x: X, z: -Z, color: CLS_COLOR[e.cls] || '#c9d4dc' })
     }
     scene.add(markers)
 
@@ -478,6 +488,7 @@
     // reveals the layout, framed to the ground footprint.
     const box = new THREE.Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position') as THREE.BufferAttribute)
     const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
+    mapBox = { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z }   // mini-map extent
     const vfov = camera!.fov * Math.PI / 180
     const foot = Math.max(size.x, size.z)
     const dist = (foot / 2) / Math.tan(vfov / 2) * 0.92 + size.y * 0.5   // tighter default frame
@@ -622,6 +633,44 @@
     shadowTex = new THREE.CanvasTexture(cv); shadowTex.colorSpace = THREE.SRGBColorSpace
     return shadowTex
   }
+  // Top-down tactical mini-map: the ground footprint + entity dots (by class) + a camera marker,
+  // redrawn each frame so the operator sees the layout from above while orbiting in 3D.
+  function drawMinimap() {
+    const cv = mapCv
+    if (!cv || !mapBox || !camera || !controls) return
+    const W = cv.width, H = cv.height, g = cv.getContext('2d')
+    if (!g) return
+    g.clearRect(0, 0, W, H)
+    g.fillStyle = 'rgba(4,7,10,0.72)'; g.fillRect(0, 0, W, H)
+    const pad = 10, { minX, maxX, minZ, maxZ } = mapBox
+    const sc = Math.min((W - 2 * pad) / ((maxX - minX) || 1), (H - 2 * pad) / ((maxZ - minZ) || 1))
+    const ox = pad + ((W - 2 * pad) - sc * (maxX - minX)) / 2
+    const oy = pad + ((H - 2 * pad) - sc * (maxZ - minZ)) / 2
+    const toX = (x: number) => ox + (x - minX) * sc
+    const toY = (z: number) => oy + (z - minZ) * sc      // far (most-negative Z) -> top
+    g.strokeStyle = 'rgba(120,224,255,0.30)'; g.lineWidth = 1
+    g.strokeRect(toX(minX), toY(minZ), sc * (maxX - minX), sc * (maxZ - minZ))
+    for (const p of mapPts) { g.fillStyle = p.color; g.beginPath(); g.arc(toX(p.x), toY(p.z), 3, 0, Math.PI * 2); g.fill() }
+    // camera marker (clamped to the panel) + sight line toward the view target
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+    const cxp = clamp(toX(camera.position.x), 2, W - 2), cyp = clamp(toY(camera.position.z), 2, H - 2)
+    g.strokeStyle = 'rgba(234,242,246,0.6)'; g.beginPath(); g.moveTo(cxp, cyp); g.lineTo(toX(controls.target.x), toY(controls.target.z)); g.stroke()
+    g.fillStyle = '#eaf2f6'; g.beginPath(); g.arc(cxp, cyp, 3, 0, Math.PI * 2); g.fill()
+  }
+
+  // Temporal stabilisation for LIVE mode: EMA the disparity against the previous frame so the
+  // surface stops jittering — but ADAPTIVELY: where the depth changed a lot (a moving person/
+  // vehicle) take the new value fully (no ghosting); only blend the near-static background.
+  function applyTemporal(disp: Float32Array, key: string) {
+    if (prevDisp && prevKey === key && prevDisp.length === disp.length) {
+      for (let i = 0; i < disp.length; i++) {
+        const a = Math.abs(disp[i] - prevDisp[i]) > 0.06 ? 1 : 0.55
+        disp[i] = a * disp[i] + (1 - a) * prevDisp[i]
+      }
+    }
+    prevKey = key; prevDisp = Float32Array.from(disp)
+  }
+
   // dispose shadow meshes (geometry + material) but KEEP the shared blob texture (cached)
   function disposeShadows() {
     shadows?.traverse((o) => {
@@ -635,7 +684,7 @@
     auto = !auto
     sfx('click')
     if (auto) autoTimer = setInterval(() => loadScene(false), 4000)
-    else if (autoTimer) { clearInterval(autoTimer); autoTimer = null }
+    else { if (autoTimer) { clearInterval(autoTimer); autoTimer = null } prevDisp = null }
   }
 
   function onkey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); onclose() } }
@@ -703,6 +752,10 @@
       <button class="ref caps" onclick={() => loadScene(true)}>↻ RETRY</button>
     </div>
   {:else}
+    <div class="minimap">
+      <span class="mmlabel caps">◹ TOP-DOWN</span>
+      <canvas bind:this={mapCv} width="184" height="150"></canvas>
+    </div>
     <div class="hint caps">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
   {/if}
 </div>
@@ -745,4 +798,8 @@
   .uasub { color: var(--ink-dim); font-size: 9px; letter-spacing: 0.06em; text-transform: none; }
   .hint { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: var(--ink-ghost);
     font-size: 8px; letter-spacing: 0.2em; pointer-events: none; }
+  .minimap { position: absolute; left: 16px; bottom: 16px; padding: 6px; border: 1px solid var(--hairline);
+    background: rgba(4,7,10,0.55); backdrop-filter: blur(2px); pointer-events: none; }
+  .minimap canvas { display: block; }
+  .mmlabel { display: block; color: var(--cyan); font-size: 7px; letter-spacing: 0.18em; margin-bottom: 4px; }
 </style>
