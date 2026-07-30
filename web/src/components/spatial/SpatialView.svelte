@@ -325,6 +325,39 @@
     return src as Float32Array
   }
 
+  // Edge-aware joint-bilateral smoothing: average neighbour disparities weighted by spatial
+  // distance AND similarity in the guide image (RGB) and in disparity — so surfaces smooth out
+  // while depth edges that line up with colour/texture edges stay crisp, instead of a box blur
+  // rounding every edge. `rgba` is the (unchanging) guide; a couple of passes.
+  function bilateralDisp(disp: Float32Array, rgba: Uint8ClampedArray, keep: Uint8Array, w: number, h: number,
+                         radius = 3, sigmaC = 0.09, sigmaD = 0.04, iters = 2): Float32Array {
+    const invC = 1 / (2 * sigmaC * sigmaC), invD = 1 / (2 * sigmaD * sigmaD), invS = 1 / (radius * radius + 1e-6)
+    let src = disp
+    for (let it = 0; it < iters; it++) {
+      const out = new Float32Array(w * h)
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const i = y * w + x
+        if (!keep[i]) { out[i] = src[i]; continue }
+        const p = i * 4, cr = rgba[p] / 255, cg = rgba[p + 1] / 255, cb = rgba[p + 2] / 255, dc = src[i]
+        let s = 0, wsum = 0
+        for (let dy = -radius; dy <= radius; dy++) {
+          const yy = y + dy; if (yy < 0 || yy >= h) continue
+          for (let dx = -radius; dx <= radius; dx++) {
+            const xx = x + dx; if (xx < 0 || xx >= w) continue
+            const j = yy * w + xx; if (!keep[j]) continue
+            const q = j * 4, ddr = rgba[q] / 255 - cr, ddg = rgba[q + 1] / 255 - cg, ddb = rgba[q + 2] / 255 - cb
+            const dv = src[j] - dc
+            const wgt = Math.exp(-(dx * dx + dy * dy) * invS - (ddr * ddr + ddg * ddg + ddb * ddb) * invC - dv * dv * invD)
+            s += src[j] * wgt; wsum += wgt
+          }
+        }
+        out[i] = wsum > 0 ? s / wsum : dc
+      }
+      src = out
+    }
+    return src
+  }
+
   // Solve a 3x3 linear system (Gaussian elimination w/ partial pivot) for the quadratic ground fit.
   function solve3(A: number[][], b: number[]): [number, number, number] | null {
     const m = [[...A[0], b[0]], [...A[1], b[1]], [...A[2], b[2]]]
@@ -373,10 +406,10 @@
     // solid, gap-free surface: clean the silhouette + FILL enclosed holes, inpaint depth into those
     // holes from surrounding surface, then smooth. No black patches in the ground.
     const keep = cleanMask(fg.disp, w, h)
-    // LIGHT regularisation: median kills speckle, a single gentle blur pass takes the stair-step
-    // off the surface — but keeps depth relief intact (heavy blur flattened people/cars into the
-    // ground). The depth-discontinuity cull, not blur, is what removes the silhouette smears.
-    const fgDisp = smoothDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h), w, h, 2, 1)
+    // median kills speckle, then an EDGE-AWARE joint-bilateral (guided by the RGB frame) smooths
+    // surfaces while keeping object edges crisp — keeps relief intact, no box-blur edge rounding.
+    // The depth-discontinuity cull still removes silhouette smears.
+    const fgDisp = bilateralDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h), fg.rgba, keep, w, h, 3, 0.09, 0.04, 2)
     const bgDisp = bg ? smoothDisp(bg.disp, w, h, 4, 2) : null
 
     // shared ground de-bow: fit the ground's height trend once so the mesh AND the markers flatten

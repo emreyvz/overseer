@@ -84,6 +84,31 @@ function smoothDisp(disp, w, h, radius, iters) {
   }
   return src
 }
+function bilateralDisp(disp, rgba, keep, w, h, radius = 3, sigmaC = 0.09, sigmaD = 0.04, iters = 2) {
+  const invC = 1 / (2 * sigmaC * sigmaC), invD = 1 / (2 * sigmaD * sigmaD), invS = 1 / (radius * radius + 1e-6)
+  let src = disp
+  for (let it = 0; it < iters; it++) {
+    const out = new Float32Array(w * h)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      if (!keep[i]) { out[i] = src[i]; continue }
+      const p = i * 4, cr = rgba[p] / 255, cg = rgba[p + 1] / 255, cb = rgba[p + 2] / 255, dc = src[i]
+      let s = 0, wsum = 0
+      for (let dy = -radius; dy <= radius; dy++) { const yy = y + dy; if (yy < 0 || yy >= h) continue
+        for (let dx = -radius; dx <= radius; dx++) { const xx = x + dx; if (xx < 0 || xx >= w) continue
+          const j = yy * w + xx; if (!keep[j]) continue
+          const q = j * 4, ddr = rgba[q] / 255 - cr, ddg = rgba[q + 1] / 255 - cg, ddb = rgba[q + 2] / 255 - cb
+          const dv = src[j] - dc
+          const wgt = Math.exp(-(dx * dx + dy * dy) * invS - (ddr * ddr + ddg * ddg + ddb * ddb) * invC - dv * dv * invD)
+          s += src[j] * wgt; wsum += wgt
+        }
+      }
+      out[i] = wsum > 0 ? s / wsum : dc
+    }
+    src = out
+  }
+  return src
+}
 function solve3(A, b) {
   const m = [[...A[0], b[0]], [...A[1], b[1]], [...A[2], b[2]]]
   for (let i = 0; i < 3; i++) { let p = i; for (let r = i + 1; r < 3; r++) if (Math.abs(m[r][i]) > Math.abs(m[p][i])) p = r; if (Math.abs(m[p][i]) < 1e-9) return null;[m[i], m[p]] = [m[p], m[i]]; for (let r = 0; r < 3; r++) { if (r === i) continue; const f = m[r][i] / m[i][i]; for (let cc = i; cc < 4; cc++) m[r][cc] -= f * m[i][cc] } }
@@ -204,7 +229,7 @@ async function main() {
   const fx = 0.5 * W / Math.tan((fov * Math.PI) / 180 / 2), cx = W / 2, cy = H / 2
 
   const keep = cleanMask(disp, W, H)
-  const fgDisp = smoothDisp(medianDisp(fillDepth(disp, keep, W, H), W, H), W, H, 2, 1)
+  const fgDisp = bilateralDisp(medianDisp(fillDepth(disp, keep, W, H), W, H), rgba, keep, W, H, 3, 0.09, 0.04, 2)
   const gy = fitGround(fgDisp, W, H, fx, cx, cy)
 
   let tex = null
