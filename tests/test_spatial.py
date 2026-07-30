@@ -8,6 +8,7 @@ from server.spatial import (
     encode_scene,
     entity_depth,
     foreground_mask,
+    ground_fill_depth,
     normalize_disparity,
 )
 
@@ -91,6 +92,29 @@ def test_foreground_mask_flags_near_object_only() -> None:
     assert m[5, 5] == 0             # far background is not foreground
     # a perfectly flat scene has no foreground
     assert not foreground_mask(np.full((120, 120), 0.5, np.float32)).any()
+
+
+def test_ground_fill_depth_extends_plane_behind_object() -> None:
+    # ground disparity ramps with the row; a near object breaks it. Behind the object the depth
+    # must return to the ground plane (continuous flat floor), not stay at the object's value.
+    h, w = 60, 60
+    disp = np.repeat(np.arange(h, dtype=np.float32)[:, None] / h, w, axis=1)  # plane disp = row/h
+    disp[20:40, 20:40] = 0.95
+    mask = np.zeros((h, w), np.uint8); mask[20:40, 20:40] = 255
+    filled = ground_fill_depth(disp, mask)
+    assert filled is not None
+    assert abs(float(filled[30, 30]) - 30 / h) < 0.08   # back to the plane at row 30
+    assert filled[5, 5] == disp[5, 5]                    # visible pixels untouched
+
+
+def test_complete_background_uses_plate_texture() -> None:
+    # a background plate supplies the REAL scene behind an object, instead of inpainting its colour
+    disp = np.full((40, 40), 0.2, np.float32); disp[10:30, 10:30] = 0.9
+    rgb = np.zeros((40, 40, 3), np.uint8); rgb[10:30, 10:30] = (0, 0, 255)   # red object (BGR)
+    plate = np.full((40, 40, 3), (0, 255, 0), np.uint8)                       # green "true background"
+    extra = np.zeros((40, 40), np.uint8); extra[10:30, 10:30] = 255
+    bg_rgb, _ = complete_background(rgb, disp, [], extra_mask=extra, bg_texture=plate)
+    assert bg_rgb[20, 20][1] > 150 and bg_rgb[20, 20][2] < 80   # green from plate, not red
 
 
 def test_complete_background_extra_mask_fills_without_boxes() -> None:
