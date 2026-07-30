@@ -28,7 +28,7 @@ async function shot(mode, out) {
   const t0 = Date.now()
   let info = null
   while (Date.now() - t0 < 90000) {
-    info = await win.webContents.executeJavaScript('({done: window.__done===true, err: window.__error||null, tris: window.__meshTris||0})').catch(() => null)
+    info = await win.webContents.executeJavaScript('({done: window.__done===true, err: window.__error||null, tris: window.__meshTris||0, measure: window.__measure||null})').catch(() => null)
     if (info && info.done) break
     await new Promise((r) => setTimeout(r, 300))
   }
@@ -36,7 +36,7 @@ async function shot(mode, out) {
   const img = await win.webContents.capturePage()
   fs.writeFileSync(out, img.toPNG())
   win.destroy()
-  console.log(`[${mode}] tris=${info && info.tris} err=${info && info.err ? info.err.split('\n')[0] : 'none'} console=${errs.slice(0, 2).join(' | ') || 'clean'} -> ${out}`)
+  console.log(`[${mode}] tris=${info && info.tris} measure=${info ? JSON.stringify(info.measure) : '?'} err=${info && info.err ? info.err.split('\n')[0] : 'none'} console=${errs.slice(0, 2).join(' | ') || 'clean'} -> ${out}`)
 }
 
 const modeArg = process.argv.find((a) => a.startsWith('--mode='))
