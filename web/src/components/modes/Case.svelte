@@ -9,6 +9,7 @@
   let cases = $state<CaseRow[]>([])
   let name = $state('')
   let offline = $state(false)
+  let pendingDelete = $state<CaseRow | null>(null)   // case awaiting a styled delete confirmation
 
   async function load() {
     try { cases = await api.cases(); offline = false } catch { offline = true }
@@ -19,10 +20,15 @@
     try { const { id } = await api.addCase(name.trim()); name = ''; await load(); open(id) } catch { offline = true }
   }
   function open(id: number) { sfx('ping', { volume: 0.3 }); investigateCase.set(id) }
-  async function del(e: MouseEvent, c: CaseRow) {
+  function del(e: MouseEvent, c: CaseRow) {
     e.stopPropagation()
-    if (!confirm(`Delete case "${c.name}"? This cannot be undone.`)) return
-    sfx('click')
+    sfx('click'); pendingDelete = c   // open the in-app confirm instead of a browser popup
+  }
+  function cancelDelete() { sfx('click', { volume: 0.2 }); pendingDelete = null }
+  async function confirmDelete() {
+    const c = pendingDelete
+    if (!c) return
+    pendingDelete = null; sfx('click')
     try { await api.deleteCase(c.id); await load() } catch { offline = true }
   }
   function toMap() { sfx('whoosh'); triggerGlitch(160); mode.set('pov'); pickerView.set('map'); stage.set('select') }
@@ -63,6 +69,23 @@
   </div>
 </section>
 
+{#if pendingDelete}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="delscrim" role="presentation" onclick={cancelDelete}>
+    <div class="delbox" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+      <div class="delhdr caps"><span class="hot">⚠ DELETE CASE</span></div>
+      <div class="delbody">
+        <div class="delname caps">/// {pendingDelete.name}</div>
+        <div class="delwarn">This permanently deletes the case file and its findings. This cannot be undone.</div>
+      </div>
+      <div class="delbtns">
+        <button class="cancel caps" onclick={cancelDelete}>CANCEL</button>
+        <button class="confirm caps" onclick={confirmDelete}>✕ DELETE</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if $investigateCase != null}
   <CaseInvestigation caseId={$investigateCase} onclose={() => investigateCase.set(null)} />
 {/if}
@@ -101,4 +124,21 @@
   .v.st-resolved, .v.st-archived { color: var(--ink-dim); }
   .openhint { display: block; padding: 6px 10px; border-top: 1px solid var(--hairline); font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.14em; }
   .file:hover .openhint { color: var(--scarlet); }
+
+  /* in-app delete confirmation (replaces the native browser popup) */
+  .delscrim { position: fixed; inset: 0; z-index: var(--z-cmd); background: rgba(2,3,4,0.82); display: grid; place-items: center; animation: dfade 150ms ease; }
+  @keyframes dfade { from { opacity: 0; } }
+  .delbox { width: min(400px, 92vw); background: #070809; border: 1px solid var(--scarlet); box-shadow: 0 0 44px rgba(225,6,0,0.22); animation: dpop 180ms cubic-bezier(0.16,1,0.3,1) both; }
+  @keyframes dpop { from { transform: translateY(-12px) scale(0.97); opacity: 0; } }
+  .delhdr { padding: 10px 14px; border-bottom: 1px solid var(--hairline); font-size: var(--fs-label); letter-spacing: var(--tracking); }
+  .delhdr .hot { color: var(--scarlet); }
+  .delbody { padding: 16px 14px 14px; }
+  .delname { font-size: var(--fs-banner); color: var(--ink); letter-spacing: var(--tracking); margin-bottom: 10px; word-break: break-word; }
+  .delwarn { font-size: var(--fs-micro); color: var(--ink-dim); line-height: 1.5; }
+  .delbtns { display: flex; gap: 8px; padding: 0 14px 14px; justify-content: flex-end; }
+  .delbtns button { padding: 6px 16px; font-size: var(--fs-label); letter-spacing: var(--tracking); background: none; cursor: pointer; }
+  .delbtns .cancel { border: 1px solid var(--ink-dim); color: var(--ink-dim); }
+  .delbtns .cancel:hover { border-color: var(--ink); color: var(--ink); }
+  .delbtns .confirm { border: 1px solid var(--scarlet); color: var(--scarlet); }
+  .delbtns .confirm:hover { background: var(--scarlet); color: #fff; }
 </style>
