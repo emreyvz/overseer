@@ -43,6 +43,8 @@
   }
   let entityCount = $state(0)
   let auto = $state(false)
+  let measure = $state(false)                  // click-to-measure mode
+  let measureDist = $state<number | null>(null) // last measured distance (scene units)
 
   // Back-projection / depth-to-Z tuning (settled by visual iteration across cameras).
   const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6
@@ -81,6 +83,10 @@
   let mapBox: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null
   let prevDisp: Float32Array | null = null     // previous LIVE-frame disparity (for EMA)
   let prevKey = ''
+  let measurePts: THREE.Vector3[] = []         // 3D points picked on the mesh
+  let measureGroup: THREE.Group | null = null
+  let downXY: [number, number] | null = null   // pointer-down pos (click vs drag discrimination)
+  const raycaster = new THREE.Raycaster()
 
   function initThree() {
     if (!host) return
@@ -91,6 +97,8 @@
     renderer.toneMapping = THREE.ACESFilmicToneMapping   // filmic highlight rolloff
     renderer.toneMappingExposure = 1.15
     host.appendChild(renderer.domElement)
+    renderer.domElement.addEventListener('pointerdown', onPointerDown)
+    renderer.domElement.addEventListener('pointerup', onPointerUp)
     scene = new THREE.Scene()
     scene.fog = new THREE.FogExp2(0x0b131c, 0.04)         // fog colour matches the sky horizon
     camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 200)
@@ -680,6 +688,62 @@
     })
   }
 
+  // Click-to-measure: pick two points on the reconstructed surface and read the straight-line
+  // distance between them (in scene units — relative depth has no metric scale; a true-metres
+  // reading would need a metric-depth model, deferred). Distinguishes a click from an orbit-drag.
+  function onPointerDown(e: PointerEvent) { downXY = [e.clientX, e.clientY] }
+  function onPointerUp(e: PointerEvent) {
+    const d = downXY; downXY = null
+    if (!measure || !d) return
+    if (Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 5) return   // was a drag (orbit), not a pick
+    measurePick(e.clientX, e.clientY)
+  }
+  function measurePick(clientX: number, clientY: number) {
+    if (!renderer || !camera || !mesh) return
+    const rect = renderer.domElement.getBoundingClientRect()
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
+    raycaster.setFromCamera(ndc, camera)
+    const targets: THREE.Object3D[] = [mesh]; if (bgMesh) targets.push(bgMesh)
+    const hit = raycaster.intersectObjects(targets, false)[0]
+    if (!hit) return
+    if (measurePts.length >= 2) { measurePts = []; measureDist = null }   // third pick starts fresh
+    measurePts.push(hit.point.clone())
+    drawMeasure()
+  }
+  function drawMeasure() {
+    clearMeasureObjs()
+    if (!scene) return
+    measureGroup = new THREE.Group()
+    for (const p of measurePts) {
+      const s = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), new THREE.MeshBasicMaterial({ color: 0x35e0ff, depthTest: false }))
+      s.position.copy(p); s.renderOrder = 998; measureGroup.add(s)
+    }
+    if (measurePts.length === 2) {
+      const [a, b] = measurePts
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]),
+        new THREE.LineBasicMaterial({ color: 0x35e0ff, depthTest: false }))
+      line.renderOrder = 998; measureGroup.add(line)
+      measureDist = a.distanceTo(b)
+      const lbl = makeMarker(`${measureDist.toFixed(2)} u`, '#35e0ff')
+      lbl.position.copy(a.clone().lerp(b, 0.5)); measureGroup.add(lbl)
+    }
+    scene.add(measureGroup)
+  }
+  function clearMeasureObjs() {
+    if (measureGroup && scene) {
+      scene.remove(measureGroup)
+      measureGroup.traverse((o) => {
+        const m = o as THREE.Mesh & THREE.Line & THREE.Sprite
+        if (m.geometry) m.geometry.dispose()
+        const mat = m.material as THREE.Material & { map?: THREE.Texture }
+        if (mat) { mat.map?.dispose?.(); mat.dispose() }
+      })
+    }
+    measureGroup = null
+  }
+  function clearMeasure() { measurePts = []; measureDist = null; clearMeasureObjs() }
+  function toggleMeasure() { measure = !measure; sfx('click'); if (!measure) clearMeasure() }
+
   function toggleAuto() {
     auto = !auto
     sfx('click')
@@ -700,6 +764,8 @@
     if (autoTimer) clearInterval(autoTimer)
     if (raf) cancelAnimationFrame(raf)
     ro?.disconnect()
+    if (renderer) { renderer.domElement.removeEventListener('pointerdown', onPointerDown); renderer.domElement.removeEventListener('pointerup', onPointerUp) }
+    clearMeasure()
     controls?.dispose()
     if (mesh) { mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     if (bgMesh) { bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose() }
@@ -721,6 +787,7 @@
     <span class="mode">MONOCULAR DEPTH · 3D</span>
     <span class="spacer"></span>
     {#if entityCount}<span class="ec caps">◈ {entityCount} ENTIT{entityCount === 1 ? 'Y' : 'IES'}</span>{/if}
+    <button class="ref caps" class:on={measure} onclick={toggleMeasure}>⟺ MEASURE</button>
     <button class="ref caps" class:on={auto} onclick={toggleAuto}>{auto ? '● LIVE' : '○ LIVE'}</button>
     <button class="ref caps" onclick={() => loadScene(true)}>↻ RECAPTURE</button>
     <button class="x caps" onclick={onclose}>✕ CLOSE</button>
@@ -756,7 +823,11 @@
       <span class="mmlabel caps">◹ TOP-DOWN</span>
       <canvas bind:this={mapCv} width="184" height="150"></canvas>
     </div>
-    <div class="hint caps">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
+    {#if measure}
+      <div class="hint caps meas">⟺ MEASURE · CLICK TWO POINTS ON THE SURFACE{#if measureDist !== null} · <b>{measureDist.toFixed(2)} UNITS</b>{/if}</div>
+    {:else}
+      <div class="hint caps">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
+    {/if}
   {/if}
 </div>
 
@@ -798,6 +869,7 @@
   .uasub { color: var(--ink-dim); font-size: 9px; letter-spacing: 0.06em; text-transform: none; }
   .hint { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: var(--ink-ghost);
     font-size: 8px; letter-spacing: 0.2em; pointer-events: none; }
+  .hint.meas { color: var(--cyan); } .hint b { color: #eaf2f6; }
   .minimap { position: absolute; left: 16px; bottom: 16px; padding: 6px; border: 1px solid var(--hairline);
     background: rgba(4,7,10,0.55); backdrop-filter: blur(2px); pointer-events: none; }
   .minimap canvas { display: block; }

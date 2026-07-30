@@ -282,6 +282,15 @@ async function main() {
     composer = buildComposer(renderer, scene, camera, w, h)
   }
 
+  // verify the click-to-measure raycasting hits the mesh and yields a sensible distance
+  try {
+    const rc = new THREE.Raycaster()
+    const pc = c.clone().project(camera)   // mesh-centre in NDC, so the rays actually hit the surface
+    const cast = (dx, dy) => { rc.setFromCamera(new THREE.Vector2(pc.x + dx, pc.y + dy), camera); return rc.intersectObjects([mesh], false)[0] }
+    const h1 = cast(-0.08, 0), h2 = cast(0.08, 0)
+    window.__measure = (h1 && h2) ? { hit: true, dist: +h1.point.distanceTo(h2.point).toFixed(3) } : { hit: false }
+  } catch (e) { window.__measure = { err: String(e) } }
+
   for (let i = 0; i < 6; i++) { if (composer) composer.render(); else renderer.render(scene, camera); await new Promise(rf => requestAnimationFrame(rf)) }
   window.__meshTris = mesh.geometry.index.count / 3
   window.__done = true
