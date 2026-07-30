@@ -1332,8 +1332,12 @@ class Backend:
         # Geometric scene completion: reconstruct the occluded background behind foreground
         # objects as a real surface (inpainted depth + texture), shipped as a second mesh layer.
         bg_rgb = bg_disp = None
-        if self.config.get("spatial.complete", True) and boxes:
-            bg_rgb, bg_disp = spatial.complete_background(rgb_grid, disp01, boxes)
+        if self.config.get("spatial.complete", True):
+            # inpaint behind detector boxes AND depth-derived standing objects, so a background
+            # layer is produced even with no detections (fills seams behind buildings/clutter).
+            fgmask = spatial.foreground_mask(disp01)
+            if boxes or bool(fgmask.any()):
+                bg_rgb, bg_disp = spatial.complete_background(rgb_grid, disp01, boxes, extra_mask=fgmask)
         scene = spatial.encode_scene(
             rgb_grid, disp01, entities, fov=float(self.config.get("spatial.fov_deg", 60.0)),
             cam=src.name, sid=str(sid), ts=time.time() * 1000.0, bg_rgb=bg_rgb, bg_disp01=bg_disp)

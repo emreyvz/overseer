@@ -3,7 +3,13 @@ import base64
 
 import numpy as np
 
-from server.spatial import complete_background, encode_scene, entity_depth, normalize_disparity
+from server.spatial import (
+    complete_background,
+    encode_scene,
+    entity_depth,
+    foreground_mask,
+    normalize_disparity,
+)
 
 
 def test_normalize_disparity_maps_to_unit_range() -> None:
@@ -72,6 +78,33 @@ def test_complete_background_no_boxes_is_identity() -> None:
     rgb = np.zeros((8, 8, 3), np.uint8)
     bg_rgb, bg_disp = complete_background(rgb, disp, [])
     assert np.array_equal(bg_disp, disp) and np.array_equal(bg_rgb, rgb)
+
+
+def test_foreground_mask_flags_near_object_only() -> None:
+    # a near, discrete object (smaller than the ~scene/10 opening kernel) on a far background:
+    # only the object should be flagged; the far background stays clear.
+    disp = np.full((120, 120), 0.2, np.float32)
+    disp[54:66, 54:66] = 0.9        # 12px object, kernel ~13px -> removed by the opening
+    m = foreground_mask(disp)
+    assert m.shape == disp.shape and m.dtype == np.uint8
+    assert m[60, 60] == 255         # inside the near object
+    assert m[5, 5] == 0             # far background is not foreground
+    # a perfectly flat scene has no foreground
+    assert not foreground_mask(np.full((120, 120), 0.5, np.float32)).any()
+
+
+def test_complete_background_extra_mask_fills_without_boxes() -> None:
+    # no detector boxes, but the depth-derived extra_mask still drives inpainting behind the object
+    disp = np.full((40, 40), 0.2, np.float32)
+    disp[10:30, 10:30] = 0.9
+    rgb = np.zeros((40, 40, 3), np.uint8)
+    rgb[10:30, 10:30] = (0, 0, 255)
+    extra = np.zeros((40, 40), np.uint8)
+    extra[10:30, 10:30] = 255
+    bg_rgb, bg_disp = complete_background(rgb, disp, [], extra_mask=extra)
+    assert bg_disp[20, 20] < 0.5           # depth pulled back to background
+    assert bg_rgb[20, 20][2] < 128         # red object inpainted away
+    assert bg_disp[2, 2] == disp[2, 2]     # outside untouched
 
 
 def test_encode_scene_includes_background_layer_when_supplied() -> None:
