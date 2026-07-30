@@ -35,13 +35,29 @@ def entity_depth(disp: np.ndarray, box_xyxy: tuple[float, float, float, float],
     return round((dval - dmin) / (dmax - dmin + 1e-6), 4)
 
 
+def foreground_mask(disp01: np.ndarray, margin: float = 0.08) -> np.ndarray:
+    """Mask (uint8 0/255) of 'standing object' pixels: disparity notably NEARER than the local
+    background level. Estimate the background by a morphological opening (drops near spikes smaller
+    than the kernel), then flag pixels that exceed it by `margin`. Lets the scene behind standing
+    objects be inpainted even when no detector box exists (buildings, poles, foreground clutter)."""
+    h, w = disp01.shape
+    du8 = (np.clip(disp01, 0.0, 1.0) * 255.0).astype(np.uint8)
+    k = max(9, ((min(h, w) // 10) | 1))   # odd kernel ~ a scene fraction
+    bg = cv2.morphologyEx(du8, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    fg = ((du8.astype(np.int16) - bg.astype(np.int16)) > int(margin * 255)).astype(np.uint8) * 255
+    fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))   # drop specks
+    return cv2.dilate(fg, np.ones((3, 3), np.uint8), iterations=2)
+
+
 def complete_background(rgb_grid: np.ndarray, disp01: np.ndarray,
-                        boxes_norm: list[tuple[float, float, float, float]]) -> tuple[np.ndarray, np.ndarray]:
-    """Reconstruct the OCCLUDED background as real geometry. Where a foreground object (a detected
-    person/vehicle box) hides the scene, inpaint BOTH the depth and the texture from the
-    surrounding background, so the wall/floor/scene continues behind it. The frontend renders this
-    as a second mesh layer at its true depth — filling disocclusion holes with a plausible 3D
-    surface (correct parallax), not a flat backdrop. Returns (bg_rgb_bgr, bg_disp01)."""
+                        boxes_norm: list[tuple[float, float, float, float]],
+                        extra_mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Reconstruct the OCCLUDED background as real geometry. Where a foreground object hides the
+    scene — a detected person/vehicle box, and/or the depth-derived `extra_mask` of standing
+    objects — inpaint BOTH the depth and the texture from the surrounding background, so the
+    wall/floor/scene continues behind it. The frontend renders this as a second mesh layer at its
+    true depth — filling disocclusion holes with a plausible 3D surface (correct parallax), not a
+    flat backdrop. Returns (bg_rgb_bgr, bg_disp01)."""
     h, w = disp01.shape
     mask = np.zeros((h, w), np.uint8)
     for (nx1, ny1, nx2, ny2) in boxes_norm:
@@ -49,6 +65,8 @@ def complete_background(rgb_grid: np.ndarray, disp01: np.ndarray,
         x2, y2 = int(nx2 * w), int(ny2 * h)
         if x2 > x1 and y2 > y1:
             mask[max(0, y1):min(h, y2), max(0, x1):min(w, x2)] = 255
+    if extra_mask is not None and extra_mask.shape == mask.shape:
+        mask = cv2.bitwise_or(mask, extra_mask.astype(np.uint8))
     if not mask.any():
         return rgb_grid.copy(), disp01.copy()
     mask = cv2.dilate(mask, np.ones((3, 3), np.uint8), iterations=1)
