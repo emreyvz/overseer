@@ -485,10 +485,9 @@
     const fgDisp = bilateralDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h, 2), fg.rgba, keep, w, h, 3, 0.09, 0.04, 2)
     const bgDisp = bg ? smoothDisp(bg.disp, w, h, 4, 2) : null
 
-    // shared ground de-bow: fit the ground's height trend once so the mesh AND the markers flatten
-    // together (monocular depth bows a flat road upward with distance — this straightens it).
+    // shared ground de-bow: fit the ground's height trend once so the mesh flattens correctly
+    // (monocular depth bows a flat road upward with distance — this straightens it).
     const gy = fitGround(fgDisp, w, h, fx, cx, cy)
-    const deb = (Z: number) => gy ? gy[0] + gy[1] * Z + gy[2] * Z * Z : 0
 
     // full-res texture: a crisp copy of the frame UV-mapped onto the (coarse) mesh
     if (fgTex) { fgTex.dispose(); fgTex = null }
@@ -521,20 +520,16 @@
     }
 
     // entity markers — de-bowed with the same trend so they sit on the flattened ground
-    if (markers) { scene.remove(markers); disposeGroup(markers) }
-    markers = new THREE.Group()
+    // entity positions feed the top-down mini-map only. NO floating 3D labels: sprite billboards
+    // render as flat black rectangles under the post-processing pipeline (and clutter the scene) —
+    // the mini-map dots + the mesh itself already show where things are.
+    if (markers) { scene.remove(markers); disposeGroup(markers); markers = null }
     entityCount = entities.length
     mapPts = []
     for (const e of entities) {
-      const Z = zOf(e.depth)
-      const u = e.cx * w, v = e.cy * h
-      const X = (u - cx) * Z / fx, Y = (-(v - cy) * Z / fx - deb(Z)) * RELIEF + 0.12
-      const spr = makeMarker(e.label || e.cls, CLS_COLOR[e.cls] || '#c9d4dc')
-      spr.position.set(X, Y, -Z)
-      markers.add(spr)
+      const Z = zOf(e.depth), X = (e.cx * w - cx) * Z / fx
       mapPts.push({ x: X, z: -Z, color: CLS_COLOR[e.cls] || '#c9d4dc' })
     }
-    scene.add(markers)
 
     // soft contact shadows: a dark blob on the flattened ground under each entity, so they read
     // as standing ON the surface rather than floating (complements the GTAO crease occlusion).
