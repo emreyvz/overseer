@@ -11,10 +11,13 @@
   }
 }
 </script>
-<style>html,body{margin:0;height:100%;background:#04060a;overflow:hidden}#c{width:100vw;height:100vh;display:block}</style>
+<style>html,body{margin:0;height:100%;background:#04060a;overflow:hidden}#c{width:100vw;height:100vh;display:block}
+#mmwrap{position:absolute;left:16px;bottom:16px;padding:6px;border:1px solid rgba(255,255,255,0.14);background:rgba(4,7,10,0.6)}
+#mm{display:block}#mmlbl{display:block;color:#35e0ff;font:7px monospace;letter-spacing:.18em;margin-bottom:4px}</style>
 </head>
 <body>
 <div id="c"></div>
+<div id="mmwrap"><span id="mmlbl">◹ TOP-DOWN</span><canvas id="mm" width="184" height="150"></canvas></div>
 <script type="module">
 import * as THREE from 'three'
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
@@ -206,6 +209,22 @@ function buildComposer(renderer, scene, camera, w, h) {
   return composer
 }
 
+function drawMM(box, entities, W, fx, cx, camPos, target) {
+  const cv = document.getElementById('mm'); if (!cv) return
+  const g = cv.getContext('2d'), Wd = cv.width, Hd = cv.height
+  g.clearRect(0, 0, Wd, Hd); g.fillStyle = 'rgba(4,7,10,0.72)'; g.fillRect(0, 0, Wd, Hd)
+  const pad = 10, minX = box.min.x, maxX = box.max.x, minZ = box.min.z, maxZ = box.max.z
+  const sc = Math.min((Wd - 2 * pad) / ((maxX - minX) || 1), (Hd - 2 * pad) / ((maxZ - minZ) || 1))
+  const ox = pad + ((Wd - 2 * pad) - sc * (maxX - minX)) / 2, oy = pad + ((Hd - 2 * pad) - sc * (maxZ - minZ)) / 2
+  const toX = (x) => ox + (x - minX) * sc, toY = (z) => oy + (z - minZ) * sc
+  g.strokeStyle = 'rgba(120,224,255,0.30)'; g.strokeRect(toX(minX), toY(minZ), sc * (maxX - minX), sc * (maxZ - minZ))
+  const CLS = { person: '#35e0ff', vehicle: '#ffb038', animal: '#6be675', object: '#c9d4dc', weapon: '#ff3b3b' }
+  for (const e of entities) { const Z = zOf(e.depth), X = (e.cx * W - cx) * Z / fx; g.fillStyle = CLS[e.cls] || '#c9d4dc'; g.beginPath(); g.arc(toX(X), toY(-Z), 3, 0, Math.PI * 2); g.fill() }
+  const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+  const cxp = cl(toX(camPos.x), 2, Wd - 2), cyp = cl(toY(camPos.z), 2, Hd - 2)
+  g.strokeStyle = 'rgba(234,242,246,0.6)'; g.beginPath(); g.moveTo(cxp, cyp); g.lineTo(toX(target.x), toY(target.z)); g.stroke()
+  g.fillStyle = '#eaf2f6'; g.beginPath(); g.arc(cxp, cyp, 3, 0, Math.PI * 2); g.fill()
+}
 async function main() {
   const host = document.getElementById('c')
   const w = host.clientWidth, h = host.clientHeight
@@ -252,6 +271,7 @@ async function main() {
   if (MODE === 'after' || MODE === 'lit') {
     addSky(scene)
     addShadows(scene, s.entities || [], W, fx, cx)
+    drawMM(box, s.entities || [], W, fx, cx, camera.position, c)
     if (lit) {
       // soft key + hemisphere fill + low ambient so geometry catches light and reads as form,
       // without blowing out the already-lit texture (high roughness, modest intensities)
