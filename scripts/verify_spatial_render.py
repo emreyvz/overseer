@@ -52,9 +52,9 @@ def fill_depth(disp, keep):
     return out
 
 
-def smooth(disp):                                # LIGHT: median despeckle + one gentle blur pass
+def smooth(disp):   # median despeckle + edge-preserving bilateral (stand-in for the app's joint bilateral)
     d = cv2.medianBlur(disp.astype(np.float32), 3)
-    return cv2.blur(d, (5, 5))
+    return cv2.bilateralFilter(d, 5, 0.12, 3)
 
 
 def zof(d): return ZNEAR + np.power(1 - d, GAMMA) * (ZFAR - ZNEAR)
