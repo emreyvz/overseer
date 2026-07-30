@@ -55,10 +55,14 @@
                               // but MODERATELY — 1.0 exaggerated the protrusions; the ground stays flat
                               // because its residual is ~0. (0.16 was the old over-flat "photo on floor".)
   const RELIEF_CAP = 2.2      // clamp raw residual height before scaling -> kills shapeless noise spikes
-  const DISP_JUMP = 0.045     // cull triangles that straddle a depth discontinuity (an object's
-                              // silhouette): its 3 disparities differ by more than this. Standing
-                              // objects then get crisp edges instead of smearing down into the ground;
-                              // continuous ground has tiny jumps and stays fully meshed (no gaps).
+  const DISP_JUMP = 0.06      // cull triangles that straddle a depth discontinuity (an object's
+                              // silhouette): its 3 disparities differ by more than this. Loose enough
+                              // that noisy (wet/reflective) ground is NOT punched full of black-dot
+                              // holes; ZRANGE below catches the long stretches this would miss.
+  const ZRANGE = 2.0         // also cull a triangle spanning more than this in metric-ish Z: kills the
+                              // long "back stretches" (a vehicle reaching to the end of the scene) that
+                              // a gradual disparity ramp slips past DISP_JUMP. Flat ground has tiny
+                              // Z-range per triangle, so it stays fully meshed.
   const CLS_COLOR: Record<string, string> = {
     person: '#35e0ff', vehicle: '#ffb038', animal: '#6be675', object: '#c9d4dc', weapon: '#ff3b3b',
   }
@@ -288,16 +292,21 @@
     return out
   }
 
-  // 3x3 median — knocks out isolated depth speckle spikes before the heavy blur.
-  function medianDisp(disp: Float32Array, w: number, h: number, r = 1): Float32Array {
-    const out = new Float32Array(w * h), win: number[] = []
+  // Replace only OUTLIER pixels (a disparity spike deviating from the local median by > thr) with
+  // that median: fills speckle "from the neighbours" without smoothing real detail, so the
+  // depth-jump cull stops punching black-dot holes into a noisy (wet/reflective) ground.
+  function despike(disp: Float32Array, keep: Uint8Array, w: number, h: number, r = 2, thr = 0.03): Float32Array {
+    const out = Float32Array.from(disp), win: number[] = []
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x; if (!keep[i]) continue
       win.length = 0
       for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
         const xx = x + dx, yy = y + dy
-        if (xx >= 0 && xx < w && yy >= 0 && yy < h) win.push(disp[yy * w + xx])
+        if (xx >= 0 && xx < w && yy >= 0 && yy < h && keep[yy * w + xx]) win.push(disp[yy * w + xx])
       }
-      win.sort((p, q) => p - q); out[y * w + x] = win[win.length >> 1]
+      if (win.length < 3) continue
+      win.sort((p, q) => p - q); const med = win[win.length >> 1]
+      if (Math.abs(disp[i] - med) > thr) out[i] = med
     }
     return out
   }
@@ -482,7 +491,7 @@
     // median kills speckle, then an EDGE-AWARE joint-bilateral (guided by the RGB frame) smooths
     // surfaces while keeping object edges crisp — keeps relief intact, no box-blur edge rounding.
     // The depth-discontinuity cull still removes silhouette smears.
-    const fgDisp = bilateralDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h, 2), fg.rgba, keep, w, h, 3, 0.09, 0.04, 2)
+    const fgDisp = bilateralDisp(despike(fillDepth(fg.disp, keep, w, h), keep, w, h), fg.rgba, keep, w, h, 3, 0.09, 0.04, 2)
     const bgDisp = bg ? smoothDisp(bg.disp, w, h, 4, 2) : null
 
     // shared ground de-bow: fit the ground's height trend once so the mesh flattens correctly
@@ -507,7 +516,7 @@
     // continuous ground stays a solid, gap-free surface. Culled boundaries are closed by the solid
     // side-walls (below), so no see-through black behind objects.
     mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, 1e9, 0,
-      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep, dispJump: DISP_JUMP })
+      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep, dispJump: DISP_JUMP, zrange: ZRANGE })
     scene.add(mesh)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
@@ -581,7 +590,7 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number; dim?: number } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number; zrange?: number; dim?: number } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
     const maxT = opt.maxT ?? 0.35, minT = 0.03, dim = opt.dim ?? 1   // dim<1 fades a guessed layer
     const pos: number[] = [], col: number[] = [], uv: number[] = []
@@ -608,13 +617,15 @@
     const edge = new Map<string, number>()
     const bump = (a: number, b: number) => { const k = a < b ? a + '_' + b : b + '_' + a; edge.set(k, (edge.get(k) ?? 0) + 1) }
     const dj = opt.dispJump ?? Infinity   // max disparity spread a triangle may span before it's a
-                                          // silhouette skirt (cut it -> objects don't smear to ground)
+    const zr = opt.zrange ?? Infinity     // silhouette skirt; zr = max Z-span before it's a long stretch
     const tri = (a: number, b: number, c: number) => {
       const va = vidx[a], vb = vidx[b], vc = vidx[c]
       if (va < 0 || vb < 0 || vc < 0) return
       if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > maxlen) return
       const da = disp[a], db = disp[b], dc = disp[c]
       if (Math.max(Math.abs(da - db), Math.abs(db - dc), Math.abs(da - dc)) > dj) return
+      const za = zOf(da), zb = zOf(db), zc = zOf(dc)
+      if (Math.max(za, zb, zc) - Math.min(za, zb, zc) > zr) return   // long back-stretch -> cut
       idx.push(va, vb, vc)
       if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) }
     }
