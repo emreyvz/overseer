@@ -41,8 +41,14 @@
   const MESH_MAXLEN = 0.32    // cull only wildly-stretched triangles; loose so the surface stays
                               // continuous (no torn gaps) — depth smoothing turns jumps into ramps
   const SKYCULL = 0.015       // keep almost everything (fills the far field); drop only pure sky
-  const GROUND_DAMP = 0.16    // flatten height toward the fitted ground plane (verified via the
-                              // offline render harness) — smooth, no near-edge "drape" smears
+  const RELIEF = 1.0          // KEEP full height above the fitted ground trend, so objects (people,
+                              // vehicles, walls) stand up as real volumes — the ground itself
+                              // flattens because its residual is ~0 once the trend is subtracted.
+                              // (Was a 0.16 "damp" that squashed everything flat — a photo on the floor.)
+  const DISP_JUMP = 0.055     // cull triangles that straddle a depth discontinuity (an object's
+                              // silhouette): its 3 disparities differ by more than this. Standing
+                              // objects then get crisp edges instead of smearing down into the ground;
+                              // continuous ground has tiny jumps and stays fully meshed (no gaps).
   const CLS_COLOR: Record<string, string> = {
     person: '#35e0ff', vehicle: '#ffb038', animal: '#6be675', object: '#c9d4dc', weapon: '#ff3b3b',
   }
@@ -312,10 +318,11 @@
     // solid, gap-free surface: clean the silhouette + FILL enclosed holes, inpaint depth into those
     // holes from surrounding surface, then smooth. No black patches in the ground.
     const keep = cleanMask(fg.disp, w, h)
-    // heavy regularisation (verified in the render harness): median kills speckle, strong box blur
-    // makes the surface smooth so no near-edge triangles stretch into smears.
-    const fgDisp = smoothDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h), w, h, 6, 4)
-    const bgDisp = bg ? smoothDisp(bg.disp, w, h, 6, 4) : null
+    // LIGHT regularisation: median kills speckle, a single gentle blur pass takes the stair-step
+    // off the surface — but keeps depth relief intact (heavy blur flattened people/cars into the
+    // ground). The depth-discontinuity cull, not blur, is what removes the silhouette smears.
+    const fgDisp = smoothDisp(medianDisp(fillDepth(fg.disp, keep, w, h), w, h), w, h, 2, 1)
+    const bgDisp = bg ? smoothDisp(bg.disp, w, h, 4, 2) : null
 
     // shared ground de-bow: fit the ground's height trend once so the mesh AND the markers flatten
     // together (monocular depth bows a flat road upward with distance — this straightens it).
@@ -335,10 +342,12 @@
     // foreground as a SOLID: each object is extruded back to the reconstructed background and its
     // silhouette stitched, so it's an opaque, textured VOLUME — not a see-through shell.
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
-    // no maxlen cull on the foreground: the cleaned+hole-filled mask already defines a clean
-    // silhouette, so mesh EVERY interior quad -> a solid, gap-free surface (no black inside).
+    // no world-length cull (that tears far ground into holes); instead cut only triangles that
+    // span a depth discontinuity (DISP_JUMP) -> crisp object silhouettes that stand up, while the
+    // continuous ground stays a solid, gap-free surface. Culled boundaries are closed by the solid
+    // side-walls (below), so no see-through black behind objects.
     mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, 1e9, 0,
-      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep })
+      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep, dispJump: DISP_JUMP })
     scene.add(mesh)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
@@ -355,7 +364,7 @@
     for (const e of entities) {
       const Z = zOf(e.depth)
       const u = e.cx * w, v = e.cy * h
-      const X = (u - cx) * Z / fx, Y = (-(v - cy) * Z / fx - deb(Z)) * GROUND_DAMP
+      const X = (u - cx) * Z / fx, Y = (-(v - cy) * Z / fx - deb(Z)) * RELIEF + 0.12
       const spr = makeMarker(e.label || e.cls, CLS_COLOR[e.cls] || '#c9d4dc')
       spr.position.set(X, Y, -Z)
       markers.add(spr)
@@ -369,7 +378,7 @@
     const vfov = camera!.fov * Math.PI / 180
     const foot = Math.max(size.x, size.z)
     const dist = (foot / 2) / Math.tan(vfov / 2) * 1.1 + size.y
-    const yaw = 20 * Math.PI / 180, pitch = 22 * Math.PI / 180
+    const yaw = 22 * Math.PI / 180, pitch = 16 * Math.PI / 180   // lower angle -> standing objects read as 3D
     if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.15; controls.maxDistance = dist * 5 }
     camera!.position.set(
       c.x + dist * Math.sin(yaw) * Math.cos(pitch),
@@ -396,7 +405,7 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
     const maxT = opt.maxT ?? 0.35, minT = 0.03
     const pos: number[] = [], col: number[] = [], uv: number[] = []
@@ -422,10 +431,14 @@
       Math.hypot(pos[va * 3] - pos[vb * 3], pos[va * 3 + 1] - pos[vb * 3 + 1], pos[va * 3 + 2] - pos[vb * 3 + 2])
     const edge = new Map<string, number>()
     const bump = (a: number, b: number) => { const k = a < b ? a + '_' + b : b + '_' + a; edge.set(k, (edge.get(k) ?? 0) + 1) }
+    const dj = opt.dispJump ?? Infinity   // max disparity spread a triangle may span before it's a
+                                          // silhouette skirt (cut it -> objects don't smear to ground)
     const tri = (a: number, b: number, c: number) => {
       const va = vidx[a], vb = vidx[b], vc = vidx[c]
       if (va < 0 || vb < 0 || vc < 0) return
       if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > maxlen) return
+      const da = disp[a], db = disp[b], dc = disp[c]
+      if (Math.max(Math.abs(da - db), Math.abs(db - dc), Math.abs(da - dc)) > dj) return
       idx.push(va, vb, vc)
       if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) }
     }
@@ -435,10 +448,10 @@
         tri(tl, bl, tr); tri(tr, bl, br)
       }
     }
-    if (opt.flattenCoef) {   // de-bow + damp height toward the ground plane -> smooth, no drapes
-      const [a, b, c] = opt.flattenCoef
-      for (let j = 0; j < nF; j++) { const Z = vz[j]; pos[j * 3 + 1] = (pos[j * 3 + 1] - (a + b * Z + c * Z * Z)) * GROUND_DAMP }
-    }
+    if (opt.flattenCoef) {   // de-bow: subtract the fitted ground trend so the GROUND flattens to a
+      const [a, b, c] = opt.flattenCoef   // plane, while each vertex keeps its RELIEF above that
+      for (let j = 0; j < nF; j++) { const Z = vz[j]; pos[j * 3 + 1] = (pos[j * 3 + 1] - (a + b * Z + c * Z * Z)) * RELIEF }
+    }                                      // plane -> objects (people, vehicles) rise as real volumes
     if (solid) {
       for (let j = 0; j < nF; j++) {   // back vertices: extruded to the background, capped
         const T = bgdisp ? Math.max(minT, Math.min(maxT, zOf(bgdisp[vpix[j]]) - vz[j])) : Math.min(maxT, minT + 0.12)
