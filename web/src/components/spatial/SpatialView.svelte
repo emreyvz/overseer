@@ -514,7 +514,9 @@
     // thin completed-background layer behind everything, filling the far field (correct parallax).
     if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
     if (bg && bgDisp) {
-      bgMesh = layerMesh(bgDisp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.04, { flattenCoef: gy, dim: 0.6 })
+      // dispJump cull + a firm push-back so the completion layer stays BEHIND the foreground and its
+      // ground-fill boundary can't stretch a blurry smear in front of objects (e.g. a car).
+      bgMesh = layerMesh(bgDisp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.15, { flattenCoef: gy, dim: 0.6, dispJump: DISP_JUMP })
       scene.add(bgMesh)
     }
 
