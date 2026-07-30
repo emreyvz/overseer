@@ -10,6 +10,8 @@
   import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
   import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js'
   import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
+  import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
+  import { VignetteShader } from 'three/addons/shaders/VignetteShader.js'
   import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
   import { onDestroy, onMount, tick } from 'svelte'
   import { api } from '../../lib/api'
@@ -67,6 +69,8 @@
   let mesh: THREE.Mesh | null = null           // foreground: the directly-observed surface
   let bgMesh: THREE.Mesh | null = null         // completed background reconstructed behind objects
   let markers: THREE.Group | null = null
+  let shadows: THREE.Group | null = null       // soft contact-shadow blobs grounding entities
+  let shadowTex: THREE.Texture | null = null   // shared radial blob (cached across rebuilds)
   let fgTex: THREE.Texture | null = null       // full-res texture map for the foreground mesh
   let raf = 0
   let ro: ResizeObserver | null = null
@@ -141,6 +145,11 @@
     composer.addPass(gtao)
     composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.75, 0.8))
     composer.addPass(new OutputPass())
+    // subtle vignette LAST (sRGB/LDR): mixing toward black focuses the frame. Before the tone-map
+    // it would feed negatives to ACES and orange the corners.
+    const vig = new ShaderPass(VignetteShader)
+    vig.uniforms.offset.value = 1.0; vig.uniforms.darkness.value = 0.85
+    composer.addPass(vig)
   }
 
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -417,13 +426,28 @@
     }
     scene.add(markers)
 
+    // soft contact shadows: a dark blob on the flattened ground under each entity, so they read
+    // as standing ON the surface rather than floating (complements the GTAO crease occlusion).
+    if (shadows) { scene.remove(shadows); disposeShadows() }
+    shadows = new THREE.Group()
+    const sblob = shadowBlobTex()
+    for (const e of entities) {
+      const Z = zOf(e.depth), X = (e.cx * w - cx) * Z / fx
+      const r = e.cls === 'vehicle' ? 1.1 : e.cls === 'person' ? 0.5 : 0.7
+      const sm = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({ map: sblob, transparent: true, depthWrite: false, opacity: 0.9 }))
+      sm.rotation.x = -Math.PI / 2; sm.scale.set(r * 2, r * 2, 1); sm.position.set(X, 0.02, -Z)
+      shadows.add(sm)
+    }
+    scene.add(shadows)
+
     // framing: the ground is now flat (X-Z plane), so establish from ABOVE at a 3/4 angle that
     // reveals the layout, framed to the ground footprint.
     const box = new THREE.Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position') as THREE.BufferAttribute)
     const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
     const vfov = camera!.fov * Math.PI / 180
     const foot = Math.max(size.x, size.z)
-    const dist = (foot / 2) / Math.tan(vfov / 2) * 1.1 + size.y
+    const dist = (foot / 2) / Math.tan(vfov / 2) * 0.92 + size.y * 0.5   // tighter default frame
     const yaw = 22 * Math.PI / 180, pitch = 16 * Math.PI / 180   // lower angle -> standing objects read as 3D
     if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.15; controls.maxDistance = dist * 5 }
     camera!.position.set(
@@ -555,6 +579,25 @@
     })
   }
 
+  function shadowBlobTex(): THREE.Texture {
+    if (shadowTex) return shadowTex
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128
+    const g = cv.getContext('2d')!
+    const grad = g.createRadialGradient(64, 64, 3, 64, 64, 64)
+    grad.addColorStop(0, 'rgba(0,0,0,0.6)'); grad.addColorStop(0.6, 'rgba(0,0,0,0.28)'); grad.addColorStop(1, 'rgba(0,0,0,0)')
+    g.fillStyle = grad; g.fillRect(0, 0, 128, 128)
+    shadowTex = new THREE.CanvasTexture(cv); shadowTex.colorSpace = THREE.SRGBColorSpace
+    return shadowTex
+  }
+  // dispose shadow meshes (geometry + material) but KEEP the shared blob texture (cached)
+  function disposeShadows() {
+    shadows?.traverse((o) => {
+      const m = o as THREE.Mesh
+      if (m.geometry) m.geometry.dispose()
+      if (m.material) (m.material as THREE.Material).dispose()
+    })
+  }
+
   function toggleAuto() {
     auto = !auto
     sfx('click')
@@ -579,8 +622,10 @@
     if (mesh) { mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose() }
     if (bgMesh) { bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose() }
     if (markers) disposeGroup(markers)
+    if (shadows) disposeShadows()
     if (sky) { sky.geometry.dispose(); (sky.material as THREE.Material).dispose() }
     fgTex?.dispose()
+    shadowTex?.dispose()
     composer?.dispose()
     renderer?.dispose()
     if (renderer?.domElement && host?.contains(renderer.domElement)) host.removeChild(renderer.domElement)

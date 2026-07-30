@@ -21,6 +21,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
+import { VignetteShader } from 'three/addons/shaders/VignetteShader.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
 
 const P = new URLSearchParams(location.search)
@@ -134,6 +136,30 @@ function addSky(scene) {
   const sky = new THREE.Mesh(new THREE.SphereGeometry(140, 32, 16), mat)
   scene.add(sky); return sky
 }
+function addGrid(scene, cx, cz, foot) {
+  const g = new THREE.GridHelper(foot * 1.35, 28, 0x35e0ff, 0x2b3a44)
+  g.position.set(cx, 0.006, cz)
+  g.material.transparent = true; g.material.opacity = 0.13; g.material.depthWrite = false
+  scene.add(g); return g
+}
+function blobTexture() {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128
+  const g = cv.getContext('2d')
+  const grad = g.createRadialGradient(64, 64, 3, 64, 64, 64)
+  grad.addColorStop(0, 'rgba(0,0,0,0.6)'); grad.addColorStop(0.6, 'rgba(0,0,0,0.28)'); grad.addColorStop(1, 'rgba(0,0,0,0)')
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128)
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t
+}
+function addShadows(scene, entities, W, fx, cx) {
+  if (!entities || !entities.length) return
+  const tex = blobTexture(), geo = new THREE.PlaneGeometry(1, 1)
+  for (const e of entities) {
+    const Z = zOf(e.depth), X = (e.cx * W - cx) * Z / fx, r = (e.cls === 'vehicle' ? 1.1 : e.cls === 'person' ? 0.5 : 0.7)
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.9 }))
+    m.rotation.x = -Math.PI / 2; m.scale.set(r * 2, r * 2, 1); m.position.set(X, 0.02, -Z)
+    scene.add(m)
+  }
+}
 function buildComposer(renderer, scene, camera, w, h) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.15
@@ -148,6 +174,10 @@ function buildComposer(renderer, scene, camera, w, h) {
   composer.addPass(gtao)
   composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.35, 0.75, 0.8))
   composer.addPass(new OutputPass())
+  // vignette LAST, in sRGB/LDR: mixing toward black (darkness<1) — if run before ACES it feeds
+  // negatives to the tone-mapper and the corners turn orange.
+  const vig = new ShaderPass(VignetteShader); vig.uniforms.offset.value = 1.0; vig.uniforms.darkness.value = 0.85
+  composer.addPass(vig)
   return composer
 }
 
@@ -188,7 +218,7 @@ async function main() {
   const box = new THREE.Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position'))
   const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
   const vfov = camera.fov * Math.PI / 180, foot = Math.max(size.x, size.z)
-  const dist = (foot / 2) / Math.tan(vfov / 2) * 1.1 + size.y
+  const dist = (foot / 2) / Math.tan(vfov / 2) * 0.92 + size.y * 0.5
   const yaw = 22 * Math.PI / 180, pitch = 16 * Math.PI / 180
   camera.position.set(c.x + dist * Math.sin(yaw) * Math.cos(pitch), c.y + dist * Math.sin(pitch), c.z + dist * Math.cos(yaw) * Math.cos(pitch))
   camera.lookAt(c); camera.updateProjectionMatrix()
@@ -196,6 +226,7 @@ async function main() {
   let composer = null
   if (MODE === 'after' || MODE === 'lit') {
     addSky(scene)
+    addShadows(scene, s.entities || [], W, fx, cx)
     if (lit) {
       // soft key + hemisphere fill + low ambient so geometry catches light and reads as form,
       // without blowing out the already-lit texture (high roughness, modest intensities)
