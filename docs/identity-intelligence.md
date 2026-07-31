@@ -62,8 +62,11 @@ new persistent layer gives it a durable memory:
   denoise + CLAHE local contrast + multi-scale unsharp. Frames that do not align above a correlation
   floor are rejected, so **the result is never worse than a good zoom**: a burst of near-identical
   crops (a plate across frames) genuinely fuses (`method: multiframe`), while disparate crops fall
-  back to a strong single-frame enhance (`method: single`). A learned face/plate super-resolution
-  model (GFPGAN / Real-ESRGAN) would be the next step for dramatic gains, at the cost of a download.
+  back to fusing the sharpest one. The fused (low-res) image is then upscaled by a **learned
+  super-resolution model** (Real-ESRGAN's ~5 MB compact generator, vendored in `server/sr_model.py`
+  and run via torch/CUDA, weights auto-downloaded once) which genuinely reconstructs detail
+  (`method: sr`); if torch/weights are unavailable it degrades to a classical Lanczos + denoise +
+  CLAHE + multi-scale unsharp enhance. Config `reconstruct.super_resolution`.
 - **Crop sources:** plate crops are buffered per track in `LivePlateReader` (previously read once and
   thrown away) and re-OCR'd after fusion; a subject's distinct sighting crops feed subject
   reconstruction.

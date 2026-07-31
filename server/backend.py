@@ -211,6 +211,15 @@ class Backend:
             except Exception:  # noqa: BLE001
                 self.gait_tracker = None
         self._gait_recorded: dict[str, float] = {}   # track key -> last gait persist ts (throttle)
+        # learned super-resolution for photo reconstruction (feature 7); lazy, downloads once, degrades
+        # to the classical enhancement if torch/weights are unavailable.
+        self._sr = None
+        if bool(self.config.get("reconstruct.super_resolution", True)):
+            try:
+                from .sr_model import SuperResolver
+                self._sr = SuperResolver(models_dir="models")
+            except Exception:  # noqa: BLE001
+                self._sr = None
         self._last_handraise = 0.0
         self._last_weapon = 0.0
         self._ooi_lost: dict[str, bool] = {}
@@ -1066,7 +1075,7 @@ class Backend:
         if len(crops) < 2:
             return {"image": None, "reason": "not_enough_frames", "frames_offered": len(crops)}
         from .reconstruct import reconstruct as _recon
-        res = _recon(crops, scale=2.0)
+        res = _recon(crops, scale=2.0, sr=self._sr)
         if res is None:
             return {"image": None, "reason": "fusion_failed", "frames_offered": len(crops)}
         ok, buf = cv2.imencode(".jpg", res["image"], [int(cv2.IMWRITE_JPEG_QUALITY), 94])

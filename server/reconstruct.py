@@ -77,7 +77,8 @@ def _finalize(img: np.ndarray) -> np.ndarray:
 
 
 def reconstruct(crops: list[np.ndarray], *, scale: float = 2.0, max_frames: int = 16,
-                min_frames: int = 2, min_corr: float = 0.72, enhance: bool = True) -> dict | None:
+                min_frames: int = 2, min_corr: float = 0.72, enhance: bool = True,
+                sr=None) -> dict | None:
     """Fuse a burst of crops of the same subject/plate into one super-resolved image.
 
     Args:
@@ -103,11 +104,11 @@ def reconstruct(crops: list[np.ndarray], *, scale: float = 2.0, max_frames: int 
               sorted(valid, key=lambda c: (sharpness(c), c.shape[0] * c.shape[1]), reverse=True)[:max_frames]]
     ref = ranked[0]
     rh, rw = ref.shape[:2]
-    out_w, out_h = max(16, int(round(rw * scale))), max(16, int(round(rh * scale)))
-
     ref_gray = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
-    ref_up = cv2.resize(ref, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
-    stack: list[np.ndarray] = [ref_up.astype(np.float32)]
+    # align + fuse at the (low) working resolution; median rejects occluders/outliers and denoises.
+    # Frames that align below min_corr are dropped, so disparate crops fall back to the reference and
+    # the result is never worse than a plain zoom.
+    stack: list[np.ndarray] = [ref.astype(np.float32)]
     crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 1e-4)
     for mov in ranked[1:]:
         mov_r = cv2.resize(mov, (rw, rh), interpolation=cv2.INTER_AREA) if mov.shape[:2] != (rh, rw) else mov
@@ -119,23 +120,31 @@ def reconstruct(crops: list[np.ndarray], *, scale: float = 2.0, max_frames: int 
             continue
         if not np.isfinite(cc) or float(cc) < min_corr or not np.all(np.isfinite(warp)):
             continue
-        warp[:, 2] *= scale   # same affine at `scale`x resolution: translation scales, linear part stays
-        mov_up = cv2.resize(mov_r, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
-        warped = cv2.warpAffine(mov_up, warp, (out_w, out_h),
+        warped = cv2.warpAffine(mov_r, warp, (rw, rh),
                                 flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REFLECT)
         stack.append(warped.astype(np.float32))
+    fused_low = np.median(np.stack(stack, axis=0), axis=0).astype(np.uint8)
 
-    arr = np.stack(stack, axis=0)
-    # robust fuse: median rejects occluders/outliers; with well-aligned frames it also denoises. Only
-    # frames that aligned above min_corr are here, so disparate crops fall back to just the reference
-    # (single-frame enhance) and the result is never worse than a plain zoom.
-    fused = np.median(arr, axis=0).astype(np.uint8)
-    if enhance:
-        fused = _finalize(fused)   # denoise + local-contrast + multi-scale unsharp
+    # upscale: a learned super-resolution model (Real-ESRGAN) genuinely reconstructs detail; without
+    # it, Lanczos + the classical finalize (denoise + CLAHE + multi-scale unsharp).
+    used_sr = False
+    out = None
+    if enhance and sr is not None:
+        try:
+            if sr.available():
+                out = sr.enhance(fused_low)
+                used_sr = out is not None
+        except Exception:  # noqa: BLE001
+            out = None
+    if out is None:
+        out_w, out_h = max(16, int(round(rw * scale))), max(16, int(round(rh * scale)))
+        out = cv2.resize(fused_low, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+        if enhance:
+            out = _finalize(out)
 
     return {
-        "image": fused,
-        "method": "multiframe" if len(stack) > 1 else "single",
+        "image": out,
+        "method": "sr" if used_sr else ("multiframe" if len(stack) > 1 else "single"),
         "frames_used": len(stack),
         "frames_offered": len(valid),
     }
