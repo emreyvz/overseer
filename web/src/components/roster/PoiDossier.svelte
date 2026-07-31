@@ -219,12 +219,17 @@
     <!-- HERO -->
     <section class="hero">
       <div class="portrait" class:livef={live}>
-        {#if entry.snapshot}<img src={heroSrc} alt="" />{:else}<div class="noimg caps">NO IMAGE ON FILE</div>{/if}
+        {#if recon?.image}<img class="clarified" src={`data:image/jpeg;base64,${recon.image}`} alt="clarified" />
+        {:else if entry.snapshot}<img src={heroSrc} alt="" />
+        {:else}<div class="noimg caps">NO IMAGE ON FILE</div>{/if}
         <span class="ret tl"></span><span class="ret tr"></span><span class="ret bl"></span><span class="ret br"></span>
         <span class="reticle"></span>
         <span class="lock caps">LOCK</span>
+        {#if reconBusy}<span class="portscan"></span>{/if}
+        {#if recon?.image}<span class="srbadge caps">◈ {recon.method === 'sr' ? 'AI SUPER-RES' : recon.method === 'multiframe' ? 'FUSED ×' + recon.frames_used : 'CLARIFIED'}</span>{/if}
         {#if watched}<span class="bolo caps">◉ BOLO · WATCHED</span>{/if}
-        {#if entry.snapshot}<button class="cut caps" onclick={() => (cutout = !cutout)}>{cutout ? 'RESTORE BG' : 'ISOLATE'}</button>{/if}
+        {#if recon?.image}<button class="cut caps" onclick={() => (recon = null)}>× ORIGINAL</button>
+        {:else if entry.snapshot}<button class="cut caps" onclick={() => (cutout = !cutout)}>{cutout ? 'RESTORE BG' : 'ISOLATE'}</button>{/if}
         {#if camByName(entry.cam)}<button class="s3d caps" onclick={() => spatialOpen.set(camByName(entry.cam)!.id)} title="Reconstruct this subject's scene in 3D">⛶ 3D</button>{/if}
       </div>
 
@@ -437,6 +442,15 @@
     box-shadow: 0 30px 70px rgba(0,0,0,0.6); animation: portin 640ms 120ms cubic-bezier(0.16, 1, 0.3, 1) both; }
   @keyframes portin { from { opacity: 0; transform: scale(1.06); } }
   .portrait img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(0.35) contrast(1.08) brightness(1.02); }
+  .portrait img.clarified { filter: contrast(1.04) saturate(1.06); animation: clarin 420ms ease both; }
+  @keyframes clarin { from { opacity: 0.2; filter: blur(6px) contrast(1.04); } to { opacity: 1; filter: blur(0) contrast(1.04) saturate(1.06); } }
+  .srbadge { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 3;
+    padding: 3px 12px; background: var(--cyan); color: #04070a; font-size: 8px; letter-spacing: 0.18em; font-weight: 700;
+    box-shadow: 0 0 14px rgba(56,208,227,0.5); }
+  .portscan { position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    background: linear-gradient(transparent, rgba(56,208,227,0.24), transparent); background-size: 100% 42%;
+    background-repeat: no-repeat; animation: portscan 1.1s linear infinite; }
+  @keyframes portscan { 0% { background-position: 0 -42%; } 100% { background-position: 0 142%; } }
   .portrait::after { content: ''; position: absolute; left: 0; right: 0; height: 22%; pointer-events: none;
     background: linear-gradient(transparent, rgba(56,208,227,0.22), transparent); animation: pscan 1400ms 260ms ease-out both; }
   @keyframes pscan { from { transform: translateY(-25%); } to { transform: translateY(460%); opacity: 0; } }
