@@ -40,26 +40,12 @@ def _valid_crops(crops: list[np.ndarray]) -> list[np.ndarray]:
     return out
 
 
-def _align_to(ref_gray: np.ndarray, mov_bgr: np.ndarray, mov_gray: np.ndarray,
-              size: tuple[int, int]) -> tuple[np.ndarray, float] | None:
-    """Warp `mov` onto `ref` with ECC (affine). Returns (warped_bgr, correlation) or None on failure.
-
-    The correlation is the alignment quality in [0,1]; the caller drops poorly aligned frames so a
-    mismatched crop can never smear the fusion.
-    """
-    w, h = size
-    warp = np.eye(2, 3, dtype=np.float32)
-    crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 1e-4)
-    try:
-        cc, warp = cv2.findTransformECC(ref_gray, mov_gray, warp, cv2.MOTION_AFFINE, crit, None, 5)
-    except cv2.error:
-        return None
-    if not np.isfinite(cc) or not np.all(np.isfinite(warp)):
-        return None
-    warped = cv2.warpAffine(mov_bgr, warp, (w, h),
-                            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
-                            borderMode=cv2.BORDER_REFLECT)
-    return warped, float(cc)
+def _cap(img: np.ndarray, maxside: int) -> np.ndarray:
+    """Downscale so the longest side <= maxside (keeps alignment fast; the upscale re-adds size)."""
+    h, w = img.shape[:2]
+    s = maxside / max(h, w)
+    return img if s >= 1.0 else cv2.resize(img, (max(1, int(w * s)), max(1, int(h * s))),
+                                           interpolation=cv2.INTER_AREA)
 
 
 def _unsharp(img: np.ndarray, amount: float = 0.6, radius: float = 1.2) -> np.ndarray:
@@ -67,8 +53,31 @@ def _unsharp(img: np.ndarray, amount: float = 0.6, radius: float = 1.2) -> np.nd
     return cv2.addWeighted(img, 1.0 + amount, blur, -amount, 0)
 
 
+_FINAL_CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)) if cv2 is not None else None
+
+
+def _finalize(img: np.ndarray) -> np.ndarray:
+    """Strong-but-safe enhancement of the fused/selected image: edge-preserving denoise so sharpening
+    does not amplify grain, local-contrast (CLAHE) on luma to reveal faint detail, then multi-scale
+    unsharp (fine + coarse) so both fine texture and larger structure crisp up. Dark crops also get
+    the app's low-light lift."""
+    try:
+        out = cv2.bilateralFilter(img, 5, 45, 45)                 # denoise, keep edges
+        yuv = cv2.cvtColor(out, cv2.COLOR_BGR2YUV)
+        yuv[:, :, 0] = _FINAL_CLAHE.apply(yuv[:, :, 0])
+        out = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
+        if float(out.mean()) < 90.0:
+            from ai.yolo import _enhance_lowlight
+            out = _enhance_lowlight(out, float(out.mean()))
+        out = _unsharp(out, amount=0.75, radius=1.0)              # fine detail
+        out = _unsharp(out, amount=0.35, radius=2.6)              # larger structure
+        return out
+    except Exception:  # noqa: BLE001
+        return _unsharp(img)
+
+
 def reconstruct(crops: list[np.ndarray], *, scale: float = 2.0, max_frames: int = 16,
-                min_frames: int = 2, min_corr: float = 0.72) -> dict | None:
+                min_frames: int = 2, min_corr: float = 0.72, enhance: bool = True) -> dict | None:
     """Fuse a burst of crops of the same subject/plate into one super-resolved image.
 
     Args:
@@ -86,39 +95,43 @@ def reconstruct(crops: list[np.ndarray], *, scale: float = 2.0, max_frames: int 
     if len(valid) < max(1, min_frames):
         return None
 
-    # rank by sharpness; the sharpest, largest crop is the alignment reference
-    ranked = sorted(valid, key=lambda c: (sharpness(c), c.shape[0] * c.shape[1]), reverse=True)[:max_frames]
+    # rank by sharpness, then cap the working resolution: ECC alignment runs on the small crops
+    # (fast) and the resulting affine is scaled and applied to the upscaled frame — aligning at full
+    # 2x resolution is what made this slow.
+    CAP = 256
+    ranked = [_cap(c, CAP) for c in
+              sorted(valid, key=lambda c: (sharpness(c), c.shape[0] * c.shape[1]), reverse=True)[:max_frames]]
     ref = ranked[0]
     rh, rw = ref.shape[:2]
     out_w, out_h = max(16, int(round(rw * scale))), max(16, int(round(rh * scale)))
 
-    ref_up = cv2.resize(ref, (out_w, out_h), interpolation=cv2.INTER_CUBIC)
-    ref_gray = cv2.cvtColor(ref_up, cv2.COLOR_BGR2GRAY)
-
+    ref_gray = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
+    ref_up = cv2.resize(ref, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
     stack: list[np.ndarray] = [ref_up.astype(np.float32)]
+    crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 1e-4)
     for mov in ranked[1:]:
-        mov_up = cv2.resize(mov, (out_w, out_h), interpolation=cv2.INTER_CUBIC)
-        mov_gray = cv2.cvtColor(mov_up, cv2.COLOR_BGR2GRAY)
-        res = _align_to(ref_gray, mov_up, mov_gray, (out_w, out_h))
-        if res is None:
+        mov_r = cv2.resize(mov, (rw, rh), interpolation=cv2.INTER_AREA) if mov.shape[:2] != (rh, rw) else mov
+        warp = np.eye(2, 3, dtype=np.float32)
+        try:
+            cc, warp = cv2.findTransformECC(ref_gray, cv2.cvtColor(mov_r, cv2.COLOR_BGR2GRAY),
+                                            warp, cv2.MOTION_AFFINE, crit, None, 5)
+        except cv2.error:
             continue
-        warped, corr = res
-        if corr >= min_corr:
-            stack.append(warped.astype(np.float32))
+        if not np.isfinite(cc) or float(cc) < min_corr or not np.all(np.isfinite(warp)):
+            continue
+        warp[:, 2] *= scale   # same affine at `scale`x resolution: translation scales, linear part stays
+        mov_up = cv2.resize(mov_r, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+        warped = cv2.warpAffine(mov_up, warp, (out_w, out_h),
+                                flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REFLECT)
+        stack.append(warped.astype(np.float32))
 
     arr = np.stack(stack, axis=0)
     # robust fuse: median rejects occluders/outliers; with well-aligned frames it also denoises. Only
     # frames that aligned above min_corr are here, so disparate crops fall back to just the reference
     # (single-frame enhance) and the result is never worse than a plain zoom.
     fused = np.median(arr, axis=0).astype(np.uint8)
-
-    if float(fused.mean()) < 90.0:   # reuse the app's low-light lift for dark night crops
-        try:
-            from ai.yolo import _enhance_lowlight
-            fused = _enhance_lowlight(fused, float(fused.mean()))
-        except Exception:  # noqa: BLE001
-            pass
-    fused = _unsharp(fused)
+    if enhance:
+        fused = _finalize(fused)   # denoise + local-contrast + multi-scale unsharp
 
     return {
         "image": fused,
