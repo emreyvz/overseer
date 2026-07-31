@@ -26,7 +26,6 @@
   import Archive from './components/modes/Archive.svelte'
   import Roster from './components/modes/Roster.svelte'
   import Case from './components/modes/Case.svelte'
-  import Dossiers from './components/modes/Dossiers.svelte'
   import ZoneEditor from './components/pov/ZoneEditor.svelte'
   import ObjectRegister from './components/pov/ObjectRegister.svelte'
   import AlertRules from './components/AlertRules.svelte'
@@ -39,7 +38,7 @@
   // the 3D engine only loads when the operator actually opens the spatial view.
   const SpatialView = () => import('./components/spatial/SpatialView.svelte')
 
-  const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case', y: 'dossiers' }
+  const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case' }
 
   onMount(() => { startZoneEngine(); startAnomalyEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts() } })
 
@@ -181,7 +180,6 @@
   {#if $mode === 'archive'}<Archive />{/if}
   {#if $mode === 'roster'}<Roster />{/if}
   {#if $mode === 'case'}<Case />{/if}
-  {#if $mode === 'dossiers'}<Dossiers />{/if}
   {#if $zoneEditor}<ZoneEditor />{/if}
   {#if $objectRegister}<ObjectRegister />{/if}
   {#if $alertRules}<AlertRules />{/if}

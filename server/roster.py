@@ -150,6 +150,8 @@ class SessionRoster:
                 "attrs": e["attrs"], "obs": e["obs"], "cam": e.get("cam"),
                 "first_cam": e.get("first_cam"), "trail": trail, "clip": e.get("clip"),
                 "watched": bool(e.get("watched")),
+                # link to the persistent long-term subject (features 5/6/7) if one was recorded
+                "subject_uid": e.get("subject_uid"), "subject_flags": e.get("subject_flags", []),
                 "first_ts": e["first_ts"] * 1000, "last_ts": e["last_ts"] * 1000}
 
     def list(self) -> list[dict]:

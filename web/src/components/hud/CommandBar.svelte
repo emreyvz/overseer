@@ -12,7 +12,6 @@
 
   const MODE_WORDS: Record<string, Mode> = {
     forensic: 'forensic', archive: 'archive', pov: 'pov', roster: 'roster', case: 'case', cases: 'case',
-    dossiers: 'dossiers', dossier: 'dossiers',
   }
 
   interface Sug { v: string; d: string }
@@ -23,7 +22,6 @@
     { v: 'forensic', d: 'FORENSIC SEARCH' },
     { v: 'watchlist', d: 'WATCHLIST · TARGETS' },
     { v: 'roster', d: 'ROSTER · PEOPLE & VEHICLES' },
-    { v: 'dossiers', d: 'IDENTITY DOSSIERS · REPEAT VISITORS · GAIT · RECONSTRUCT' },
     { v: 'ai', d: 'AI ASSISTANT · ASK / SEARCH' },
     { v: 'suggestions', d: 'SMART SUGGESTIONS · RECOMMENDATIONS' },
     { v: 'spatial', d: 'SPATIAL 3D SCENE · DEPTH RECONSTRUCTION' },

@@ -146,8 +146,12 @@
   {/if}
 
   {#if selected}
-    <PoiDossier entry={selected} {now} onclose={() => (selected = null)}
-      onopen={(id) => { const e = entries.find((x) => x.id === id); if (e) selected = e }} />
+    <!-- keyed on the subject id so navigating via the relationship network remounts the profile,
+         replaying its cinematic entrance as an animated transition (a refresh keeps the same id) -->
+    {#key selected.id}
+      <PoiDossier entry={selected} {now} onclose={() => (selected = null)}
+        onopen={(id) => { const e = entries.find((x) => x.id === id); if (e) selected = e }} />
+    {/key}
   {/if}
 </section>
 

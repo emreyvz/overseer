@@ -73,6 +73,27 @@
     assocFor = id
     watchLocal = null; superUrl = null   // reset per subject
   })
+
+  // long-term dossier + photo reconstruction (features 5/6/7), keyed to the persistent subject id
+  let dossier = $state<import('../../lib/api').Dossier | null>(null)
+  let recon = $state<import('../../lib/api').Reconstruction | null>(null)
+  let reconBusy = $state(false)
+  let dossierFor: number | null | undefined
+  $effect(() => {
+    const uid = entry.subject_uid ?? null
+    if (uid === dossierFor) return
+    dossierFor = uid
+    dossier = null; recon = null
+    if (uid != null) api.subjectDossier(uid).then((r) => { dossier = r.dossier }).catch(() => {})
+  })
+  async function reconstruct() {
+    if (entry.subject_uid == null || reconBusy) return
+    reconBusy = true; recon = null; sfx('sonar')
+    try { recon = await api.subjectReconstruct(entry.subject_uid) } catch { recon = { image: null, reason: 'error' } }
+    reconBusy = false
+  }
+  const maxHour = $derived(dossier ? Math.max(1, ...dossier.hour_histogram) : 1)
+  const num = (v: unknown) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v)
   async function findAcross() {
     if (finding || !photo) return
     finding = true; sfx('sonar')
@@ -325,6 +346,43 @@
         {/each}
       </div>
       </div>
+
+      <!-- LONG-TERM DOSSIER + PHOTO RECONSTRUCTION (features 5/6/7) -->
+      <div class="dossier">
+        <div class="dhead caps">
+          <span class="dt">◇ LONG-TERM IDENTITY</span>
+          {#each entry.subject_flags ?? [] as f}<span class="dflag">{f.replace('_', ' ')}</span>{/each}
+        </div>
+        {#if entry.subject_uid == null}
+          <div class="dempty caps">BUILDING LONG-TERM PROFILE…</div>
+        {:else}
+          <div class="dgrid">
+            <div class="drecon">
+              <div class="rphoto">
+                {#if recon?.image}<img src={'data:image/jpeg;base64,' + recon.image} alt="reconstruction" />
+                {:else if photo}<img src={photo} alt="" />
+                {:else}<div class="noimg caps">NO IMAGE</div>{/if}
+                {#if reconBusy}<span class="rscan"></span>{/if}
+              </div>
+              <button class="rbtn caps" onclick={reconstruct} disabled={reconBusy}>
+                {reconBusy ? 'CLARIFYING…' : recon?.image ? '↻ RE-CLARIFY' : '✧ CLARIFY PHOTO'}
+              </button>
+              {#if recon}<span class="rmsg caps">{recon.image ? (recon.method === 'multiframe' ? `FUSED ${recon.frames_used} FRAMES` : 'ENHANCED') : (recon.reason === 'not_enough_frames' ? `NEED MORE CROPS (${recon.frames_offered ?? 0})` : recon.reason)}</span>{/if}
+            </div>
+            <div class="dinfo">
+              {#if dossier}
+                <div class="drow caps"><span class="dk">SEEN</span><span class="dv">{dossier.distinct_days} DAYS · {dossier.sighting_count}×</span></div>
+                <div class="drow caps"><span class="dk">CAMERAS</span><span class="dv">{dossier.per_camera.map((c) => c.cam).slice(0, 4).join(' · ') || '—'}</span></div>
+                {#if dossier.attrs?.cadence_hz || dossier.attrs?.build_ratio || dossier.attrs?.leg_ratio}
+                  <div class="drow caps"><span class="dk">GAIT/BODY</span><span class="dv">{#if dossier.attrs.cadence_hz}{num(dossier.attrs.cadence_hz)}HZ{/if}{#if dossier.attrs.build_ratio} · BUILD {num(dossier.attrs.build_ratio)}{/if}{#if dossier.attrs.leg_ratio} · LEG {num(dossier.attrs.leg_ratio)}{/if}</span></div>
+                {/if}
+                <div class="dwhen caps">WHEN · HOUR OF DAY</div>
+                <div class="dhours">{#each dossier.hour_histogram as v, h}<span class="dhb" class:hot={v > 0} style="height:{4 + (v / maxHour) * 22}px" title="{h}:00 · {v}"></span>{/each}</div>
+              {:else}<div class="dempty caps">LOADING…</div>{/if}
+            </div>
+          </div>
+        {/if}
+      </div>
     </section>
   </div>
 </div>
@@ -445,7 +503,7 @@
   @keyframes traceIn { from { opacity: 0; transform: translateX(20px); } }
 
   /* big live wall: sighting clip + last-camera live feed */
-  .livewall { flex: 0 0 54%; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hairline);
+  .livewall { flex: 0 0 34%; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hairline);
     border-bottom: 1px solid var(--hairline); min-height: 0; }
   .wcell { display: flex; flex-direction: column; min-height: 0; background: #05080b;
     animation: rise 520ms both cubic-bezier(0.16, 1, 0.3, 1); }
@@ -470,7 +528,7 @@
     padding: 3px 9px; background: rgba(5,8,11,0.72); color: var(--cyan); font-size: 8px; letter-spacing: 0.16em; }
   .livetag .d { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); animation: pulse 1.2s ease-in-out infinite; }
 
-  .mapwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .mapwrap { flex: 0 0 30%; min-height: 0; display: flex; flex-direction: column; border-bottom: 1px solid var(--hairline); }
   .thead { flex: 0 0 auto; display: flex; align-items: baseline; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); }
   .tt { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.16em; color: var(--ink); }
   .th-sub { font-size: 8px; letter-spacing: 0.16em; color: var(--ink-ghost); }
@@ -511,6 +569,33 @@
   .sn { font-family: var(--font-display); font-size: 10px; color: var(--ink); letter-spacing: 0.06em; white-space: nowrap; }
   .st { font-size: 7px; color: var(--ink-ghost); }
   .sconn { width: 22px; height: 1px; background: var(--hairline); flex: 0 0 auto; }
+
+  /* ── LONG-TERM DOSSIER + PHOTO RECONSTRUCTION ── */
+  .dossier { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 16px; background: rgba(4,7,10,0.5);
+    animation: fadeup 560ms 360ms both; }
+  .dhead { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .dt { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.16em; color: var(--ink); }
+  .dflag { padding: 2px 8px; background: color-mix(in srgb, var(--amber, #ffb038) 14%, transparent);
+    color: var(--amber, #ffcf87); border: 1px solid color-mix(in srgb, #ffb038 40%, transparent);
+    font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .dempty { color: var(--ink-ghost); font-size: 9px; letter-spacing: 0.16em; padding: 10px 0; }
+  .dgrid { display: grid; grid-template-columns: 150px 1fr; gap: 16px; }
+  .drecon { display: flex; flex-direction: column; gap: 7px; }
+  .rphoto { position: relative; aspect-ratio: 3/4; overflow: hidden; background: #05080b; border: 1px solid var(--hairline); }
+  .rphoto img { width: 100%; height: 100%; object-fit: cover; image-rendering: auto; }
+  .rscan { position: absolute; left: 0; right: 0; height: 30%; pointer-events: none;
+    background: linear-gradient(transparent, rgba(56,208,227,0.28), transparent); animation: wscan 1.2s ease-in-out infinite; }
+  .rbtn { padding: 8px; cursor: pointer; background: none; border: 1px solid var(--cyan); color: var(--cyan);
+    font-family: var(--font-display); font-size: 10px; letter-spacing: 0.14em; }
+  .rbtn:hover:not(:disabled) { background: var(--cyan); color: #04070a; }
+  .rbtn:disabled { opacity: 0.6; cursor: default; }
+  .rmsg { font-size: 8px; letter-spacing: 0.14em; color: var(--ink-ghost); text-align: center; }
+  .dinfo { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .drow { display: flex; justify-content: space-between; gap: 10px; font-size: 9px; padding-bottom: 5px; border-bottom: 1px solid var(--hairline); }
+  .drow .dk { color: var(--ink-ghost); letter-spacing: 0.14em; } .drow .dv { color: var(--cyan); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dwhen { font-size: 8px; letter-spacing: 0.18em; color: var(--ink-ghost); margin-top: 6px; }
+  .dhours { display: flex; align-items: flex-end; gap: 2px; height: 28px; }
+  .dhb { flex: 1; background: var(--hairline); border-radius: 1px; } .dhb.hot { background: var(--cyan); }
 
   @keyframes fadein { from { opacity: 0; } }
   @keyframes fadeup { from { opacity: 0; transform: translateY(12px); } }

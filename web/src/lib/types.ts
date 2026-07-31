@@ -94,6 +94,8 @@ export interface RosterEntry {
   clip?: string | null          // short sighting clip (/snapshots/clips/...), prefix with API base
   watched?: boolean             // flagged as BOLO — re-sightings raise a WATCHLIST HIT alert
   trail?: RosterSighting[]      // movement trail: cameras visited, earliest first
+  subject_uid?: number | null   // persistent long-term subject id (features 5/6/7), if recorded
+  subject_flags?: string[]      // e.g. ['repeat_visitor']
   first_ts: number
   last_ts: number
 }

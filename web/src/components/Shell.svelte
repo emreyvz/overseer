@@ -21,7 +21,6 @@
     { label: 'SOURCES', key: 'C', mode: '', act: () => { pickerView.set('grid'); stage.set('select') } },
     { label: 'FORENSIC', key: 'A', mode: 'forensic', act: () => mode.set('forensic') },
     { label: 'CASES', key: 'K', mode: 'case', act: () => mode.set('case') },
-    { label: 'DOSSIERS', key: 'Y', mode: 'dossiers', act: () => mode.set('dossiers') },
     { label: 'WATCHLIST', key: 'W', mode: '', act: () => watchlistOpen.set(true) },
     { label: 'ASSISTANT', key: 'I', mode: '', act: () => aiOpen.set(true) },
     { label: 'SUGGEST', key: 'G', mode: '', act: () => suggestionsOpen.set(true) },

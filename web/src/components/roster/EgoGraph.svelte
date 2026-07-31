@@ -80,7 +80,7 @@
     const f = ev.deltaY < 0 ? 1.12 : 1 / 1.12
     k = Math.max(0.4, Math.min(3.5, k * f))
   }
-  function pick(nd: EgoNode) { if (moved || nd.id === g.center) return; sfx('ping', { volume: 0.3 }); onopen?.(nd.id) }
+  function pick(nd: EgoNode) { if (nd.id === g.center) return; sfx('ping', { volume: 0.3 }); onopen?.(nd.id) }
 
   onMount(() => { load() })
   $effect(() => { void id; load() })
@@ -111,7 +111,7 @@
             <g class="node" class:center={nd.id === g.center} class:veh={nd.cls === 'vehicle'} class:h2={nd.hop === 2}
               transform={`translate(${pos[nd.id].x} ${pos[nd.id].y})`}
               role="button" tabindex="0" onpointerenter={() => (hover = nd.id)} onpointerleave={() => (hover = null)}
-              onclick={() => pick(nd)}>
+              ondblclick={() => pick(nd)} onkeydown={(e) => { if (e.key === 'Enter') pick(nd) }}>
               <circle class="halo" r={R + 5} />
               <clipPath id={`e-${nd.id}`}><circle r={R} /></clipPath>
               {#if nd.snapshot}<image href={src(nd.snapshot)} x={-R} y={-R} width={R * 2} height={R * 2} clip-path={`url(#e-${nd.id})`} preserveAspectRatio="xMidYMid slice" />{/if}
