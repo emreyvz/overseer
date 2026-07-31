@@ -150,7 +150,11 @@
          replaying its cinematic entrance as an animated transition (a refresh keeps the same id) -->
     {#key selected.id}
       <PoiDossier entry={selected} {now} onclose={() => (selected = null)}
-        onopen={(id) => { const e = entries.find((x) => x.id === id); if (e) selected = e }} />
+        onopen={async (id) => {
+          const e = entries.find((x) => x.id === id)
+          if (e) { selected = e; return }
+          try { selected = await api.rosterGet(id) } catch { /* gone from the roster */ }
+        }} />
     {/key}
   {/if}
 </section>

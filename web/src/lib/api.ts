@@ -81,6 +81,7 @@ export const api = {
   plateMatch: (plate: string) =>
     post<{ matches: { camId: string; cam: string; plate: string; score: number; bbox: [number, number, number, number] }[] }>(`/api/platematch`, { plate }),
   roster: () => get<import('./types').RosterEntry[]>(`/api/roster`),
+  rosterGet: (id: string) => get<import('./types').RosterEntry>(`/api/roster/${id}`),
   watchRoster: (id: string, on: boolean) =>
     post<import('./types').RosterEntry>(`/api/roster/${id}/watch`, { on }),
   supercut: (id: string) => get<{ url: string }>(`/api/roster/${id}/supercut`),

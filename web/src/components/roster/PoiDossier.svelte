@@ -94,6 +94,11 @@
   }
   const maxHour = $derived(dossier ? Math.max(1, ...dossier.hour_histogram) : 1)
   const num = (v: unknown) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v)
+  // distinct stored crops for this subject (many sightings can share one snapshot) — so you can see
+  // how many photos exist before clarifying
+  const shots = $derived(dossier
+    ? Array.from(new Map(dossier.sightings.filter((s) => s.snapshot).map((s) => [s.snapshot, s])).values())
+    : [])
   async function findAcross() {
     if (finding || !photo) return
     finding = true; sfx('sonar')
@@ -297,6 +302,7 @@
         </figure>
       </div>
 
+      <div class="lower">
       <div class="mapwrap">
       <div class="thead caps"><span class="tt">MOVEMENT TRACE</span><span class="th-sub">{nodes.length} CAMERA{nodes.length > 1 ? 'S' : ''} · DRAG · ZOOM</span></div>
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -356,7 +362,7 @@
         {#if entry.subject_uid == null}
           <div class="dempty caps">BUILDING LONG-TERM PROFILE…</div>
         {:else}
-          <div class="dgrid">
+          <div class="dbody">
             <div class="drecon">
               <div class="rphoto">
                 {#if recon?.image}<img src={'data:image/jpeg;base64,' + recon.image} alt="reconstruction" />
@@ -367,7 +373,7 @@
               <button class="rbtn caps" onclick={reconstruct} disabled={reconBusy}>
                 {reconBusy ? 'CLARIFYING…' : recon?.image ? '↻ RE-CLARIFY' : '✧ CLARIFY PHOTO'}
               </button>
-              {#if recon}<span class="rmsg caps">{recon.image ? (recon.method === 'multiframe' ? `FUSED ${recon.frames_used} FRAMES` : 'ENHANCED') : (recon.reason === 'not_enough_frames' ? `NEED MORE CROPS (${recon.frames_offered ?? 0})` : recon.reason)}</span>{/if}
+              {#if recon}<span class="rmsg caps">{recon.image ? (recon.method === 'sr' ? `AI SUPER-RES · ${recon.frames_used} FRAME${recon.frames_used === 1 ? '' : 'S'}` : recon.method === 'multiframe' ? `FUSED ${recon.frames_used} FRAMES` : 'ENHANCED') : (recon.reason === 'not_enough_frames' ? `NEED MORE CROPS (${recon.frames_offered ?? 0})` : recon.reason)}</span>{/if}
             </div>
             <div class="dinfo">
               {#if dossier}
@@ -376,12 +382,22 @@
                 {#if dossier.attrs?.cadence_hz || dossier.attrs?.build_ratio || dossier.attrs?.leg_ratio}
                   <div class="drow caps"><span class="dk">GAIT/BODY</span><span class="dv">{#if dossier.attrs.cadence_hz}{num(dossier.attrs.cadence_hz)}HZ{/if}{#if dossier.attrs.build_ratio} · BUILD {num(dossier.attrs.build_ratio)}{/if}{#if dossier.attrs.leg_ratio} · LEG {num(dossier.attrs.leg_ratio)}{/if}</span></div>
                 {/if}
-                <div class="dwhen caps">WHEN · HOUR OF DAY</div>
+                <div class="dwhen caps">HOUR OF DAY</div>
                 <div class="dhours">{#each dossier.hour_histogram as v, h}<span class="dhb" class:hot={v > 0} style="height:{4 + (v / maxHour) * 22}px" title="{h}:00 · {v}"></span>{/each}</div>
               {:else}<div class="dempty caps">LOADING…</div>{/if}
             </div>
           </div>
+          <!-- previous crops on file: see them (and the count) before clarifying -->
+          <div class="dwhen caps">PHOTOS ON FILE · {shots.length}</div>
+          <div class="dshots">
+            {#if shots.length}
+              {#each shots as s (s.id)}
+                <img class="dshot" src={`${API}${s.snapshot}`} alt="" title={`${s.cam ?? '?'} · ${new Date(s.ts * 1000).toLocaleString()}`} />
+              {/each}
+            {:else}<span class="dempty caps">NO STORED CROPS YET</span>{/if}
+          </div>
         {/if}
+      </div>
       </div>
     </section>
   </div>
@@ -528,7 +544,9 @@
     padding: 3px 9px; background: rgba(5,8,11,0.72); color: var(--cyan); font-size: 8px; letter-spacing: 0.16em; }
   .livetag .d { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); animation: pulse 1.2s ease-in-out infinite; }
 
-  .mapwrap { flex: 0 0 30%; min-height: 0; display: flex; flex-direction: column; border-bottom: 1px solid var(--hairline); }
+  /* movement trace + long-term identity share one row, side by side */
+  .lower { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+  .mapwrap { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--hairline); }
   .thead { flex: 0 0 auto; display: flex; align-items: baseline; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); }
   .tt { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.16em; color: var(--ink); }
   .th-sub { font-size: 8px; letter-spacing: 0.16em; color: var(--ink-ghost); }
@@ -571,7 +589,7 @@
   .sconn { width: 22px; height: 1px; background: var(--hairline); flex: 0 0 auto; }
 
   /* ── LONG-TERM DOSSIER + PHOTO RECONSTRUCTION ── */
-  .dossier { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 16px; background: rgba(4,7,10,0.5);
+  .dossier { min-height: 0; overflow-y: auto; padding: 12px 14px; background: rgba(4,7,10,0.5);
     animation: fadeup 560ms 360ms both; }
   .dhead { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .dt { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.16em; color: var(--ink); }
@@ -579,7 +597,7 @@
     color: var(--amber, #ffcf87); border: 1px solid color-mix(in srgb, #ffb038 40%, transparent);
     font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; }
   .dempty { color: var(--ink-ghost); font-size: 9px; letter-spacing: 0.16em; padding: 10px 0; }
-  .dgrid { display: grid; grid-template-columns: 150px 1fr; gap: 16px; }
+  .dbody { display: grid; grid-template-columns: 118px 1fr; gap: 14px; }
   .drecon { display: flex; flex-direction: column; gap: 7px; }
   .rphoto { position: relative; aspect-ratio: 3/4; overflow: hidden; background: #05080b; border: 1px solid var(--hairline); }
   .rphoto img { width: 100%; height: 100%; object-fit: cover; image-rendering: auto; }
@@ -596,6 +614,9 @@
   .dwhen { font-size: 8px; letter-spacing: 0.18em; color: var(--ink-ghost); margin-top: 6px; }
   .dhours { display: flex; align-items: flex-end; gap: 2px; height: 28px; }
   .dhb { flex: 1; background: var(--hairline); border-radius: 1px; } .dhb.hot { background: var(--cyan); }
+  .dshots { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 4px; }
+  .dshot { flex: 0 0 auto; width: 48px; height: 64px; object-fit: cover; border: 1px solid var(--hairline);
+    cursor: pointer; transition: border-color 140ms; } .dshot:hover { border-color: var(--cyan); }
 
   @keyframes fadein { from { opacity: 0; } }
   @keyframes fadeup { from { opacity: 0; transform: translateY(12px); } }
