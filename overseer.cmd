@@ -36,6 +36,9 @@ call uv sync --extra ai-extras
 echo   [setup] Fetching AI models ^(one time; the app still runs if this is skipped^)...
 call uv run python -m match.tools.export_models
 
+REM ---- re-ensure spatial-3D extras (ROMP) that `uv sync` strips (pip --no-deps, not in lock) ----
+call .venv\Scripts\python.exe scripts\ensure_spatial_extras.py
+
 REM ---- 2. Node present -> full desktop app; otherwise -> browser ----
 where npm >nul 2>nul
 if not errorlevel 1 (
@@ -54,4 +57,4 @@ echo   ^(Install Node.js from https://nodejs.org if you want the desktop window.
 echo   [2/3] Opening the browser shortly...
 start "" /b powershell -NoProfile -c "Start-Sleep 5; Start-Process 'http://127.0.0.1:8787'"
 echo   [3/3] Starting Overseer. Close this window to stop it.
-call uv run python -m server
+call .venv\Scripts\python.exe -m server

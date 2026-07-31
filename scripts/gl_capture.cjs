@@ -16,6 +16,10 @@ const PITCH = pitchArg ? pitchArg.split('=')[1] : ''
 const yawArg = process.argv.find((a) => a.startsWith('--yaw='))
 const YAW = yawArg ? yawArg.split('=')[1] : ''
 const FOCUS = process.argv.includes('--focus')
+const renderArg = process.argv.find((a) => a.startsWith('--render='))
+const RENDER = renderArg ? renderArg.split('=')[1] : ''
+const extraArg = process.argv.find((a) => a.startsWith('--extra='))   // raw &-joined query passthrough, e.g. --extra=dj=0.04&zr=0.6
+const EXTRA = extraArg ? extraArg.split('=').slice(1).join('=') : ''
 
 async function shot(mode, out) {
   const win = new BrowserWindow({
@@ -26,7 +30,7 @@ async function shot(mode, out) {
   win.webContents.on('console-message', (_e, _l, msg) => { if (/error|Error|undefined/.test(msg)) errs.push(msg) })
   let loaded = false
   for (let attempt = 0; attempt < 4 && !loaded; attempt++) {
-    try { await win.loadURL(`${PAGE}?mode=${mode}&sid=${SID}${PITCH ? '&pitch=' + PITCH : ''}${YAW ? '&yaw=' + YAW : ''}${FOCUS ? '&focus=1' : ''}`); loaded = true }
+    try { await win.loadURL(`${PAGE}?mode=${mode}&sid=${SID}${PITCH ? '&pitch=' + PITCH : ''}${YAW ? '&yaw=' + YAW : ''}${FOCUS ? '&focus=1' : ''}${RENDER ? '&render=' + RENDER : ''}${EXTRA ? '&' + EXTRA : ''}`); loaded = true }
     catch (e) { await new Promise((r) => setTimeout(r, 600)) }
   }
   if (!loaded) { console.log(`[${mode}] load failed`); win.destroy(); return }

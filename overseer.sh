@@ -30,6 +30,10 @@ uv sync --extra ai-extras || true
 echo "  [setup] Fetching AI models (one time; the app still runs if this is skipped)..."
 uv run python -m match.tools.export_models || true
 
+# re-ensure spatial-3D extras (ROMP) that `uv sync` strips (pip --no-deps, not in lock)
+PY=".venv/bin/python"; [ -f "$PY" ] || PY=".venv/Scripts/python.exe"
+"$PY" scripts/ensure_spatial_extras.py || true
+
 open_browser() {
   ( sleep 5; (open "http://127.0.0.1:8787" 2>/dev/null || xdg-open "http://127.0.0.1:8787" 2>/dev/null) ) &
 }
@@ -48,5 +52,5 @@ else
   echo "  [2/3] Opening the browser shortly..."
   open_browser
   echo "  [3/3] Starting Overseer. Press Ctrl+C to stop it."
-  uv run python -m server
+  "$PY" -m server
 fi

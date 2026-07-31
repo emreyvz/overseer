@@ -16,9 +16,17 @@ let spawnedByUs = false
 
 function startServer() {
   if (!SPAWN) return
-  server = spawn('uv', ['run', 'python', '-m', 'server'], {
-    cwd: REPO_ROOT, shell: true, stdio: 'inherit',
-  })
+  // Use the venv's Python DIRECTLY, not `uv run` — `uv run` re-syncs the env to the lock on every
+  // launch and strips the spatial 3D extras installed --no-deps (MoGe / ROMP / bgutil), so the 3D
+  // bodies + geometry silently vanish. Fall back to `uv run` only if the venv isn't built yet.
+  const fs = require('node:fs')
+  const venvPy = process.platform === 'win32'
+    ? path.join(REPO_ROOT, '.venv', 'Scripts', 'python.exe')
+    : path.join(REPO_ROOT, '.venv', 'bin', 'python')
+  const [cmd, args] = fs.existsSync(venvPy)
+    ? [venvPy, ['-m', 'server']]
+    : ['uv', ['run', 'python', '-m', 'server']]
+  server = spawn(cmd, args, { cwd: REPO_ROOT, shell: true, stdio: 'inherit' })
   spawnedByUs = true
   server.on('error', (e) => console.error('server spawn failed:', e.message))
 }

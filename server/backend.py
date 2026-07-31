@@ -155,6 +155,12 @@ class Backend:
             model_name=str(self.config.get("spatial.model",
                                            "depth-anything/Depth-Anything-V2-Large-hf")),
             input_size=self.config.get("spatial.depth_res"))
+        # Human mesh recovery (idea 2): a real posed 3D SMPL body per detected person, so people
+        # read as 3D humans instead of flat depth cutouts. Lazy; needs the one-time SMPL setup.
+        self._human = None
+        if self.config.get("spatial.human_mesh", True):
+            from .human_mesh import HumanMeshEstimator
+            self._human = HumanMeshEstimator()
         # Session roster: an anonymous, deduped registry of people + vehicles seen, with a
         # photo each (and plates for vehicles). Background cutouts use the YOLO-seg model.
         from match.seg_backend import YoloSegBackend
@@ -1385,6 +1391,25 @@ class Backend:
         ok_t, texjpg = cv2.imencode(".jpg", texframe, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if ok_t:
             scene["tex_image"] = _b64.b64encode(texjpg.tobytes()).decode("ascii")
+        # Human 3D bodies (idea 2): a posed SMPL mesh per person. verts int16 (mm, root-relative),
+        # SMPL faces uint16 shared once; the frontend places + scales each body onto the scene depth
+        # at its 2D centre, so people become real 3D humans instead of flat depth cutouts.
+        if self._human is not None:
+            # whole-frame ROMP: reliably recovers CLOSE people (the crop-per-box variant was worse
+            # for them and didn't rescue tiny far people either — those are an inherent limit).
+            hm = self._human.estimate(work)
+            if hm is not None and hm["verts"].shape[0] > 0:
+                people = []
+                for i in range(hm["verts"].shape[0]):
+                    vmm = np.clip(np.round(hm["verts"][i] * 1000.0), -32767, 32767).astype(np.int16)
+                    people.append({
+                        "v": _b64.b64encode(np.ascontiguousarray(vmm).tobytes()).decode("ascii"),
+                        "cx": round(float(hm["center2d"][i][0]), 4), "cy": round(float(hm["center2d"][i][1]), 4),
+                        "sw": round(float(hm["size2d"][i][0]), 4), "sh": round(float(hm["size2d"][i][1]), 4),
+                    })
+                scene["people"] = people
+                scene["smpl_faces"] = _b64.b64encode(
+                    np.ascontiguousarray(hm["faces"].astype(np.uint16)).tobytes()).decode("ascii")
         return {"scene": scene}
 
     def _spatial_entities(self, frame: Any, disp: Any, dmin: float,
@@ -1408,6 +1433,7 @@ class Backend:
             out.append({
                 "id": f"{cls[:2].upper()}{idx:02d}", "cls": cls,
                 "cx": (x1 + x2) / 2.0 / w, "cy": (y1 + y2) / 2.0 / h,
+                "sw": round((x2 - x1) / w, 4), "sh": round((y2 - y1) / h, 4),  # apparent size -> scale 3D primitives
                 "depth": spatial.entity_depth(disp, (x1, y1, x2, y2), (w, h), dmin, dmax),
                 "conf": round(float(d.confidence), 2), "label": (d.label or cls).upper(),
             })

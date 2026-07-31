@@ -13,6 +13,7 @@
   import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
   import { VignetteShader } from 'three/addons/shaders/VignetteShader.js'
   import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
+  import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
   import { onDestroy, onMount, tick } from 'svelte'
   import { api } from '../../lib/api'
   import { sfx } from '../../lib/audio'
@@ -76,6 +77,8 @@
   let mesh: THREE.Mesh | null = null           // foreground: the directly-observed surface
   let bgMesh: THREE.Mesh | null = null         // completed background reconstructed behind objects
   let markers: THREE.Group | null = null
+  let peopleGroup: THREE.Group | null = null   // real 3D SMPL human bodies (idea 2, ROMP)
+  let vehicleGroup: THREE.Group | null = null   // real 3D low-poly cars, one per vehicle detection
   let shadows: THREE.Group | null = null       // soft contact-shadow blobs grounding entities
   let shadowTex: THREE.Texture | null = null   // shared radial blob (cached across rebuilds)
   let fgTex: THREE.Texture | null = null       // full-res texture map for the foreground mesh
@@ -464,6 +467,122 @@
     return inl.length >= 20 ? (quad(inl) ?? best) : best
   }
 
+  // idea 2: real 3D SMPL human bodies (ROMP) placed into the scene. Each `person.v` is int16 mm
+  // root-relative SMPL verts (y-up), sharing the uint16 SMPL faces. We drop each body onto the
+  // scene's own depth at its 2D centre and scale it so its height matches the person's apparent
+  // size — so people are true 3D humans (front/back/sides), not flat depth cutouts.
+  function buildPeople(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>,
+                       w: number, h: number, fx: number, fy: number, cx: number, cy: number,
+                       disp: Float32Array): THREE.Group | null {
+    if (!d.people || !d.people.length || !d.smpl_faces) return null
+    const fb = Uint8Array.from(atob(d.smpl_faces), (c) => c.charCodeAt(0))
+    const faces = new Uint16Array(fb.buffer, fb.byteOffset, Math.floor(fb.byteLength / 2))
+    const grp = new THREE.Group()
+    const L = new THREE.Vector3(0.35, 1.0, 0.45).normalize()
+    const base = [0.21, 0.86, 1.0]   // cyan body
+    for (const p of d.people) {
+      const vb = Uint8Array.from(atob(p.v), (c) => c.charCodeAt(0))
+      const raw = new Int16Array(vb.buffer, vb.byteOffset, Math.floor(vb.byteLength / 2))
+      const nv = Math.floor(raw.length / 3)
+      const pos = new Float32Array(nv * 3)
+      let ymin = 1e9, ymax = -1e9
+      for (let i = 0; i < nv; i++) {
+        const x = raw[i * 3] / 1000, y = -raw[i * 3 + 1] / 1000, z = -raw[i * 3 + 2] / 1000  // ROMP y is DOWN -> flip
+        pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z
+        if (y < ymin) ymin = y; if (y > ymax) ymax = y
+      }
+      const bodyH = (ymax - ymin) || 1.7
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+      geo.setIndex(new THREE.BufferAttribute(faces, 1))
+      geo.computeVertexNormals()
+      const nrm = geo.getAttribute('normal'), col = new Float32Array(nv * 3)
+      for (let i = 0; i < nv; i++) {
+        const ndl = Math.max(0, nrm.getX(i) * L.x + nrm.getY(i) * L.y + nrm.getZ(i) * L.z)
+        const sh = 0.4 + 0.6 * ndl
+        col[i * 3] = base[0] * sh; col[i * 3 + 1] = base[1] * sh; col[i * 3 + 2] = base[2] * sh
+      }
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+      const bodyMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))
+      // place feet where the FEET are in the image (bottom-centre of the 2D box), not the body centre:
+      // sample scene depth at the foot pixel (searching outward for a kept/valid depth), then stand the
+      // body on the flattened ground (Y~=0). Scale so world height matches a plausible human at that depth.
+      const pxf = p.cx * w, pyf = (p.cy + p.sh * 0.5) * h
+      const sampleZ = (sx: number, sy: number): number | null => {
+        for (let rad = 0; rad <= 8; rad++) for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
+          const xx = Math.round(sx + dx), yy = Math.round(sy + dy)
+          if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue
+          const dv = disp[yy * w + xx]; if (dv >= 0.015) return zOf(dv)
+        }
+        return null
+      }
+      const Zc = sampleZ(pxf, pyf) ?? zOf(0.25)
+      const Xc = (pxf - cx) * Zc / fx
+      const worldH = Math.max(1.2, Math.min(2.1, (p.sh * h) * Zc / fy))   // clamp to a human height
+      const s = Math.max(0.01, worldH / bodyH)
+      bodyMesh.scale.setScalar(s)
+      bodyMesh.position.set(Xc, -ymin * s, -Zc)
+      grp.add(bodyMesh)
+    }
+    return grp
+  }
+
+  // a unit low-poly car built once: 1.0 wide (X), 2.2 long (Z), ~1.0 tall, sitting on Y=0. Scaled per
+  // detection by its real-world width, so every car shares this cheap merged geometry.
+  const carGeo: THREE.BufferGeometry = (() => {
+    const parts: THREE.BufferGeometry[] = []
+    const body = new THREE.BoxGeometry(1.0, 0.42, 2.2); body.translate(0, 0.42, 0)
+    const cabin = new THREE.BoxGeometry(0.86, 0.36, 1.12); cabin.translate(0, 0.80, -0.12)
+    parts.push(body, cabin)
+    const wr = 0.20, ww = 0.16
+    for (const [wx, wz] of [[-0.52, 0.72], [0.52, 0.72], [-0.52, -0.72], [0.52, -0.72]]) {
+      const g = new THREE.CylinderGeometry(wr, wr, ww, 14); g.rotateZ(Math.PI / 2); g.translate(wx, wr, wz); parts.push(g)
+    }
+    return mergeGeometries(parts, false)!
+  })()
+
+  // idea: real 3D vehicles — a low-poly car per vehicle detection, standing on the ground at the
+  // detection's depth, scaled to its apparent width (clamped to a plausible car), tinted by the crop's
+  // mean colour, oriented side-on vs facing from the box aspect. Replaces a flat, stretched car cutout.
+  function buildVehicles(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>,
+                         w: number, h: number, fx: number, cx: number, cy: number,
+                         disp: Float32Array, rgba: Uint8ClampedArray): THREE.Group | null {
+    const ents = (d.entities ?? []).filter((e: any) => e.cls === 'vehicle' && e.sw && e.sh)
+    if (!ents.length) return null
+    const grp = new THREE.Group()
+    const L = new THREE.Vector3(0.35, 1.0, 0.45).normalize()
+    const seen: { x: number; z: number }[] = []
+    for (const e of ents as any[]) {
+      const Zc = Math.max(3.0, zOf(Math.max(0.015, e.depth || 0.1)))   // car-body depth, floored at 3m
+      const pxf = e.cx * w
+      const Xc = (pxf - cx) * Zc / fx
+      if (seen.some((p) => Math.hypot(p.x - Xc, p.z - Zc) < 1.2)) continue   // NMS overlapping dets
+      seen.push({ x: Xc, z: Zc })
+      const worldW = Math.max(1.5, Math.min(3.2, (e.sw * w) * Zc / fx))
+      let cr = 0, cg = 0, cb = 0, cn = 0
+      const bx1 = Math.max(0, Math.floor((e.cx - e.sw / 2) * w)), bx2 = Math.min(w, Math.ceil((e.cx + e.sw / 2) * w))
+      const by1 = Math.max(0, Math.floor((e.cy - e.sh / 2) * h)), by2 = Math.min(h, Math.ceil((e.cy + e.sh / 2) * h))
+      for (let y = by1; y < by2; y += 2) for (let x = bx1; x < bx2; x += 2) { const p = (y * w + x) * 4; cr += rgba[p]; cg += rgba[p + 1]; cb += rgba[p + 2]; cn++ }
+      const tint = cn ? new THREE.Color(cr / cn / 255, cg / cn / 255, cb / cn / 255) : new THREE.Color(0.6, 0.62, 0.68)
+      tint.offsetHSL(0, 0.05, 0.06)
+      const geo = carGeo.clone(); geo.computeVertexNormals()
+      const nrm = geo.getAttribute('normal'), col = new Float32Array(nrm.count * 3)
+      for (let i = 0; i < nrm.count; i++) {
+        const ndl = Math.max(0, nrm.getX(i) * L.x + nrm.getY(i) * L.y + nrm.getZ(i) * L.z)
+        const sh = 0.4 + 0.6 * ndl
+        const glass = (i >= 24 && i < 48) ? 0.3 : 1   // cabin verts (idx 24-47) darkened -> reads as glass
+        col[i * 3] = tint.r * sh * glass; col[i * 3 + 1] = tint.g * sh * glass; col[i * 3 + 2] = tint.b * sh * glass
+      }
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3))
+      const car = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }))
+      car.scale.setScalar(worldW)
+      car.rotation.y = (e.sw * w) / (e.sh * h) > 1.7 ? Math.PI / 2 : 0   // wide box -> side-on
+      car.position.set(Xc, 0, -Zc)
+      grp.add(car)
+    }
+    return grp.children.length ? grp : null
+  }
+
   async function buildCloud(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>) {
     if (!scene) return
     const { w, h, fov, image, depth, entities, bg_image, bg_depth } = d
@@ -516,8 +635,26 @@
     // continuous ground stays a solid, gap-free surface. Culled boundaries are closed by the solid
     // side-walls (below), so no see-through black behind objects.
     mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, 1e9, 0,
-      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep, dispJump: DISP_JUMP, zrange: ZRANGE })
+      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep, dispJump: DISP_JUMP, zrange: ZRANGE, graze: 0.2 })
     scene.add(mesh)
+
+    // idea 2: real 3D SMPL human bodies placed onto the scene (cyan), replacing flat person cutouts.
+    if (peopleGroup) {
+      scene.remove(peopleGroup)
+      peopleGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); if (m.material) (m.material as THREE.Material).dispose() })
+      peopleGroup = null
+    }
+    peopleGroup = buildPeople(d, w, h, fx, fx, cx, cy, fgDisp)
+    if (peopleGroup) scene.add(peopleGroup)
+
+    // real 3D vehicles: a low-poly car per vehicle detection, placed onto the scene ground.
+    if (vehicleGroup) {
+      scene.remove(vehicleGroup)
+      vehicleGroup.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); if (m.material) (m.material as THREE.Material).dispose() })
+      vehicleGroup = null
+    }
+    vehicleGroup = buildVehicles(d, w, h, fx, cx, cy, fgDisp, fg.rgba)
+    if (vehicleGroup) scene.add(vehicleGroup)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
     if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
@@ -590,7 +727,7 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number; zrange?: number; dim?: number } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number; zrange?: number; dim?: number; graze?: number } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
     const maxT = opt.maxT ?? 0.35, minT = 0.03, dim = opt.dim ?? 1   // dim<1 fades a guessed layer
     const pos: number[] = [], col: number[] = [], uv: number[] = []
@@ -618,6 +755,21 @@
     const bump = (a: number, b: number) => { const k = a < b ? a + '_' + b : b + '_' + a; edge.set(k, (edge.get(k) ?? 0) + 1) }
     const dj = opt.dispJump ?? Infinity   // max disparity spread a triangle may span before it's a
     const zr = opt.zrange ?? Infinity     // silhouette skirt; zr = max Z-span before it's a long stretch
+    const graze = opt.graze ?? 0   // cull tris seen nearly edge-on (|normal . viewDir| < graze): the
+    // stretched "drip" tris that bridge a near pixel to a far one are exactly these grazing triangles
+    // (depth smearing at an occlusion edge), while camera-facing surfaces are kept. Gentle default so
+    // a legit receding ground plane (moderately grazing) survives; only the near-90° smears go.
+    const grazeCull = (va: number, vb: number, vc: number): boolean => {
+      if (graze <= 0) return false
+      const ax = pos[va * 3], ay = pos[va * 3 + 1], az = pos[va * 3 + 2]
+      const e1x = pos[vb * 3] - ax, e1y = pos[vb * 3 + 1] - ay, e1z = pos[vb * 3 + 2] - az
+      const e2x = pos[vc * 3] - ax, e2y = pos[vc * 3 + 1] - ay, e2z = pos[vc * 3 + 2] - az
+      let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x
+      const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl
+      const cxp = (ax + pos[vb * 3] + pos[vc * 3]) / 3, cyp = (ay + pos[vb * 3 + 1] + pos[vc * 3 + 1]) / 3, czp = (az + pos[vb * 3 + 2] + pos[vc * 3 + 2]) / 3
+      const vl = Math.hypot(cxp, cyp, czp) || 1
+      return Math.abs((nx * cxp + ny * cyp + nz * czp) / vl) < graze
+    }
     const tri = (a: number, b: number, c: number) => {
       const va = vidx[a], vb = vidx[b], vc = vidx[c]
       if (va < 0 || vb < 0 || vc < 0) return
@@ -626,6 +778,7 @@
       if (Math.max(Math.abs(da - db), Math.abs(db - dc), Math.abs(da - dc)) > dj) return
       const za = zOf(da), zb = zOf(db), zc = zOf(dc)
       if (Math.max(za, zb, zc) - Math.min(za, zb, zc) > zr) return   // long back-stretch -> cut
+      if (grazeCull(va, vb, vc)) return   // edge-on drip triangle -> cut
       idx.push(va, vb, vc)
       if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) }
     }
