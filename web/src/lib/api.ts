@@ -37,6 +37,10 @@ export interface SpatialEntity { id: string; cls: string; cx: number; cy: number
 export interface SpatialScene { cam: string; sid: string; w: number; h: number; fov: number; image: string; depth: string; entities: SpatialEntity[]; ts: number; bg_image?: string; bg_depth?: string; tex_image?: string }
 export interface SuggestRule { name: string; event_type: string; source_id: number; severity: string }
 export interface Suggestion { kind: 'alert' | 'camera'; cam: string; title: string; why: string; count?: number; rule?: SuggestRule }
+export interface Subject { id: number; cls: string; label?: string | null; first_seen: number; last_seen: number; sighting_count: number; day_count: number; plate?: string | null; attrs: Record<string, unknown>; snapshot?: string | null; watched: boolean; flags: string[] }
+export interface Sighting { id: number; cam?: string | null; ts: number; snapshot?: string | null }
+export interface Dossier extends Subject { per_camera: { cam: string; count: number }[]; hour_histogram: number[]; distinct_days: number; sightings: Sighting[] }
+export interface Reconstruction { image: string | null; reason?: string; method?: string; frames_used?: number; frames_offered?: number }
 
 export const api = {
   base: API_BASE,
@@ -85,6 +89,10 @@ export const api = {
   relationships: () => get<SocialGraph>(`/api/relationships`),
   cameraDna: () => get<{ cameras: CameraDna[] }>(`/api/cameras/dna`),
   spatial: (sid: string, grid = 320) => get<{ scene: SpatialScene | null; reason?: string }>(`/api/spatial/${sid}?grid=${grid}`),
+  subjects: (cls?: string, limit = 200) => get<Subject[]>(`/api/subjects?limit=${limit}${cls ? '&cls=' + cls : ''}`),
+  subjectDossier: (id: number) => get<{ dossier: Dossier | null }>(`/api/subjects/${id}/dossier`),
+  subjectReconstruct: (id: number) => get<Reconstruction>(`/api/subjects/${id}/reconstruct`),
+  reconstructPlate: (detId: string) => get<Reconstruction>(`/api/reconstruct/plate/${encodeURIComponent(detId)}`),
   suggestions: () => get<{ suggestions: Suggestion[] }>(`/api/suggestions`),
   addAlertRule: (rule: SuggestRule) => post<{ id: number }>(`/api/alerts/rules`, rule),
   mergeCandidates: () => get<{ candidates: MergeCandidate[] }>(`/api/roster/merge-candidates`),
