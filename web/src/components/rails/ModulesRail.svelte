@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { modules } from '../../lib/stores'
+  import { modules, toggleModule } from '../../lib/stores'
   import { sfx } from '../../lib/audio'
   import { LEX } from '../../lib/lexicon'
 
@@ -10,7 +10,7 @@
   })
   function toggle(key: string) {
     sfx('click', { volume: 0.25 })
-    modules.update((list) => list.map((m) => (m.key === key ? { ...m, on: !m.on } : m)))
+    toggleModule(key)  // flips the store, persists locally + gates backend load for DETECTION classes
   }
 </script>
 

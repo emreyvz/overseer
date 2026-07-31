@@ -98,7 +98,28 @@ class YoloBackend:
         self._cache: list[Detection] = []
         self.inference_count = 0
         self.last_inference_ms = 0.0
+        # Live class gate: which COCO ids the detector is asked to find. Narrowing it (via
+        # set_categories) drops disabled classes inside YOLO's own postprocessing, so nothing
+        # downstream (tracking, ReID, plates, pose, gait) ever sees them; that's where the
+        # real per-class load lives. Starts wide (everything mapped).
+        self._active_ids: list[int] = list(COCO_CLASS_MAP.keys())
         logger.info("YOLO backend ready on {} (model={})", device, model_path.name)
+
+    def set_categories(self, enabled: set[str] | None) -> None:
+        """Restrict detection to the given top-level categories (person / vehicle / animal /
+        weapon). None restores everything. Accessories stay on regardless; they feed the
+        abandoned-object logic, not a user toggle."""
+        if enabled is None:
+            self._active_ids = list(COCO_CLASS_MAP.keys())
+            return
+        keep = {c for c in enabled if c} | self._ALWAYS_ON
+        ids = [cid for cid, (cat, _) in COCO_CLASS_MAP.items() if cat in keep]
+        # Never hand YOLO an empty list (it would fall back to all-classes); the accessory
+        # floor guarantees this stays non-empty even with every toggle off.
+        self._active_ids = ids or list(COCO_CLASS_MAP.keys())
+
+    # categories that are never user-gated (abandoned-object detection depends on them)
+    _ALWAYS_ON = {"accessory"}
 
     def infer(self, frame: Frame) -> list[Detection]:
         if frame.seq == self._cache_seq:
@@ -129,7 +150,7 @@ class YoloBackend:
             # `quantize` scheme ("fp16"/"int8"/None); passing `half=` still works but
             # logs a deprecation warning on every call, so we target `quantize` directly.
             quantize="fp16" if self._device.startswith("cuda") else None,
-            classes=list(COCO_CLASS_MAP.keys()),
+            classes=self._active_ids,
             tracker=_TRACKER,
             verbose=False,
         )
@@ -178,7 +199,7 @@ class YoloBackend:
                     source=crop, conf=min(self._person_conf, self._confidence),
                     imgsz=tile_imgsz, device=self._device,
                     quantize="fp16" if self._device.startswith("cuda") else None,
-                    classes=list(COCO_CLASS_MAP.keys()), verbose=False,
+                    classes=self._active_ids, verbose=False,
                 )
             except Exception:  # noqa: BLE001
                 continue
@@ -207,7 +228,7 @@ class YoloBackend:
             results = self._model(
                 source=img, conf=conf, imgsz=max(self._imgsz, 1280), device=self._device,
                 quantize="fp16" if self._device.startswith("cuda") else None,
-                classes=list(COCO_CLASS_MAP.keys()), verbose=False,
+                classes=self._active_ids, verbose=False,
             )
         except Exception:  # noqa: BLE001
             return []

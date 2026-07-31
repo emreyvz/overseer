@@ -22,8 +22,14 @@ class MotionDetector(BaseDetector):
         self._kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         self.motion_percent: float = 0.0
         self.last_mask: np.ndarray | None = None
+        self.enabled = True  # gated by the operator's MOTION module toggle
 
     def process(self, frame: Frame) -> list[Detection]:
+        if not self.enabled:
+            # Operator turned MOTION off: skip MOG2 + contour work entirely.
+            self.motion_percent = 0.0
+            self.last_mask = None
+            return []
         mask = self._subtractor.apply(frame.image)
         # Discard shadows (127), keep only definite foreground (255)
         _, mask = cv2.threshold(mask, 200, 255, cv2.THRESH_BINARY)

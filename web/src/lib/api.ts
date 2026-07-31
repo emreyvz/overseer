@@ -101,6 +101,9 @@ export const api = {
   mergeReject: (a: string, b: string) => post<{ ok: boolean }>(`/api/roster/merge-reject`, { a, b }),
   findAcross: (id: string) =>
     post<{ matches: { camId: string; cam: string; score: number; ambiguous?: boolean }[] }>(`/api/roster/${id}/find`, {}),
+  detectionFilters: () => get<Record<string, boolean>>(`/api/detection/filters`),
+  setDetectionFilters: (filters: Record<string, boolean>) =>
+    post<Record<string, boolean>>(`/api/detection/filters`, filters),
   watchedPlates: () => get<{ plates: string[] }>(`/api/plates`),
   watchPlate: (plate: string, on: boolean) => post<{ plates: string[] }>(`/api/plates`, { plate, on }),
   aiStatus: () => get<AiStatus>(`/api/ai/status`),
