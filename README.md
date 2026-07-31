@@ -11,7 +11,7 @@ overseer turns any set of cameras into a single real time intelligence operation
 
 ### Live command center
 
-![Live command center](demo/initial_map_demo_view.gif)
+<img src="demo/initial_map_demo_view.gif" alt="Live command center" width="100%" />
 
 Every camera is a live node on a world map. Watch anonymised movement flow between feeds, drop into any camera with a single click, and run your whole network from one screen.
 
@@ -47,7 +47,7 @@ Open any person or vehicle into a full profile. Where and when they were seen ac
 
 ### 3D scene reconstruction
 
-![3D scene reconstruction](demo/scene_reconstruction.gif)
+<img src="demo/scene_reconstruction.gif" alt="3D scene reconstruction" width="100%" />
 
 Lift a single camera frame into a navigable 3D scene you can orbit to read depth and layout.
 
