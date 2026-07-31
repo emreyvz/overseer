@@ -33,6 +33,9 @@ roster:
   imgsz: 960
   interval: 4.0             # seconds to cycle through every camera once
   dedup_threshold: 0.82     # ReID cosine above which two sightings are the same identity
+  persist: true             # long-term identity (features 5/6): recognize subjects across days and
+                            # build repeat-visitor dossiers, persisted into the SQLite db
+  persist_threshold: 0.74   # cosine to match a sighting to an existing persisted subject
   fullres_interval: 25.0    # passive cameras: seconds between one-shot FULL-RES grabs (0 = off,
                             # thumbnail only). Catches distant subjects on cameras you're not
                             # actively viewing, without straining the system.
@@ -225,6 +228,12 @@ vehicle:
     min_margin: 0.10        # required lead over the runner-up brand
     min_area: 4096          # skip crops smaller than this (unreliable)
     live_interval: 4.0      # seconds between brand reads per tracked vehicle (live card)
+# Gait + soft-biometrics (feature 5): identify people by body shape and how they walk, fused into
+# the long-term identity store so recognition survives clothing changes and face occlusion. Runs on
+# the actively-analyzed camera's tracked persons; needs roster.persist on.
+gait:
+  enabled: true
+
 pose:
   enabled: true
   buffer_size: 30

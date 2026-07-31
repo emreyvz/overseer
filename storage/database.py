@@ -89,6 +89,48 @@ CREATE TABLE IF NOT EXISTS tracklet_embeddings (
     vector BLOB NOT NULL,
     created_at REAL NOT NULL
 );
+-- Long-term cross-session identity: a durable "subject" recognized across days/weeks (feature 6),
+-- its multi-descriptor gallery (appearance + gait, feature 5), and an append-only sighting log.
+CREATE TABLE IF NOT EXISTS subjects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cls TEXT NOT NULL,
+    label TEXT,
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    sighting_count INTEGER NOT NULL DEFAULT 0,
+    day_count INTEGER NOT NULL DEFAULT 1,
+    last_day TEXT,
+    plate TEXT,
+    attrs TEXT NOT NULL DEFAULT '{}',
+    snapshot_path TEXT,
+    watched INTEGER NOT NULL DEFAULT 0,
+    flags TEXT NOT NULL DEFAULT '[]',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subjects_cls_last ON subjects(cls, last_seen DESC);
+CREATE TABLE IF NOT EXISTS subject_descriptors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_id INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    model_id TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    quality REAL NOT NULL DEFAULT 1.0,
+    ts REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subject_desc ON subject_descriptors(subject_id, kind, ts DESC);
+CREATE TABLE IF NOT EXISTS sightings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_id INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    source_id INTEGER,
+    cam TEXT,
+    ts REAL NOT NULL,
+    snapshot_path TEXT,
+    clip_path TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sightings_subject_ts ON sightings(subject_id, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_sightings_ts ON sightings(ts DESC);
 CREATE TABLE IF NOT EXISTS zones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_id INTEGER,
@@ -817,6 +859,202 @@ class Database:
             cur = self._conn.execute("DELETE FROM tracklets WHERE pinned = 0")
             self._conn.commit()
             return int(cur.rowcount)
+
+    # -- subjects (long-term cross-session identity, features 5/6) ------------
+    _SUBJ_COLS = ("id, cls, label, first_seen, last_seen, sighting_count, day_count, last_day,"
+                  " plate, attrs, snapshot_path, watched, flags, created_at, updated_at")
+
+    @staticmethod
+    def _subject_row(row: tuple) -> dict:
+        return {
+            "id": row[0], "cls": row[1], "label": row[2], "first_seen": row[3], "last_seen": row[4],
+            "sighting_count": row[5], "day_count": row[6], "last_day": row[7], "plate": row[8],
+            "attrs": json.loads(row[9] or "{}"), "snapshot_path": row[10], "watched": bool(row[11]),
+            "flags": json.loads(row[12] or "[]"), "created_at": row[13], "updated_at": row[14],
+        }
+
+    def add_subject(self, cls: str, now: float, *, day: str, plate: str | None = None,
+                    attrs: dict | None = None, snapshot_path: str | None = None) -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO subjects (cls, first_seen, last_seen, sighting_count, day_count,"
+                " last_day, plate, attrs, snapshot_path, created_at, updated_at)"
+                " VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?, ?, ?)",
+                (cls, now, now, day, plate, json.dumps(attrs or {}), snapshot_path, now, now),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def touch_subject(self, subject_id: int, now: float, *, day: str,
+                      snapshot_path: str | None = None, plate: str | None = None,
+                      attrs: dict | None = None) -> None:
+        """Record another sighting of an existing subject: bump last_seen + counts, roll the distinct
+        day counter when the day changes, and adopt a better snapshot/plate when offered."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT last_day, snapshot_path FROM subjects WHERE id=?", (subject_id,)).fetchone()
+            if row is None:
+                return
+            new_day = 1 if row[0] != day else 0
+            sets = ["last_seen=?", "sighting_count=sighting_count+1",
+                    "day_count=day_count+?", "last_day=?", "updated_at=?"]
+            args: list = [now, new_day, day, now]
+            if snapshot_path and not row[1]:
+                sets.append("snapshot_path=?"); args.append(snapshot_path)
+            if plate:
+                sets.append("plate=?"); args.append(plate)
+            if attrs is not None:
+                sets.append("attrs=?"); args.append(json.dumps(attrs))
+            args.append(subject_id)
+            self._conn.execute(f"UPDATE subjects SET {', '.join(sets)} WHERE id=?", args)
+            self._conn.commit()
+
+    def add_sighting(self, subject_id: int, ts: float, *, source_id: int | None = None,
+                     cam: str | None = None, snapshot_path: str | None = None,
+                     clip_path: str | None = None) -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO sightings (subject_id, source_id, cam, ts, snapshot_path, clip_path)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (subject_id, source_id, cam, ts, snapshot_path, clip_path),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def add_subject_descriptor(self, subject_id: int, kind: str, vector: bytes, dim: int,
+                               model_id: str, ts: float, *, quality: float = 1.0, cap: int = 12) -> None:
+        """Append a descriptor to a subject's gallery, keeping at most `cap` most-recent per kind so
+        matching averages over many crops without the table growing without bound."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO subject_descriptors (subject_id, kind, dim, model_id, vector, quality, ts)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (subject_id, kind, dim, model_id, vector, quality, ts),
+            )
+            self._conn.execute(
+                "DELETE FROM subject_descriptors WHERE id IN (SELECT id FROM subject_descriptors"
+                " WHERE subject_id=? AND kind=? ORDER BY ts DESC LIMIT -1 OFFSET ?)",
+                (subject_id, kind, cap),
+            )
+            self._conn.commit()
+
+    def subject_descriptors(self, cls: str, kind: str, *, since: float | None = None,
+                            limit: int = 20000) -> list[tuple[int, bytes, int]]:
+        """(subject_id, vector, dim) rows of one kind for candidate matching, newest first, optionally
+        only for subjects seen since `since` (a warm recent-subjects window)."""
+        q = ("SELECT d.subject_id, d.vector, d.dim FROM subject_descriptors d"
+             " JOIN subjects s ON s.id = d.subject_id WHERE s.cls=? AND d.kind=?")
+        args: list = [cls, kind]
+        if since is not None:
+            q += " AND s.last_seen >= ?"; args.append(since)
+        q += " ORDER BY d.ts DESC LIMIT ?"; args.append(limit)
+        with self._lock:
+            return [(r[0], r[1], r[2]) for r in self._conn.execute(q, args).fetchall()]
+
+    def get_subject(self, subject_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT {self._SUBJ_COLS} FROM subjects WHERE id=?", (subject_id,)).fetchone()
+        return self._subject_row(row) if row else None
+
+    def list_subjects(self, *, cls: str | None = None, limit: int = 200,
+                      order: str = "last_seen") -> list[dict]:
+        col = {"last_seen": "last_seen", "first_seen": "first_seen",
+               "sighting_count": "sighting_count", "day_count": "day_count"}.get(order, "last_seen")
+        q = f"SELECT {self._SUBJ_COLS} FROM subjects"
+        args: list = []
+        if cls:
+            q += " WHERE cls=?"; args.append(cls)
+        q += f" ORDER BY {col} DESC LIMIT ?"; args.append(limit)
+        with self._lock:
+            return [self._subject_row(r) for r in self._conn.execute(q, args).fetchall()]
+
+    def list_sightings(self, subject_id: int, *, limit: int = 500) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, source_id, cam, ts, snapshot_path, clip_path FROM sightings"
+                " WHERE subject_id=? ORDER BY ts DESC LIMIT ?", (subject_id, limit)).fetchall()
+        return [{"id": r[0], "source_id": r[1], "cam": r[2], "ts": r[3],
+                 "snapshot_path": r[4], "clip_path": r[5]} for r in rows]
+
+    def subject_dossier(self, subject_id: int) -> dict | None:
+        """Aggregate a subject's whole history: per-camera counts, hour-of-day histogram, and the
+        number of distinct calendar days seen. Powers the repeat-visitor dossier view."""
+        subj = self.get_subject(subject_id)
+        if subj is None:
+            return None
+        with self._lock:
+            per_cam = self._conn.execute(
+                "SELECT cam, COUNT(*) FROM sightings WHERE subject_id=? GROUP BY cam"
+                " ORDER BY COUNT(*) DESC", (subject_id,)).fetchall()
+            hours = self._conn.execute(
+                "SELECT CAST((ts % 86400) / 3600 AS INT) h, COUNT(*) FROM sightings"
+                " WHERE subject_id=? GROUP BY h", (subject_id,)).fetchall()
+            days = self._conn.execute(
+                "SELECT COUNT(DISTINCT date(ts,'unixepoch')) FROM sightings WHERE subject_id=?",
+                (subject_id,)).fetchone()
+        hist = [0] * 24
+        for h, c in hours:
+            if h is not None and 0 <= int(h) < 24:
+                hist[int(h)] = int(c)
+        subj["per_camera"] = [{"cam": c or "?", "count": int(n)} for c, n in per_cam]
+        subj["hour_histogram"] = hist
+        subj["distinct_days"] = int(days[0]) if days else 0
+        return subj
+
+    def set_subject_flags(self, subject_id: int, flags: list[str], now: float) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE subjects SET flags=?, updated_at=? WHERE id=?",
+                               (json.dumps(sorted(set(flags))), now, subject_id))
+            self._conn.commit()
+
+    def set_subject_watched(self, subject_id: int, watched: bool, now: float) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE subjects SET watched=?, updated_at=? WHERE id=?",
+                               (1 if watched else 0, now, subject_id))
+            self._conn.commit()
+
+    def set_subject_label(self, subject_id: int, label: str | None, now: float) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE subjects SET label=?, updated_at=? WHERE id=?",
+                               (label, now, subject_id))
+            self._conn.commit()
+
+    def merge_subjects(self, keep_id: int, drop_id: int, now: float) -> None:
+        """Fold `drop` into `keep`: re-point its sightings + descriptors, sum counts, widen the seen
+        window. Used when two persisted subjects turn out to be the same person."""
+        if keep_id == drop_id:
+            return
+        with self._lock:
+            k = self._conn.execute("SELECT first_seen, last_seen, sighting_count, day_count"
+                                   " FROM subjects WHERE id=?", (keep_id,)).fetchone()
+            d = self._conn.execute("SELECT first_seen, last_seen, sighting_count, day_count"
+                                   " FROM subjects WHERE id=?", (drop_id,)).fetchone()
+            if k is None or d is None:
+                return
+            self._conn.execute("UPDATE sightings SET subject_id=? WHERE subject_id=?", (keep_id, drop_id))
+            self._conn.execute("UPDATE subject_descriptors SET subject_id=? WHERE subject_id=?",
+                               (keep_id, drop_id))
+            self._conn.execute(
+                "UPDATE subjects SET first_seen=?, last_seen=?, sighting_count=?, day_count=?,"
+                " updated_at=? WHERE id=?",
+                (min(k[0], d[0]), max(k[1], d[1]), k[2] + d[2], k[3] + d[3], now, keep_id))
+            self._conn.execute("DELETE FROM subjects WHERE id=?", (drop_id,))
+            self._conn.commit()
+
+    def prune_subjects_older_than(self, ts: float) -> list[str]:
+        """Delete subjects (never watched) whose last sighting predates `ts`; return their snapshot
+        paths so the caller can remove the files. Cascades descriptors + sightings."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, snapshot_path FROM subjects WHERE watched=0 AND last_seen < ?",
+                (ts,)).fetchall()
+            ids = [r[0] for r in rows]
+            snaps = [r[1] for r in rows if r[1]]
+            for sid in ids:
+                self._conn.execute("DELETE FROM subjects WHERE id=?", (sid,))
+            self._conn.commit()
+        return snaps
 
     # -- zones ---------------------------------------------------------------
     def add_zone(self, source_id: int | None, name: str, type: str,
