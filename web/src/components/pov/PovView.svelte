@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen, spatialOpen } from '../../lib/stores'
+  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen, spatialOpen, modules } from '../../lib/stores'
   import { SIM } from '../../lib/sim'
   import { LEX } from '../../lib/lexicon'
   import { api } from '../../lib/api'
@@ -8,6 +8,8 @@
   import type { Detection } from '../../lib/types'
   import { initFeedGL, type FeedGL } from '../../lib/hud/feedgl'
   import DetectionLayer from './DetectionLayer.svelte'
+  import GhostLayer from './GhostLayer.svelte'
+  import TacticalMap from './TacticalMap.svelte'
   import MatchHighlight from './MatchHighlight.svelte'
   import PtzPad from './PtzPad.svelte'
   import LiveThumb from '../LiveThumb.svelte'
@@ -20,6 +22,12 @@
   // Connecting stays visible until fully online (or the connection is dropped).
   let connecting = $derived(($conn === 'connecting' || $conn === 'reconnecting') && !SIM && !!$activeCam)
   let failed = $state(false)
+
+  // experiential overlays (left MODULES rail): predictive ghosts on the feed + the top-down
+  // tactical god-view. Both feed off the shared foresight engine; shown only over a real feed.
+  let ghostsOn = $derived(!!$modules.find((m) => m.key === 'ghosts')?.on)
+  let tacticalOn = $derived(!!$modules.find((m) => m.key === 'tactical')?.on)
+  let showOverlays = $derived((live && !failed) || SIM)
 
   // 3D fly-between: the old feed zooms out and banks away in perspective while the
   // new feed flies in from depth and settles to fullscreen — both visible, angled,
@@ -105,8 +113,11 @@
 
     <div class="grid-overlay"></div>
     <DetectionLayer />
+    {#if ghostsOn && showOverlays}<GhostLayer />{/if}
     <MatchHighlight />
   </div>
+
+  {#if tacticalOn && showOverlays}<TacticalMap />{/if}
 
   {#if connecting}
     <!-- keep the camera's thumbnail on screen while connecting so there is no black flash -->

@@ -62,6 +62,8 @@ export const MODULES = [
   { key: 'satellite', label: 'SATELLITE', group: 'SKY' },
   { key: 'tracklet', label: 'TRACKLET', group: 'FORENSIC' },
   { key: 'heatmap', label: 'HEATMAP', group: 'VISUAL' },
+  { key: 'tactical', label: 'TACTICAL', group: 'VISUAL' },
+  { key: 'ghosts', label: 'FORESIGHT', group: 'VISUAL' },
 ] as const
 
 export const clock = (d = new Date()): string =>
