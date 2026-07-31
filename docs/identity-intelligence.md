@@ -11,8 +11,10 @@ share one backbone: a persistent gallery of descriptors + a sighting log per sub
 - **Feature 7 - multi-frame super-resolution:** fuse many crops of one subject or plate into a
   single sharper, higher-resolution image.
 
-Open them in the app with the `DOSSIERS` nav button, the `y` key, or `dossiers` in the command
-palette.
+They live inside the roster **profile page** (`PoiDossier.svelte`): open any person/vehicle from the
+roster, and the long-term identity panel (repeat-visit pattern, gait / soft-biometric profile, and a
+CLARIFY PHOTO reconstruction button) sits under a shrunk movement trace. Double-clicking a node in
+the profile's relationship network navigates to that subject's profile with an animated transition.
 
 ## Backbone (feature 6): persistent identity
 
@@ -53,12 +55,15 @@ new persistent layer gives it a durable memory:
 
 ## Feature 7: multi-frame super-resolution
 
-- **`server/reconstruct.py`:** `reconstruct(crops)` ranks crops by sharpness, upscales, aligns each
-  to the sharpest with sub-pixel ECC, and robustly median-fuses the well-aligned ones (a median
-  rejects occluders and cuts sensor noise by ~sqrt(N)), then sharpens. Frames that do not align
-  above a correlation floor are rejected, so **the result is never worse than a good zoom**: a burst
-  of near-identical crops (a plate across frames) genuinely fuses (`method: multiframe`), while
-  disparate crops fall back to enhancing the single sharpest one (`method: single`).
+- **`server/reconstruct.py`:** `reconstruct(crops)` ranks crops by sharpness, Lanczos-upscales,
+  aligns each to the sharpest with sub-pixel ECC (run on capped-resolution crops for speed, the
+  affine then scaled to the output), and robustly median-fuses the well-aligned ones (a median
+  rejects occluders and cuts sensor noise by ~sqrt(N)). The output is finalized with edge-preserving
+  denoise + CLAHE local contrast + multi-scale unsharp. Frames that do not align above a correlation
+  floor are rejected, so **the result is never worse than a good zoom**: a burst of near-identical
+  crops (a plate across frames) genuinely fuses (`method: multiframe`), while disparate crops fall
+  back to a strong single-frame enhance (`method: single`). A learned face/plate super-resolution
+  model (GFPGAN / Real-ESRGAN) would be the next step for dramatic gains, at the cost of a download.
 - **Crop sources:** plate crops are buffered per track in `LivePlateReader` (previously read once and
   thrown away) and re-OCR'd after fusion; a subject's distinct sighting crops feed subject
   reconstruction.

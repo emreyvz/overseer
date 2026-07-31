@@ -43,14 +43,16 @@ def test_fusion_beats_single_frame() -> None:
     frames = [np.clip(deg.astype(np.float32) + rng.normal(0, 22.0, deg.shape), 0, 255).astype(np.uint8)
               for _ in range(10)]
 
-    out = reconstruct(frames, scale=2.0)
+    # enhance=False isolates the fusion (the sharpening pass deliberately adds high-freq detail that
+    # would otherwise make the fused image "further" from the smooth noise-free target)
+    out = reconstruct(frames, scale=2.0, enhance=False)
     assert out is not None
     fused = out["image"]
     assert abs(fused.shape[1] - 240) <= 4 and abs(fused.shape[0] - 128) <= 4
     assert out["frames_used"] >= 2 and out["frames_offered"] == 10
 
-    target = cv2.resize(deg, (fused.shape[1], fused.shape[0]), interpolation=cv2.INTER_CUBIC)
-    single_up = cv2.resize(frames[0], (fused.shape[1], fused.shape[0]), interpolation=cv2.INTER_CUBIC)
+    target = cv2.resize(deg, (fused.shape[1], fused.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+    single_up = cv2.resize(frames[0], (fused.shape[1], fused.shape[0]), interpolation=cv2.INTER_LANCZOS4)
     # fusing 10 noisy views lands closer to the noise-free image than any single noisy frame
     assert _mse(target, fused) < _mse(target, single_up)
 
