@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack, onMount, onDestroy } from 'svelte'
-  import { detections, selectedDetection, dossierOpen, flashBanner, forensicSeed, mode, cameras, activeCam, enrollOpen } from '../../lib/stores'
+  import { detections, selectedDetection, dossierOpen, flashBanner, forensicSeed, mode, cameras, activeCam, enrollOpen, modules } from '../../lib/stores'
   import { predictedDetections } from '../../lib/motion'
   import { sfx } from '../../lib/audio'
   import { trUpper } from '../../lib/lexicon'
@@ -8,6 +8,20 @@
   import { matchVerdict } from '../../lib/match'
   import { recordMatchFeedback } from '../../lib/feedback'
   import type { Detection } from '../../lib/types'
+
+  // Honour the DETECTION module toggles: a class the operator switched off must vanish from
+  // the overlay at once (the backend also stops producing it, but this makes it instant and
+  // also hides any predicted/coasting boxes still lingering in the store).
+  let modOn = $derived(new Map<string, boolean>($modules.map((m) => [m.key, m.on])))
+  const on = (k: string) => modOn.get(k) !== false
+  let shown = $derived($predictedDetections.filter((d) => {
+    if (!on('track') && d.coasting) return false          // tracking off -> drop held tracklets
+    if (d.klass === 'WEAPON') return on('weapon')
+    if (d.cls === 'person') return on('person')
+    if (d.cls === 'vehicle') return on('vehicle')
+    if (d.cls === 'animal') return on('animal')
+    return true
+  }))
 
   type Marker = 'ring' | 'cross' | 'tri' | 'tri-solid' | 'double'
   function markerOf(d: Detection): Marker {
@@ -142,7 +156,7 @@
 </script>
 
 <div class="layer">
-  {#each $predictedDetections as d (d.id)}
+  {#each shown as d (d.id)}
     {@const m = markerOf(d)}
     {@const a = $annotations[d.id] ?? {}}
     <div

@@ -500,6 +500,21 @@ async def api_roster_watch(det_id: str, body: dict) -> Any:
     return entry if entry else JSONResponse({"error": "not found"}, status_code=404)
 
 
+@app.get("/api/detection/filters")
+async def api_detection_filters() -> Any:
+    """The operator's per-class DETECTION toggles (person / vehicle / animal / weapon /
+    motion / track). Persisted server-side so disabling a class survives restarts and
+    actually drops it from the processing budget."""
+    return backend.get_detection_filters() if backend else {}
+
+
+@app.post("/api/detection/filters")
+async def api_detection_filters_set(payload: dict) -> Any:
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    return backend.set_detection_filters(payload or {})
+
+
 @app.get("/api/plates")
 async def api_plates_list() -> Any:
     """The plate watchlist — reading any of these on any camera raises a PLATE WATCHLIST HIT."""

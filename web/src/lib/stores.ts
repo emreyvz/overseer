@@ -1,5 +1,5 @@
 // OVERSEER — shared reactive state (svelte stores).
-import { writable } from 'svelte/store'
+import { get, writable } from 'svelte/store'
 import type {
   Alert, Camera, ConnState, Detection, FrameMeta, Metric, OOITarget, SystemStat, TimelineEvent,
 } from './types'
@@ -85,7 +85,52 @@ activeCam.subscribe((id) => {
   camTrail.update((t) => (t[t.length - 1] === id ? t : [...t, id]).slice(-8))
 })
 
-export const modules = writable(MODULES.map((m) => ({ ...m, on: !['heatmap', 'motion'].includes(m.key) })))
+// DETECTION-group modules that gate REAL backend load (persisted server-side, authority on
+// boot). The rest are display-only and persist in localStorage alone.
+const DETECTION_KEYS = ['motion', 'person', 'vehicle', 'animal', 'weapon', 'track']
+const MODULES_LS = 'overseer.modules'
+
+function seedModules() {
+  let saved: Record<string, boolean> = {}
+  try { saved = JSON.parse(localStorage.getItem(MODULES_LS) || '{}') } catch { saved = {} }
+  return MODULES.map((m) => ({
+    ...m,
+    on: m.key in saved ? !!saved[m.key] : !['heatmap', 'motion'].includes(m.key),
+  }))
+}
+export const modules = writable(seedModules())
+
+function saveModulesLocal() {
+  try {
+    const map = Object.fromEntries(get(modules).map((m) => [m.key, m.on]))
+    localStorage.setItem(MODULES_LS, JSON.stringify(map))
+  } catch { /* private mode / quota: non-fatal, backend still persists the class gates */ }
+}
+
+// Flip one module, persist locally, and for the DETECTION classes tell the backend so
+// the disabled class immediately drops off its processing budget (and stays off next session).
+export function toggleModule(key: string) {
+  modules.update((list) => list.map((m) => (m.key === key ? { ...m, on: !m.on } : m)))
+  saveModulesLocal()
+  if (DETECTION_KEYS.includes(key)) {
+    const filters = Object.fromEntries(
+      get(modules).filter((m) => DETECTION_KEYS.includes(m.key)).map((m) => [m.key, m.on]),
+    )
+    api.setDetectionFilters(filters).catch(() => { /* offline: localStorage still carries it */ })
+  }
+}
+
+// On boot, let the backend's persisted class gates win for the DETECTION group (they are the
+// source of truth; they actually govern the server's load), then mirror into localStorage.
+export async function hydrateModules() {
+  try {
+    const f = await api.detectionFilters()
+    if (f && Object.keys(f).length) {
+      modules.update((list) => list.map((m) => (m.key in f ? { ...m, on: !!f[m.key] } : m)))
+      saveModulesLocal()
+    }
+  } catch { /* backend down: keep localStorage-seeded state */ }
+}
 
 // UI state
 export const commandOpen = writable(false)

@@ -9,6 +9,7 @@ Thread model (per backend integration reference):
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import threading
 import time
@@ -195,6 +196,12 @@ class Backend:
         self._embed_lock = threading.Lock()   # serialize ReID encoder use (harvester vs search)
         self._roster_harvester = None
         self._roster_det = None
+        self._motion_det = None
+        # Operator's per-class DETECTION toggles (person / vehicle / animal / weapon /
+        # motion / track). Persisted in the settings table so a disabled class stays off
+        # (and off the processing budget) across restarts. `track` is display-only: the
+        # tracker underpins ReID, so it is never actually torn down backend-side.
+        self._detection_filters = self._load_detection_filters()
         self._roster_boot_lock = threading.Lock()  # guard boot-vs-connect harvester start race
         self._supercut_cache: dict[str, tuple[int, str]] = {}   # det_id -> (n legs, url)
         self._roster_fullres_last: dict[int, float] = {}  # per-source last full-res grab time
@@ -376,8 +383,11 @@ class Backend:
             self._buffer = FrameBuffer(maxsize=int(self.config.get("camera.buffer_size", 5)))
             self._health = HealthMonitor(freeze_timeout=float(self.config.get("camera.freeze_timeout", 10.0)))
             self._plugins = PluginManager()
-            self._plugins.register(MotionDetector(self.config))
+            self._motion_det = MotionDetector(self.config)
+            self._plugins.register(self._motion_det)
             self._load_yolo(self._plugins)
+            # apply the persisted class toggles to the freshly built detectors
+            self._apply_detection_filters()
 
             self._recorder = Recorder(self.config, self.db, on_status=lambda _s: self._push_system())
             self._recorder.source_id = source_id
@@ -463,6 +473,52 @@ class Backend:
             self._latest_img = None
             self.set_conn("offline")
 
+    # ---- detection class filters (operator MODULES rail) ---------------------------
+    _DETECTION_DEFAULTS = {"person": True, "vehicle": True, "animal": True,
+                           "weapon": True, "motion": True, "track": True}
+    _FILTER_CATEGORIES = {"person", "vehicle", "animal", "weapon"}  # keys that gate YOLO
+
+    def _load_detection_filters(self) -> dict:
+        saved: dict = {}
+        try:
+            raw = self.db.get_setting("detection.filters")
+            if raw:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    saved = {k: bool(v) for k, v in data.items()}
+        except Exception:  # noqa: BLE001 - never let a bad setting block boot
+            saved = {}
+        return {**self._DETECTION_DEFAULTS, **saved}
+
+    def get_detection_filters(self) -> dict:
+        return dict(self._detection_filters)
+
+    def set_detection_filters(self, filters: dict) -> dict:
+        """Merge the operator's toggles, persist them, and apply live to every detector so a
+        disabled class immediately stops costing us inference + all downstream work."""
+        for k, v in (filters or {}).items():
+            if k in self._DETECTION_DEFAULTS:
+                self._detection_filters[k] = bool(v)
+        try:
+            self.db.set_setting("detection.filters", json.dumps(self._detection_filters))
+        except Exception:  # noqa: BLE001
+            pass
+        self._apply_detection_filters()
+        return dict(self._detection_filters)
+
+    def _apply_detection_filters(self) -> None:
+        """Push the current filters onto whatever detectors exist right now: the live YOLO,
+        the roster harvester's YOLO, and the motion plugin. Safe before any exist (no-op)."""
+        cats = {c for c in self._FILTER_CATEGORIES if self._detection_filters.get(c, True)}
+        for yb in (self._yolo, self._roster_det):
+            if yb is not None:
+                try:
+                    yb.set_categories(cats)
+                except Exception:  # noqa: BLE001
+                    pass
+        if self._motion_det is not None:
+            self._motion_det.enabled = bool(self._detection_filters.get("motion", True))
+
     def _load_yolo(self, plugins: PluginManager) -> None:
         try:
             from ai.model_manager import ModelManager
@@ -526,6 +582,7 @@ class Backend:
                     watch_cooldown=float(self.config.get("roster.watch_cooldown", 45.0)),
                     interval=float(self.config.get("roster.interval", 4.0)),
                 )
+                self._apply_detection_filters()  # gate the harvester's YOLO to enabled classes too
                 self._roster_harvester.start()
                 log.info("roster harvester online")
             except Exception:  # noqa: BLE001
