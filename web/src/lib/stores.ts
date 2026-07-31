@@ -95,7 +95,7 @@ function seedModules() {
   try { saved = JSON.parse(localStorage.getItem(MODULES_LS) || '{}') } catch { saved = {} }
   return MODULES.map((m) => ({
     ...m,
-    on: m.key in saved ? !!saved[m.key] : !['heatmap', 'motion'].includes(m.key),
+    on: m.key in saved ? !!saved[m.key] : !['heatmap', 'motion', 'tactical', 'ghosts'].includes(m.key),
   }))
 }
 export const modules = writable(seedModules())
