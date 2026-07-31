@@ -6,24 +6,44 @@
   // to select it on the main view.
   import { get } from 'svelte/store'
   import { tracks, predict, encounters, type FTrack } from '../../lib/foresight'
-  import { detections, selectedDetection } from '../../lib/stores'
+  import { detections, selectedDetection, activeCam } from '../../lib/stores'
+  import { ensureDepthField, cachedDepthField, type DepthField } from '../../lib/depthField'
   import { sfx } from '../../lib/audio'
 
   const VB_W = 150, VB_H = 110
-  const HORIZON_IMG = 0.30      // image y of the horizon line (above = too far to place)
-  const FOV = 1.15              // assumed horizontal field of view (~66 deg)
+  const HORIZON_IMG = 0.30      // image y of the horizon line (fallback heuristic only)
+  const FOV = Math.PI / 3       // nominal 60 deg (matches spatial.fov_deg) when no depth field yet
   const NEAR_R = 0.10, FAR_R = 1.0
   const GHOST_DT = 2.2          // seconds ahead for the map's ghost blip
   const MOVING = 0.03
 
   const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v)
-  // inverse-perspective: image ground point -> bird's-eye position in [0..1] scope space
-  function project(gx: number, gy: number): { x: number; y: number } {
-    const yy = clamp((gy - HORIZON_IMG) / (1 - HORIZON_IMG), 0, 1)   // 0 far .. 1 near
-    const r = NEAR_R + (FAR_R - NEAR_R) * (1 - yy)                   // near objects close in
-    const theta = (gx - 0.5) * FOV
+
+  // Real depth for the active camera (Depth Anything, backend). When present, contacts are placed
+  // by true scene depth + real FOV; otherwise we fall back to the calibration-free heuristic.
+  let df = $state<DepthField | null>(null)
+  $effect(() => {
+    const sid = $activeCam
+    df = sid ? cachedDepthField(sid) : null
+    if (!sid) return
+    let alive = true
+    const pull = () => ensureDepthField(sid).then((f) => { if (alive && $activeCam === sid) df = f })
+    pull()
+    const iv = setInterval(pull, 30000)   // scene depth drifts slowly; refresh occasionally
+    return () => { alive = false; clearInterval(iv) }
+  })
+
+  // fan projection shared by both modes: radial distance `dist` (0 near..1 far) + angle `theta`
+  const fan = (dist: number, theta: number) => {
+    const r = NEAR_R + (FAR_R - NEAR_R) * dist
     const lateral = Math.sin(theta) * (0.30 + 0.5 * r)
     return { x: clamp(0.5 + lateral, 0.03, 0.97), y: clamp(0.94 - r * Math.cos(theta) * 0.86, 0.05, 0.95) }
+  }
+  // image ground point -> bird's-eye position in [0..1] scope space
+  function project(gx: number, gy: number): { x: number; y: number } {
+    if (df) return fan(df.distAt(gx, gy), (gx - 0.5) * df.fovRad)          // real depth + real FOV
+    const near = clamp((gy - HORIZON_IMG) / (1 - HORIZON_IMG), 0, 1)       // fallback heuristic
+    return fan(1 - near, (gx - 0.5) * FOV)
   }
   const toVB = (p: { x: number; y: number }) => ({ x: p.x * VB_W, y: p.y * VB_H })
   const colorOf = (t: FTrack): string =>
@@ -59,6 +79,7 @@
 <div class="tac">
   <div class="thead caps">
     <span class="tt">◎ TACTICAL · GOD-VIEW</span>
+    <span class="tmode" class:lock={!!df} title={df ? 'Placed by Depth Anything scene depth' : 'Estimated (no depth field yet)'}>{df ? '◈ DEPTH-LOCKED' : '◇ ESTIMATED'}</span>
     <span class="tc">{blips.length} CONTACT{blips.length === 1 ? '' : 'S'}</span>
   </div>
   <div class="scope">
@@ -104,6 +125,8 @@
   @keyframes tin { from { opacity: 0; transform: translate(-50%, 12px); } }
   .thead { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid var(--hairline); }
   .tt { font-size: 8px; color: var(--cyan); letter-spacing: 0.16em; }
+  .tmode { font-size: 7px; letter-spacing: 0.12em; color: var(--ink-ghost); border: 1px solid var(--hairline); padding: 1px 5px; }
+  .tmode.lock { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, transparent); }
   .tc { font-size: 8px; color: var(--ink-dim); letter-spacing: 0.1em; }
   .scope { position: relative; background: radial-gradient(120% 90% at 50% 100%, #071119 0%, #04070a 70%); }
   svg { display: block; width: 100%; height: auto; }
