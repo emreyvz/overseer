@@ -1333,6 +1333,25 @@ class Backend:
         disp = self._depth.estimate(work)
         if disp is None:
             return {"scene": None, "reason": "depth_unavailable"}
+        # Multi-frame temporal fusion (spatial.fuse_frames): grab a few more frames at short
+        # intervals and take the per-pixel MEDIAN of their depth. For a fixed camera this averages
+        # out the per-frame monocular-depth noise on the static scene (noise ~ 1/sqrt(N)), while the
+        # median stays robust to moving objects (a person/car crossing doesn't smear the geometry).
+        n_fuse = max(1, int(self.config.get("spatial.fuse_frames", 1)))
+        if n_fuse > 1:
+            stack = [disp]
+            wh = (work.shape[1], work.shape[0])
+            for _ in range(n_fuse - 1):
+                time.sleep(float(self.config.get("spatial.fuse_delay", 0.1)))   # let a new frame arrive
+                fk = self._source_frame(src)
+                if fk is None:
+                    continue
+                wk = fk if fk.shape[:2] == work.shape[:2] else cv2.resize(fk, wh, interpolation=cv2.INTER_AREA)
+                dk = self._depth.estimate(wk)
+                if dk is not None and dk.shape == disp.shape:
+                    stack.append(dk)
+            if len(stack) > 1:
+                disp = np.median(np.stack(stack, axis=0), axis=0).astype(np.float32)
         grid_w = max(120, min(int(grid_w), 480))
         gh = max(1, int(grid_w * work.shape[0] / work.shape[1]))
         rgb_grid = cv2.resize(work, (grid_w, gh), interpolation=cv2.INTER_AREA)
@@ -1366,10 +1385,6 @@ class Backend:
         ok_t, texjpg = cv2.imencode(".jpg", texframe, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if ok_t:
             scene["tex_image"] = _b64.b64encode(texjpg.tobytes()).decode("ascii")
-        # detected object boxes (normalized) with class, so the frontend can shape each object's
-        # occluded BACK per class (a vehicle as a full body, a person thin) instead of a flat cap.
-        scene["boxes"] = [{"x1": b[0], "y1": b[1], "x2": b[2], "y2": b[3], "cls": e["cls"]}
-                          for b, e in zip(boxes, entities)]
         return {"scene": scene}
 
     def _spatial_entities(self, frame: Any, disp: Any, dmin: float,
