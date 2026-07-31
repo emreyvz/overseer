@@ -234,6 +234,11 @@ vehicle:
 gait:
   enabled: true
 
+# Photo reconstruction (feature 7): multi-frame fusion + a learned super-resolution model
+# (Real-ESRGAN, ~5 MB, auto-downloads once). Falls back to a classical enhancement if unavailable.
+reconstruct:
+  super_resolution: true
+
 pose:
   enabled: true
   buffer_size: 30
