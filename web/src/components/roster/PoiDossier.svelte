@@ -83,7 +83,7 @@
     const uid = entry.subject_uid ?? null
     if (uid === dossierFor) return
     dossierFor = uid
-    dossier = null; recon = null
+    dossier = null; recon = null; viewer = false
     if (uid != null) api.subjectDossier(uid).then((r) => { dossier = r.dossier }).catch(() => {})
   })
   async function reconstruct() {
@@ -92,6 +92,11 @@
     try { recon = await api.subjectReconstruct(entry.subject_uid) } catch { recon = { image: null, reason: 'error' } }
     reconBusy = false
   }
+  // full-screen viewer: compare the original vs the super-resolved photo, large
+  let viewer = $state(false)
+  let viewerSuper = $state(false)
+  function openViewer(sup = false) { viewerSuper = sup && !!recon?.image; viewer = true; sfx('sonar') }
+  function closeViewer() { viewer = false; sfx('click') }
   const maxHour = $derived(dossier ? Math.max(1, ...dossier.hour_histogram) : 1)
   const num = (v: unknown) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v)
   // distinct stored crops for this subject (many sightings can share one snapshot) — so you can see
@@ -200,7 +205,7 @@
     mode.set('pov')
   }
   function close() { if (closing) return; sfx('click'); closing = true; setTimeout(onclose, 360) }
-  function onkey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); close() } }
+  function onkey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); if (viewer) closeViewer(); else close() } }
   onMount(() => {
     sfx('sonar'); window.addEventListener('keydown', onkey, true)
     obsN.set(entry.obs); camN.set(nodes.length)
@@ -228,8 +233,11 @@
         {#if reconBusy}<span class="portscan"></span>{/if}
         {#if recon?.image}<span class="srbadge caps">◈ {recon.method === 'sr' ? 'AI SUPER-RES' : recon.method === 'multiframe' ? 'FUSED ×' + recon.frames_used : 'CLARIFIED'}</span>{/if}
         {#if watched}<span class="bolo caps">◉ BOLO · WATCHED</span>{/if}
-        {#if recon?.image}<button class="cut caps" onclick={() => (recon = null)}>× ORIGINAL</button>
-        {:else if entry.snapshot}<button class="cut caps" onclick={() => (cutout = !cutout)}>{cutout ? 'RESTORE BG' : 'ISOLATE'}</button>{/if}
+        <div class="pbar">
+          {#if recon?.image}<button class="cut caps" onclick={() => (recon = null)}>× ORIGINAL</button>
+          {:else if entry.snapshot}<button class="cut caps" onclick={() => (cutout = !cutout)}>{cutout ? 'RESTORE BG' : 'ISOLATE'}</button>{/if}
+          {#if entry.snapshot || recon?.image}<button class="cut caps" onclick={() => openViewer(!!recon?.image)} title="View large">⛶ FULL</button>{/if}
+        </div>
         {#if camByName(entry.cam)}<button class="s3d caps" onclick={() => spatialOpen.set(camByName(entry.cam)!.id)} title="Reconstruct this subject's scene in 3D">⛶ 3D</button>{/if}
       </div>
 
@@ -406,6 +414,30 @@
       </div>
     </section>
   </div>
+
+  {#if viewer}
+    <!-- full-screen photo viewer: original vs super-res, large -->
+    <div class="viewer">
+      <button class="vbackdrop" aria-label="close" onclick={closeViewer}></button>
+      <div class="vpanel">
+        <div class="vhead caps">
+          <div class="vtabs">
+            <button class:on={!viewerSuper} onclick={() => (viewerSuper = false)}>ORIGINAL</button>
+            {#if recon?.image}<button class:on={viewerSuper} onclick={() => (viewerSuper = true)}>◈ SUPER-RES</button>{/if}
+          </div>
+          <span class="vname">{designation}</span>
+          <button class="vclose caps" onclick={closeViewer}>CLOSE ✕</button>
+        </div>
+        <div class="vbody">
+          {#if viewerSuper && recon?.image}
+            <img src={`data:image/jpeg;base64,${recon.image}`} alt="super-res" />
+          {:else if photo}
+            <img src={photo} alt="original" />
+          {:else}<div class="noimg caps">NO IMAGE</div>{/if}
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -451,6 +483,27 @@
     background: linear-gradient(transparent, rgba(56,208,227,0.24), transparent); background-size: 100% 42%;
     background-repeat: no-repeat; animation: portscan 1.1s linear infinite; }
   @keyframes portscan { 0% { background-position: 0 -42%; } 100% { background-position: 0 142%; } }
+
+  /* ── FULL-SCREEN PHOTO VIEWER ── */
+  .viewer { position: fixed; inset: 0; z-index: calc(var(--z-boot) + 10); display: grid; place-items: center;
+    animation: vfade 220ms ease both; }
+  @keyframes vfade { from { opacity: 0; } }
+  .vbackdrop { position: absolute; inset: 0; background: rgba(2,4,7,0.86); backdrop-filter: blur(6px); border: 0; cursor: zoom-out; }
+  .vpanel { position: relative; z-index: 1; width: min(92vw, 900px); max-height: 92vh; display: flex; flex-direction: column;
+    background: #05080b; border: 1px solid var(--hairline); box-shadow: 0 40px 120px rgba(0,0,0,0.7);
+    animation: vpop 340ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  @keyframes vpop { from { opacity: 0; transform: scale(0.92) translateY(16px); } }
+  .vhead { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); }
+  .vtabs { display: flex; gap: 2px; }
+  .vtabs button { padding: 6px 14px; background: none; border: 1px solid var(--hairline); color: var(--ink-dim);
+    font-size: 9px; letter-spacing: 0.16em; cursor: pointer; }
+  .vtabs button.on { border-color: var(--cyan); color: #04070a; background: var(--cyan); }
+  .vname { color: var(--ink-ghost); font-size: 10px; letter-spacing: 0.14em; }
+  .vclose { margin-left: auto; background: none; border: 1px solid var(--hairline); color: var(--ink-dim);
+    padding: 6px 14px; font-size: 9px; letter-spacing: 0.16em; cursor: pointer; }
+  .vclose:hover { border-color: var(--scarlet); color: var(--scarlet); }
+  .vbody { flex: 1; min-height: 0; display: grid; place-items: center; overflow: auto; background: #04060a; padding: 12px; }
+  .vbody img { max-width: 100%; max-height: 78vh; object-fit: contain; display: block; }
   .portrait::after { content: ''; position: absolute; left: 0; right: 0; height: 22%; pointer-events: none;
     background: linear-gradient(transparent, rgba(56,208,227,0.22), transparent); animation: pscan 1400ms 260ms ease-out both; }
   @keyframes pscan { from { transform: translateY(-25%); } to { transform: translateY(460%); opacity: 0; } }
@@ -470,7 +523,8 @@
   @keyframes reticleon { from { opacity: 0; transform: scale(1.5) rotate(-40deg); } to { opacity: 0.8; transform: scale(1) rotate(0); } }
   .lock { position: absolute; top: 16px; right: 46px; z-index: 3; font-size: 9px; letter-spacing: 0.24em; color: var(--cyan);
     opacity: 0; animation: fadein 400ms 720ms both; }
-  .cut { position: absolute; bottom: 12px; left: 12px; z-index: 3; padding: 4px 10px; border: 1px solid var(--hairline);
+  .pbar { position: absolute; bottom: 12px; left: 12px; z-index: 3; display: flex; gap: 6px; }
+  .cut { padding: 4px 10px; border: 1px solid var(--hairline);
     background: rgba(5,8,11,0.7); color: var(--ink-dim); font-size: 8px; letter-spacing: 0.16em; cursor: pointer; }
   .cut:hover { border-color: var(--cyan); color: var(--cyan); }
   .s3d { position: absolute; bottom: 12px; right: 12px; z-index: 3; padding: 4px 10px; border: 1px solid var(--hairline);
