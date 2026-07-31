@@ -7,7 +7,7 @@ import { MODULES } from './lexicon'
 import { fpRate } from './feedback'
 import { api } from './api'
 
-export type Mode = 'pov' | 'montage' | 'topology' | 'forensic' | 'archive' | 'case' | 'roster' | 'dossiers'
+export type Mode = 'pov' | 'montage' | 'topology' | 'forensic' | 'archive' | 'case' | 'roster'
 
 export const booted = writable(false)
 export type Stage = 'boot' | 'select' | 'live'
