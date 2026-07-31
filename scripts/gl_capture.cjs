@@ -16,6 +16,11 @@ const PITCH = pitchArg ? pitchArg.split('=')[1] : ''
 const yawArg = process.argv.find((a) => a.startsWith('--yaw='))
 const YAW = yawArg ? yawArg.split('=')[1] : ''
 const FOCUS = process.argv.includes('--focus')
+const IDENTITY = process.argv.includes('--identity')
+const NODEBOW = process.argv.includes('--nodebow')
+const NOCULL = process.argv.includes('--nocull')
+const gridArg = process.argv.find((a) => a.startsWith('--grid='))
+const GRID = gridArg ? gridArg.split('=')[1] : ''
 
 async function shot(mode, out) {
   const win = new BrowserWindow({
@@ -26,7 +31,7 @@ async function shot(mode, out) {
   win.webContents.on('console-message', (_e, _l, msg) => { if (/error|Error|undefined/.test(msg)) errs.push(msg) })
   let loaded = false
   for (let attempt = 0; attempt < 4 && !loaded; attempt++) {
-    try { await win.loadURL(`${PAGE}?mode=${mode}&sid=${SID}${PITCH ? '&pitch=' + PITCH : ''}${YAW ? '&yaw=' + YAW : ''}${FOCUS ? '&focus=1' : ''}`); loaded = true }
+    try { await win.loadURL(`${PAGE}?mode=${mode}&sid=${SID}${PITCH ? '&pitch=' + PITCH : ''}${YAW ? '&yaw=' + YAW : ''}${FOCUS ? '&focus=1' : ''}${IDENTITY ? '&identity=1' : ''}${NODEBOW ? '&nodebow=1' : ''}${NOCULL ? '&nocull=1' : ''}${GRID ? '&grid=' + GRID : ''}`); loaded = true }
     catch (e) { await new Promise((r) => setTimeout(r, 600)) }
   }
   if (!loaded) { console.log(`[${mode}] load failed`); win.destroy(); return }

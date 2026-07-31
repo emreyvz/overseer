@@ -171,7 +171,19 @@ function layerMesh(disp, rgba, w, h, fx, cx, cy, opt) {
   const el = (va, vb) => Math.hypot(pos[va * 3] - pos[vb * 3], pos[va * 3 + 1] - pos[vb * 3 + 1], pos[va * 3 + 2] - pos[vb * 3 + 2])
   const edge = new Map(), bump = (a, b) => { const k = a < b ? a + '_' + b : b + '_' + a; edge.set(k, (edge.get(k) ?? 0) + 1) }
   const dj = opt.dispJump ?? Infinity
-  const tri = (a, b, c) => { const va = vidx[a], vb = vidx[b], vc = vidx[c]; if (va < 0 || vb < 0 || vc < 0) return; if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > (opt.maxlen ?? Infinity)) return; const da = disp[a], db = disp[b], dc = disp[c]; if (Math.max(Math.abs(da - db), Math.abs(db - dc), Math.abs(da - dc)) > dj) return; const za = zOf(da), zb = zOf(db), zc = zOf(dc); if (Math.max(za, zb, zc) - Math.min(za, zb, zc) > (opt.zrange ?? Infinity)) return; idx.push(va, vb, vc); if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) } }
+  const graze = opt.graze ?? 0
+  const grazeCull = (va, vb, vc) => {
+    if (graze <= 0) return false
+    const ax = pos[va * 3], ay = pos[va * 3 + 1], az = pos[va * 3 + 2]
+    const e1x = pos[vb * 3] - ax, e1y = pos[vb * 3 + 1] - ay, e1z = pos[vb * 3 + 2] - az
+    const e2x = pos[vc * 3] - ax, e2y = pos[vc * 3 + 1] - ay, e2z = pos[vc * 3 + 2] - az
+    let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x
+    const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl
+    const mx = (ax + pos[vb * 3] + pos[vc * 3]) / 3, my = (ay + pos[vb * 3 + 1] + pos[vc * 3 + 1]) / 3, mz = (az + pos[vb * 3 + 2] + pos[vc * 3 + 2]) / 3
+    const ml = Math.hypot(mx, my, mz) || 1
+    return Math.abs((nx * mx + ny * my + nz * mz) / ml) < graze
+  }
+  const tri = (a, b, c) => { const va = vidx[a], vb = vidx[b], vc = vidx[c]; if (va < 0 || vb < 0 || vc < 0) return; if (Math.max(el(va, vb), el(vb, vc), el(va, vc)) > (opt.maxlen ?? Infinity)) return; const da = disp[a], db = disp[b], dc = disp[c]; if (Math.max(Math.abs(da - db), Math.abs(db - dc), Math.abs(da - dc)) > dj) return; const za = zOf(da), zb = zOf(db), zc = zOf(dc); if (Math.max(za, zb, zc) - Math.min(za, zb, zc) > (opt.zrange ?? Infinity)) return; if (grazeCull(va, vb, vc)) return; idx.push(va, vb, vc); if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) } }
   for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) { const tl = y * w + x, tr = tl + 1, bl = tl + w, br = bl + 1; tri(tl, bl, tr); tri(tr, bl, br) }
   if (opt.flattenCoef) { const [a, b, c] = opt.flattenCoef; for (let j = 0; j < nF; j++) { const Z = vz[j]; let r = pos[j * 3 + 1] - (a + b * Z + c * Z * Z); r = Math.max(-0.6, Math.min(2.2, r)); pos[j * 3 + 1] = r * RELIEF } }
   if (solid) {
@@ -258,7 +270,7 @@ function buildComposer(renderer, scene, camera, w, h) {
   composer.addPass(new OutputPass())
   // vignette LAST, in sRGB/LDR: mixing toward black (darkness<1) — if run before ACES it feeds
   // negatives to the tone-mapper and the corners turn orange.
-  const vig = new ShaderPass(VignetteShader); vig.uniforms.offset.value = 1.0; vig.uniforms.darkness.value = 0.85
+  const vig = new ShaderPass(VignetteShader); vig.uniforms.offset.value = 1.1; vig.uniforms.darkness.value = 0.5
   composer.addPass(vig)
   return composer
 }
@@ -287,10 +299,10 @@ async function main() {
   renderer.setClearColor(0x04060a, 1)
   host.appendChild(renderer.domElement)
   const scene = new THREE.Scene()
-  scene.fog = new THREE.FogExp2(0x05070a, 0.045)
+  scene.fog = new THREE.FogExp2(0x05070a, 0.05)
   const camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 200)
 
-  const r = await fetch(`http://127.0.0.1:8787/api/spatial/${SID}?grid=384`).then(x => x.json())
+  const r = await fetch(`http://127.0.0.1:8787/api/spatial/${SID}?grid=${P.get('grid') || 384}`).then(x => x.json())
   const s = r.scene
   const W = s.w, H = s.h, fov = s.fov
   const bytes = Uint8Array.from(atob(s.depth), c => c.charCodeAt(0))
@@ -319,7 +331,12 @@ async function main() {
     const T = b.cls === 'vehicle' ? Math.min(1.6, Math.max(0.5, 1.5 * worldW)) : b.cls === 'person' ? 0.15 : Math.min(0.9, Math.max(0.3, worldW))
     for (let y = y1; y < y2; y++) for (let x = x1; x < x2; x++) objDepth[y * W + x] = T
   }
-  const mesh = layerMesh(fgDisp, rgba, W, H, fx, cx, cy, { solid: true, bgdisp: null, maxT: 0.5, flattenCoef: gy, tex, keep, dispJump: DISP_JUMP, maxlen: MAXLEN, zrange: ZRANGE, objDepth, lit })
+  // DEMO: identity mode = pure back-projection (no de-bow) so the from-camera view reproduces the photo
+  const identity = P.get('identity') === '1'
+  const nodebow = P.get('nodebow') === '1'   // keep solid+cull, only drop the de-bow (test the app variant)
+  const nocull = P.get('nocull') === '1'     // solid ON but continuous (no cull) -> no stretched side-walls
+  const cullOff = (identity && !nodebow) || nocull
+  const mesh = layerMesh(fgDisp, rgba, W, H, fx, cx, cy, { solid: !identity || nodebow || nocull, bgdisp: null, maxT: 0.5, flattenCoef: (identity || nodebow || nocull) ? null : gy, tex, keep, dispJump: cullOff ? Infinity : DISP_JUMP, maxlen: MAXLEN, zrange: cullOff ? Infinity : ZRANGE, objDepth, lit, graze: (nodebow && !nocull) ? 0.08 : 0 })
   scene.add(mesh)
 
   // framing (same as SpatialView)
@@ -336,8 +353,17 @@ async function main() {
     tgt = new THREE.Vector3((px - cx) * Zc / fx, 0.25, -Zc)
     fdist = Math.max(1.6, Zc * 0.55)
   }
-  camera.position.set(tgt.x + fdist * Math.sin(yaw) * Math.cos(pitch), tgt.y + fdist * Math.sin(pitch), tgt.z + fdist * Math.cos(yaw) * Math.cos(pitch))
-  camera.lookAt(tgt); camera.updateProjectionMatrix()
+  if (identity) {
+    // put the view camera EXACTLY at the capture pose: optical centre at the origin, looking down -Z,
+    // with the capture FOV (converted from the horizontal fx-based fov to three.js's vertical fov for
+    // the frame aspect). From here the projection is the inverse of the back-projection -> the photo.
+    camera.fov = 2 * Math.atan((H / W) * Math.tan(fov * Math.PI / 360)) * 180 / Math.PI
+    camera.aspect = w / h
+    camera.position.set(0, 0, 0.001); camera.lookAt(0, 0, -1); camera.updateProjectionMatrix()
+  } else {
+    camera.position.set(tgt.x + fdist * Math.sin(yaw) * Math.cos(pitch), tgt.y + fdist * Math.sin(pitch), tgt.z + fdist * Math.cos(yaw) * Math.cos(pitch))
+    camera.lookAt(tgt); camera.updateProjectionMatrix()
+  }
 
   // GENTLE scene-adaptive exposure from the SUBJECT (kept pixels only, so a dark/black sky doesn't
   // skew it). Tight clamp around the base 1.15 -> dark scenes stay dark-ish, bright ones don't blow.
@@ -346,9 +372,17 @@ async function main() {
   const meanLum = cnt ? (sum / cnt) / 255 : 0.25
   const exposure = Math.min(1.3, Math.max(0.9, 0.26 / Math.max(0.06, meanLum)))
 
+  // sky/fog colour from the frame's own sky (mirror of SpatialView.tintSkyFromFrame)
+  let skyTop = null, skyBot = null
+  {
+    let sr = 0, sg = 0, sb = 0, sn = 0, rows = Math.floor(H * 0.4)
+    for (let y = 0; y < rows; y++) for (let x = 0; x < W; x++) { if (disp[y * W + x] >= SKYCULL) continue; const p = (y * W + x) * 4; sr += rgba[p]; sg += rgba[p + 1]; sb += rgba[p + 2]; sn++ }
+    if (sn >= W * H * 0.02) { skyTop = new THREE.Color(0x1b3350).lerp(new THREE.Color(sr / sn / 255, sg / sn / 255, sb / sn / 255), 0.3) }   // gentle nudge, fog stays dark
+  }
+
   let composer = null
-  if (MODE === 'after' || MODE === 'lit') {
-    addSky(scene)
+  if ((!identity || nodebow || nocull) && (MODE === 'after' || MODE === 'lit')) {   // app-representative: keep sky+post
+    addSky(scene, skyTop)
     addShadows(scene, s.entities || [], W, fx, cx)
     drawMM(box, s.entities || [], W, fx, cx, camera.position, c)
     if (lit) {

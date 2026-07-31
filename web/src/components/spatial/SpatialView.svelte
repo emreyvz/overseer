@@ -63,6 +63,11 @@
                               // long "back stretches" (a vehicle reaching to the end of the scene) that
                               // a gradual disparity ramp slips past DISP_JUMP. Flat ground has tiny
                               // Z-range per triangle, so it stays fully meshed.
+  // De-bow bends the geometry (subtracts the ground trend, scales relief) to make objects "stand up"
+  // from an orbit angle — but that shear breaks the from-camera view. OFF: pure back-projection, so
+  // the scene opens EXACTLY as the camera saw it (see the identity framing below) and only reveals
+  // its 2.5-D nature when you orbit. Flip to true for the old stand-up-diorama look.
+  const DEBOW = false
   const CLS_COLOR: Record<string, string> = {
     person: '#35e0ff', vehicle: '#ffb038', animal: '#6be675', object: '#c9d4dc', weapon: '#ff3b3b',
   }
@@ -82,6 +87,7 @@
   let raf = 0
   let ro: ResizeObserver | null = null
   let autoTimer: ReturnType<typeof setInterval> | null = null
+  let hasFramed = false   // set the capture-pose camera only on first load, so a refresh keeps the orbit
   // top-down mini-map data + temporal-stabilisation state
   let mapPts: { x: number; z: number; color: string }[] = []
   let mapBox: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null
@@ -104,7 +110,7 @@
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
     renderer.domElement.addEventListener('pointerup', onPointerUp)
     scene = new THREE.Scene()
-    scene.fog = new THREE.FogExp2(0x0b131c, 0.04)         // fog colour matches the sky horizon
+    scene.fog = new THREE.FogExp2(0x0b131c, 0.05)         // dark, modest density: softens far stretches into depth without hazing the near scene
     camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 200)
     camera.position.set(0, 0, 0.1)
     controls = new OrbitControls(camera, renderer.domElement)
@@ -148,6 +154,33 @@
     scene.add(sky)
   }
 
+  // Tint the sky dome + distance fog from the frame's OWN sky (the top rows the depth flags as sky),
+  // so the reconstruction sits under a matching horizon and far/stretched geometry fades into that
+  // sky rather than a generic navy. Indoor frames (little or no sky) restore the default, so a
+  // ceiling of products never becomes a brown "sky".
+  function tintSkyFromFrame(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number) {
+    const skyMat = sky ? (sky.material as THREE.ShaderMaterial) : null
+    if (!skyMat) return
+    let r = 0, g = 0, b = 0, n = 0
+    const rows = Math.floor(h * 0.4)
+    for (let y = 0; y < rows; y++) for (let x = 0; x < w; x++) {
+      if (disp[y * w + x] >= SKYCULL) continue          // not a sky pixel
+      const p = (y * w + x) * 4; r += rgba[p]; g += rgba[p + 1]; b += rgba[p + 2]; n++
+    }
+    if (n < w * h * 0.02) {                              // indoor / no sky -> default navy
+      skyMat.uniforms.top.value.setHex(0x1b3350); skyMat.uniforms.bot.value.setHex(0x0b131c)
+      if (scene?.fog) (scene.fog as THREE.FogExp2).color.setHex(0x0b131c)
+      return
+    }
+    // NUDGE the stylised default toward the real sky (don't replace it): a blue sky leans blue, a
+    // sunset warms, while a flat/hazy grey sky only shifts the navy slightly — so we keep the pleasing
+    // dark backdrop and never wash it out to the raw (often dull) sky. Blend is gentle.
+    const sampled = new THREE.Color(r / n / 255, g / n / 255, b / n / 255)
+    skyMat.uniforms.top.value.setHex(0x1b3350).lerp(sampled, 0.3)
+    skyMat.uniforms.bot.value.setHex(0x0b131c).lerp(sampled.clone().multiplyScalar(0.5), 0.3)
+    // fog stays dark on purpose: matching it to a bright sky hazes the whole mesh grey.
+  }
+
   // Post-processing chain (verified via the offline Electron capture harness, scripts/gl_*):
   // RenderPass -> GTAO (ground-object contact/crease occlusion) -> subtle bloom on highlights ->
   // OutputPass (ACES tone map + sRGB). Kept unlit (texture carries the scene's real light).
@@ -167,7 +200,7 @@
     // subtle vignette LAST (sRGB/LDR): mixing toward black focuses the frame. Before the tone-map
     // it would feed negatives to ACES and orange the corners.
     const vig = new ShaderPass(VignetteShader)
-    vig.uniforms.offset.value = 1.0; vig.uniforms.darkness.value = 0.85
+    vig.uniforms.offset.value = 1.1; vig.uniforms.darkness.value = 0.5   // gentle: the from-camera view should read like the frame, not a heavily-vignetted monitor
     composer.addPass(vig)
   }
 
@@ -474,6 +507,7 @@
     // silhouettes (stretched skirts culled).
     const fg = await decodeLayer(image, depth, w, h)
     if (auto) applyTemporal(fg.disp, `${cam}:${w}x${h}`)   // LIVE: stabilise depth vs last frame
+    tintSkyFromFrame(fg.disp, fg.rgba, w, h)   // sky dome + fog match the frame's own sky (outdoor)
     // the completed background (computed backend-side) is decoded first: it's both the far-field
     // fill AND the back-cap that turns foreground objects into solid volumes.
     const bg = (bg_image && bg_depth) ? await decodeLayer(bg_image, bg_depth, w, h) : null
@@ -515,16 +549,23 @@
     // span a depth discontinuity (DISP_JUMP) -> crisp object silhouettes that stand up, while the
     // continuous ground stays a solid, gap-free surface. Culled boundaries are closed by the solid
     // side-walls (below), so no see-through black behind objects.
+    // CONTINUOUS surface (no depth-jump / z-range cull): culling opens gaps that the solid fills with
+    // stretched, dimmed side-walls — which read as "irrelevant blur" and over-stretched bits from the
+    // camera. A gap-free mesh instead reproduces the frame 1:1 head-on, and when orbited it stretches
+    // its own texture at occlusion edges (coherent) rather than tearing into blurry walls / dark holes.
     mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, 1e9, 0,
-      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: gy, tex: fgTex, keep, dispJump: DISP_JUMP, zrange: ZRANGE })
+      { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: DEBOW ? gy : null, tex: fgTex, keep, dispJump: Infinity, zrange: Infinity })
     scene.add(mesh)
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
     if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
-    if (bg && bgDisp) {
+    // Only needed for the de-bow diorama: with a CONTINUOUS foreground (no cull) the fg has no
+    // object-holes for a bg to show through, so this inpainted (blurry) completion is redundant and
+    // would only peek through as blur. Skip it and let true gaps read as the sky backdrop.
+    if (DEBOW && bg && bgDisp) {
       // dispJump cull + a firm push-back so the completion layer stays BEHIND the foreground and its
       // ground-fill boundary can't stretch a blurry smear in front of objects (e.g. a car).
-      bgMesh = layerMesh(bgDisp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.15, { flattenCoef: gy, dim: 0.6, dispJump: DISP_JUMP })
+      bgMesh = layerMesh(bgDisp, bg.rgba, w, h, fx, cx, cy, MESH_MAXLEN * 2.5, 0.15, { flattenCoef: DEBOW ? gy : null, dim: 0.6, dispJump: DISP_JUMP })
       scene.add(bgMesh)
     }
 
@@ -544,32 +585,36 @@
     // as standing ON the surface rather than floating (complements the GTAO crease occlusion).
     if (shadows) { scene.remove(shadows); disposeShadows() }
     shadows = new THREE.Group()
-    const sblob = shadowBlobTex()
-    for (const e of entities) {
-      const Z = zOf(e.depth), X = (e.cx * w - cx) * Z / fx
-      const r = e.cls === 'vehicle' ? 1.1 : e.cls === 'person' ? 0.5 : 0.7
-      const sm = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
-        new THREE.MeshBasicMaterial({ map: sblob, transparent: true, depthWrite: false, opacity: 0.9 }))
-      sm.rotation.x = -Math.PI / 2; sm.scale.set(r * 2, r * 2, 1); sm.position.set(X, 0.02, -Z)
-      shadows.add(sm)
+    if (DEBOW) {   // blobs assume a FLAT ground at Y=0; without de-bow the ground is curved, so they float
+      const sblob = shadowBlobTex()
+      for (const e of entities) {
+        const Z = zOf(e.depth), X = (e.cx * w - cx) * Z / fx
+        const r = e.cls === 'vehicle' ? 1.1 : e.cls === 'person' ? 0.5 : 0.7
+        const sm = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+          new THREE.MeshBasicMaterial({ map: sblob, transparent: true, depthWrite: false, opacity: 0.9 }))
+        sm.rotation.x = -Math.PI / 2; sm.scale.set(r * 2, r * 2, 1); sm.position.set(X, 0.02, -Z)
+        shadows.add(sm)
+      }
     }
     scene.add(shadows)
 
-    // framing: the ground is now flat (X-Z plane), so establish from ABOVE at a 3/4 angle that
-    // reveals the layout, framed to the ground footprint.
     const box = new THREE.Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position') as THREE.BufferAttribute)
-    const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3())
     mapBox = { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z }   // mini-map extent
-    const vfov = camera!.fov * Math.PI / 180
-    const foot = Math.max(size.x, size.z)
-    const dist = (foot / 2) / Math.tan(vfov / 2) * 0.92 + size.y * 0.5   // tighter default frame
-    const yaw = 22 * Math.PI / 180, pitch = 16 * Math.PI / 180   // lower angle -> standing objects read as 3D
-    if (controls) { controls.target.copy(c); controls.minDistance = dist * 0.15; controls.maxDistance = dist * 5 }
-    camera!.position.set(
-      c.x + dist * Math.sin(yaw) * Math.cos(pitch),
-      c.y + dist * Math.sin(pitch),
-      c.z + dist * Math.cos(yaw) * Math.cos(pitch))
-    camera!.updateProjectionMatrix()
+    // framing: open EXACTLY from the capture pose — optical centre at the origin, looking straight
+    // down -Z, with the capture FOV (converted to three.js's vertical fov for the frame aspect). The
+    // projection then inverts the back-projection, so the first thing you see reproduces the camera
+    // image 1:1; orbiting from here gives real parallax. Only on first load (a refresh keeps the orbit).
+    if (!hasFramed) {
+      const c = box.getCenter(new THREE.Vector3())
+      camera!.fov = 2 * Math.atan((h / w) * Math.tan((fov * Math.PI) / 360)) * 180 / Math.PI
+      camera!.aspect = (host?.clientWidth || w) / (host?.clientHeight || h)
+      const dscene = Math.max(0.5, -c.z)   // distance to the scene centre along the view axis
+      if (controls) { controls.target.set(0, 0, c.z); controls.minDistance = dscene * 0.05; controls.maxDistance = dscene * 6 }
+      camera!.position.set(0, 0, 0.001)    // optical centre
+      camera!.lookAt(0, 0, c.z)
+      camera!.updateProjectionMatrix()
+      hasFramed = true
+    }
   }
 
   async function decodeLayer(image: string, depth: string, w: number, h: number) {
@@ -590,7 +635,7 @@
   // see-through sheet.
   function layerMesh(disp: Float32Array, rgba: Uint8ClampedArray, w: number, h: number,
                      fx: number, cx: number, cy: number, maxlen: number, zbias: number,
-                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number; zrange?: number; dim?: number } = {}): THREE.Mesh {
+                     opt: { solid?: boolean; bgdisp?: Float32Array | null; maxT?: number; flattenCoef?: [number, number, number] | null; tex?: THREE.Texture | null; keep?: Uint8Array | null; dispJump?: number; zrange?: number; dim?: number; graze?: number } = {}): THREE.Mesh {
     const solid = !!opt.solid, bgdisp = opt.bgdisp ?? null
     const maxT = opt.maxT ?? 0.35, minT = 0.03, dim = opt.dim ?? 1   // dim<1 fades a guessed layer
     const pos: number[] = [], col: number[] = [], uv: number[] = []
@@ -618,6 +663,21 @@
     const bump = (a: number, b: number) => { const k = a < b ? a + '_' + b : b + '_' + a; edge.set(k, (edge.get(k) ?? 0) + 1) }
     const dj = opt.dispJump ?? Infinity   // max disparity spread a triangle may span before it's a
     const zr = opt.zrange ?? Infinity     // silhouette skirt; zr = max Z-span before it's a long stretch
+    const graze = opt.graze ?? 0   // cull tris seen edge-on from the CAPTURE camera (|normal . viewDir| <
+    // graze). Those are the near->far "drip" tris at occlusion edges: from the capture pose they are
+    // edge-on so they cover ~0 pixels (the identity view is unchanged), but when you ORBIT they'd smear
+    // into the scene — so cutting them keeps the from-camera match AND cleans the parallax view.
+    const grazeCull = (va: number, vb: number, vc: number): boolean => {
+      if (graze <= 0) return false
+      const ax = pos[va * 3], ay = pos[va * 3 + 1], az = pos[va * 3 + 2]
+      const e1x = pos[vb * 3] - ax, e1y = pos[vb * 3 + 1] - ay, e1z = pos[vb * 3 + 2] - az
+      const e2x = pos[vc * 3] - ax, e2y = pos[vc * 3 + 1] - ay, e2z = pos[vc * 3 + 2] - az
+      let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x
+      const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl
+      const mx = (ax + pos[vb * 3] + pos[vc * 3]) / 3, my = (ay + pos[vb * 3 + 1] + pos[vc * 3 + 1]) / 3, mz = (az + pos[vb * 3 + 2] + pos[vc * 3 + 2]) / 3
+      const ml = Math.hypot(mx, my, mz) || 1
+      return Math.abs((nx * mx + ny * my + nz * mz) / ml) < graze
+    }
     const tri = (a: number, b: number, c: number) => {
       const va = vidx[a], vb = vidx[b], vc = vidx[c]
       if (va < 0 || vb < 0 || vc < 0) return
@@ -626,6 +686,7 @@
       if (Math.max(Math.abs(da - db), Math.abs(db - dc), Math.abs(da - dc)) > dj) return
       const za = zOf(da), zb = zOf(db), zc = zOf(dc)
       if (Math.max(za, zb, zc) - Math.min(za, zb, zc) > zr) return   // long back-stretch -> cut
+      if (grazeCull(va, vb, vc)) return   // edge-on drip triangle -> cut (invisible from camera, cleans orbit)
       idx.push(va, vb, vc)
       if (solid) { bump(va, vb); bump(vb, vc); bump(vc, va) }
     }
