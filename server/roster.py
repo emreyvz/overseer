@@ -35,10 +35,12 @@ class SessionRoster:
                  *, min_area: int = 1400, refresh_ratio: float = 1.4,
                  shot_interval: float = 1.5, max_entries: int = 600,
                  dedup_threshold: float = 0.82,
-                 auto_merge: bool = True, auto_merge_threshold: float = 0.78) -> None:
+                 auto_merge: bool = True, auto_merge_threshold: float = 0.78,
+                 subject_store: Any = None) -> None:
         self._snap = snapshots
         self._dir = Path(snap_dir)
         self._seg = seg_backend
+        self._subjects = subject_store   # optional persistent long-term identity (features 5/6)
         self._min_area = int(min_area)
         self._refresh = float(refresh_ratio)
         self._shot_interval = float(shot_interval)
@@ -64,7 +66,7 @@ class SessionRoster:
 
     def observe_reid(self, cls: str, crop: Any, embedding: np.ndarray | None, now: float,
                      plate: str | None = None, attrs: dict | None = None,
-                     cam: str | None = None) -> str:
+                     cam: str | None = None, gait: np.ndarray | None = None) -> str:
         """Fold one sighting into the roster, merging with an existing entry whose appearance
         embedding is close enough (same class), else creating a new anonymous identity.
         Keeps the best (largest) crop as the photo. Returns the entry id."""
@@ -119,6 +121,21 @@ class SessionRoster:
                     e["last_shot"] = now
                     if embedding is not None:
                         e["embedding"] = embedding   # keep the best crop's embedding
+                except Exception:  # noqa: BLE001
+                    pass
+            # persist into the long-term identity store (feature 6): recognize this subject across
+            # days and log the sighting. Guarded + throttled so it can never slow or break the roster.
+            if (self._subjects is not None and e.get("embedding") is not None
+                    and (now - e.get("_last_persist", 0.0) >= 3.0)):
+                try:
+                    res = self._subjects.record(
+                        cls, appearance=e["embedding"], gait=gait, now=now,
+                        snapshot_path=e.get("snapshot_path"), cam=cam, plate=e.get("plate"),
+                        attrs={k: v for k, v in e["attrs"].items() if not k.startswith("_")},
+                        clip_path=e.get("clip"))
+                    e["subject_uid"] = res.get("subject_id")
+                    e["subject_flags"] = res.get("flags", [])
+                    e["_last_persist"] = now
                 except Exception:  # noqa: BLE001
                     pass
             return e["id"]

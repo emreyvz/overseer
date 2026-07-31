@@ -8,6 +8,7 @@ Thread model (per backend integration reference):
 """
 from __future__ import annotations
 
+import base64
 import logging
 import threading
 import time
@@ -161,11 +162,23 @@ class Backend:
         from .roster import SessionRoster
         _seg_name = str(self.config.get("match.models.seg", "") or "")
         _roster_seg = YoloSegBackend(Path("models") / _seg_name) if _seg_name else None
+        # Long-term cross-session identity: recognize subjects across days + build repeat-visitor
+        # dossiers (features 5/6). Persists into the shared SQLite db; degrades to off on any error.
+        self.subject_store = None
+        if bool(self.config.get("roster.persist", True)):
+            try:
+                from .identity_store import SubjectStore
+                self.subject_store = SubjectStore(
+                    self.db,
+                    appearance_threshold=float(self.config.get("roster.persist_threshold", 0.74)))
+            except Exception:  # noqa: BLE001
+                self.subject_store = None
         self.roster = SessionRoster(
             self.snapshots, self._snap_dir, _roster_seg,
             dedup_threshold=float(self.config.get("roster.dedup_threshold", 0.82)),
             auto_merge=bool(self.config.get("roster.auto_merge.enabled", True)),
-            auto_merge_threshold=float(self.config.get("roster.auto_merge.threshold", 0.85)))
+            auto_merge_threshold=float(self.config.get("roster.auto_merge.threshold", 0.85)),
+            subject_store=self.subject_store)
         # Vehicle make/brand classifier for roster profiles (CPU, off the GPU hot path).
         # Quiet unless its weights are present under models/ (uv run -m match.tools.export_models
         # --only carbrand). Confidence-gated so it never asserts a confident-but-wrong brand.
@@ -188,8 +201,16 @@ class Backend:
         self._roster_seek: dict[int, float] = {}          # rotating sample point in looped files
         self._prewarm_thumbs()
         self.ooi = OOIManager()   # object-of-interest visual tracker
-        self.pose_kp = PoseKP()   # keypoint pose behaviours (hand-raise)
+        self.pose_kp = PoseKP()   # keypoint pose behaviours (hand-raise) + gait skeletons (feature 5)
         self._pose_ctr = 0
+        self.gait_tracker = None
+        if bool(self.config.get("gait.enabled", True)) and self.subject_store is not None:
+            try:
+                from .gait import GaitTracker
+                self.gait_tracker = GaitTracker()
+            except Exception:  # noqa: BLE001
+                self.gait_tracker = None
+        self._gait_recorded: dict[str, float] = {}   # track key -> last gait persist ts (throttle)
         self._last_handraise = 0.0
         self._last_weapon = 0.0
         self._ooi_lost: dict[str, bool] = {}
@@ -969,6 +990,133 @@ class Backend:
         edges = [e for e in g["edges"] if e["a"] in valid and e["b"] in valid]
         return {"nodes": nodes, "edges": edges}
 
+    # -- long-term identity: subjects, dossiers, reconstruction (features 5/6/7) --------------
+    def _subj_url(self, p: Any) -> str | None:
+        if not p:
+            return None
+        try:
+            return f"/snapshots/{Path(p).relative_to(self._snap_dir).as_posix()}"
+        except Exception:  # noqa: BLE001
+            s = str(p).replace("\\", "/")
+            return "/snapshots/" + s.split("/snapshots/")[-1] if "/snapshots/" in s else None
+
+    def subjects_list(self, cls: str | None = None, limit: int = 200,
+                      order: str = "last_seen") -> list[dict]:
+        """Persisted long-term subjects (repeat visitors) with a resolved photo URL."""
+        if self.subject_store is None:
+            return []
+        out = []
+        for s in self.subject_store.list(cls=cls, limit=limit, order=order):
+            s = dict(s)
+            s["snapshot"] = self._subj_url(s.pop("snapshot_path", None))
+            out.append(s)
+        return out
+
+    def subject_dossier(self, subject_id: int) -> dict | None:
+        """One subject's full dossier: gallery photo, per-camera + hour-of-day patterns, sightings."""
+        if self.subject_store is None:
+            return None
+        d = self.subject_store.dossier(int(subject_id))
+        if d is None:
+            return None
+        d = dict(d)
+        d["snapshot"] = self._subj_url(d.pop("snapshot_path", None))
+        d["sightings"] = [{**si, "snapshot": self._subj_url(si.get("snapshot_path"))}
+                          for si in d.get("sightings", [])]
+        return d
+
+    def reconstruct_subject(self, subject_id: int, max_frames: int = 16) -> dict:
+        """Feature 7: fuse a subject's distinct sighting crops into one super-resolved image."""
+        if self.subject_store is None:
+            return {"image": None, "reason": "disabled"}
+        d = self.subject_store.dossier(int(subject_id))
+        if d is None:
+            return {"image": None, "reason": "unknown"}
+        seen, crops = set(), []
+        for si in d.get("sightings", []):
+            p = si.get("snapshot_path")
+            if not p or p in seen:
+                continue
+            seen.add(p)
+            img = cv2.imread(str(p))
+            if img is not None:
+                crops.append(img)
+            if len(crops) >= max_frames:
+                break
+        return self._encode_reconstruct(crops)
+
+    def reconstruct_plate(self, det_id: str) -> dict:
+        """Feature 7: fuse the many tight plate crops captured for one vehicle track + re-read it."""
+        crops = self.plates.recent_crops(det_id) if hasattr(self.plates, "recent_crops") else []
+        res = self._encode_reconstruct(crops)
+        if res.get("image") and hasattr(self, "_yolo"):
+            try:
+                from .plate_ocr import default_plate_reader
+                reader = default_plate_reader()
+                raw = reader(cv2.imdecode(np.frombuffer(base64.b64decode(res["image"]), np.uint8),
+                                          cv2.IMREAD_COLOR))
+                if raw:
+                    from match.anpr.normalize import normalize_plate
+                    res["plate"] = normalize_plate(raw[0][0])
+            except Exception:  # noqa: BLE001
+                pass
+        return res
+
+    def _encode_reconstruct(self, crops: list) -> dict:
+        if len(crops) < 2:
+            return {"image": None, "reason": "not_enough_frames", "frames_offered": len(crops)}
+        from .reconstruct import reconstruct as _recon
+        res = _recon(crops, scale=2.0)
+        if res is None:
+            return {"image": None, "reason": "fusion_failed", "frames_offered": len(crops)}
+        ok, buf = cv2.imencode(".jpg", res["image"], [int(cv2.IMWRITE_JPEG_QUALITY), 94])
+        return {
+            "image": base64.b64encode(buf.tobytes()).decode("ascii") if ok else None,
+            "method": res["method"], "frames_used": res["frames_used"],
+            "frames_offered": res["frames_offered"],
+        }
+
+    def _accumulate_gait(self, r: Any, img: Any, poses: list, now: float) -> None:
+        """Feed tracked person skeletons into the gait tracker; when a track has walked enough frames,
+        persist its gait + soft-biometrics into the identity store so it fuses with appearance re-ID.
+        Fully guarded + throttled so it never disturbs the analysis hot path."""
+        if self.gait_tracker is None or self.subject_store is None:
+            return
+        persons = []
+        for group in (getattr(r, "detections", {}) or {}).values():   # detections is {category: [det]}
+            for d in group:
+                if d.track_id is None or _CATEGORY_CLS.get(d.category, "object") != "person":
+                    continue
+                persons.append((f"TK{self._source_id}.{d.track_id}", tuple(float(v) for v in d.bbox)))
+        if not persons:
+            return
+        self.gait_tracker.update(persons, poses, now)
+        h, w = img.shape[:2]
+        for key, pbox in persons:
+            if now - self._gait_recorded.get(key, 0.0) < 15.0:
+                continue
+            desc = self.gait_tracker.descriptor(key)
+            if desc is None:
+                continue
+            self._gait_recorded[key] = now
+            try:
+                x1, y1 = max(0, int(pbox[0])), max(0, int(pbox[1]))
+                x2, y2 = min(w, int(pbox[2])), min(h, int(pbox[3]))
+                crop = img[y1:y2, x1:x2]
+                emb = self._roster_embed(crop, "person") if crop.size else None
+                if emb is None:
+                    continue
+                snap = self.snapshots.save(crop.copy(), prefix="gait")
+                sb = desc.get("soft_bio", {})
+                attrs = {"cadence_hz": desc.get("cadence_hz"), "build_ratio": sb.get("shoulder_hip"),
+                         "leg_ratio": sb.get("leg_torso"), "gait": True}
+                self.subject_store.record(
+                    "person", appearance=emb, gait=desc["vector"], now=now, snapshot_path=str(snap),
+                    cam=self._source_name(self._source_id), source_id=self._source_id,
+                    attrs={k: v for k, v in attrs.items() if v is not None})
+            except Exception:  # noqa: BLE001
+                pass
+
     def _roster_embed(self, crop: Any, cls: str) -> Any:
         """A ReID appearance embedding for a crop, for roster de-duplication. Serialized so
         the harvester thread doesn't race a concurrent visual search on the same encoder."""
@@ -1199,21 +1347,29 @@ class Backend:
                     }})
                 self._ooi_lost[oid] = o["lost"]
 
-        # keypoint pose behaviours (hand-raise) — low rate, best-effort
+        # keypoint pose: ONE inference feeds both hand-raise behaviours and gait/soft-biometrics
         self._pose_ctr += 1
-        if self._pose_ctr % 10 == 0:
-            for beh in self.pose_kp.detect(img):
-                self._emit({"t": "event", "d": {
-                    "ts": now * 1000, "type": beh["behavior"], "label": beh["behavior"],
-                    "conf": None, "cam": str(self._source_id or ""),
-                }})
-                if now - self._last_handraise > 8.0:
-                    self._last_handraise = now
-                    self._emit({"t": "alert", "d": {
-                        "ts": now * 1000, "severity": "warning", "type": "HAND RAISE",
-                        "summary": "Raised-hand gesture detected", "cam": self._source_name(self._source_id),
-                        "ack": False, "snapshot": self._alert_snapshot(img), "clip": self._save_clip(),
+        run_gait = self.gait_tracker is not None and self._pose_ctr % 5 == 0
+        if self._pose_ctr % 10 == 0 or run_gait:
+            poses = self.pose_kp.detect_pose(img)
+            if self._pose_ctr % 10 == 0:
+                for pose in poses:
+                    beh = self.pose_kp.hand_raise(pose, w, h)
+                    if beh is None:
+                        continue
+                    self._emit({"t": "event", "d": {
+                        "ts": now * 1000, "type": beh["behavior"], "label": beh["behavior"],
+                        "conf": None, "cam": str(self._source_id or ""),
                     }})
+                    if now - self._last_handraise > 8.0:
+                        self._last_handraise = now
+                        self._emit({"t": "alert", "d": {
+                            "ts": now * 1000, "severity": "warning", "type": "HAND RAISE",
+                            "summary": "Raised-hand gesture detected", "cam": self._source_name(self._source_id),
+                            "ack": False, "snapshot": self._alert_snapshot(img), "clip": self._save_clip(),
+                        }})
+            if run_gait and poses:
+                self._accumulate_gait(r, img, poses, now)
 
         if now - self._last_frame_push > 0.2:
             self._last_frame_push = now

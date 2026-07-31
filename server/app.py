@@ -525,6 +525,38 @@ async def api_spatial(sid: str, grid: int = 320) -> Any:
     return await asyncio.to_thread(backend.spatial_scene, sid, grid)
 
 
+# -- long-term identity: subjects / dossiers / reconstruction (features 5/6/7) --------------
+@app.get("/api/subjects")
+async def api_subjects(cls: str | None = None, limit: int = 200, order: str = "last_seen") -> Any:
+    """Persisted long-term subjects (repeat visitors), most recently seen first."""
+    if backend is None:
+        return []
+    return await asyncio.to_thread(backend.subjects_list, cls, limit, order)
+
+
+@app.get("/api/subjects/{sid}/dossier")
+async def api_subject_dossier(sid: int) -> Any:
+    """A subject's dossier: per-camera + hour-of-day patterns and the full sighting history.
+    Always 200 with {"dossier": {...}} or {"dossier": null}."""
+    if backend is None:
+        return {"dossier": None}
+    return {"dossier": await asyncio.to_thread(backend.subject_dossier, sid)}
+
+
+@app.get("/api/subjects/{sid}/reconstruct")
+async def api_subject_reconstruct(sid: int) -> Any:
+    """Multi-frame super-resolution of the subject from its sighting crops (feature 7)."""
+    if backend is None:
+        return {"image": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.reconstruct_subject, sid)
+
+
+@app.get("/api/reconstruct/plate/{det_id}")
+async def api_reconstruct_plate(det_id: str) -> Any:
+    """Fuse a vehicle track's plate crops into one super-res plate and re-read it (feature 7)."""
+    if backend is None:
+        return {"image": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.reconstruct_plate, det_id)
 
 
 @app.get("/api/suggestions")

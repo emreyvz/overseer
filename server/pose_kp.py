@@ -34,6 +34,43 @@ class PoseKP:
             log.warning("pose-keypoint unavailable: %s", exc)
             return False
 
+    def detect_pose(self, frame: np.ndarray) -> list[dict]:
+        """Raw per-person skeletons for gait/soft-biometrics (feature 5):
+        [{bbox:(x1,y1,x2,y2) px, kpts:(17,2), conf:(17,)}]. One inference; caller derives behaviours."""
+        if not self._ensure():
+            return []
+        try:
+            res = self._model(frame, verbose=False, conf=0.4)[0]  # type: ignore[index]
+        except Exception:  # noqa: BLE001
+            return []
+        kps, boxes = res.keypoints, res.boxes
+        if kps is None or kps.xy is None or boxes is None or kps.conf is None:
+            return []
+        xy = kps.xy.cpu().numpy() if hasattr(kps.xy, "cpu") else np.asarray(kps.xy)
+        cf = kps.conf.cpu().numpy() if hasattr(kps.conf, "cpu") else np.asarray(kps.conf)
+        bx = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, "cpu") else np.asarray(boxes.xyxy)
+        out: list[dict] = []
+        for i in range(len(xy)):
+            b = bx[i]
+            out.append({"bbox": (float(b[0]), float(b[1]), float(b[2]), float(b[3])),
+                        "kpts": xy[i].astype(np.float32), "conf": cf[i].astype(np.float32)})
+        return out
+
+    @staticmethod
+    def hand_raise(pose: dict, w: int, h: int) -> dict | None:
+        """Derive a HAND RAISE behaviour from one raw skeleton (so a single pose inference serves both
+        the behaviour and gait paths). Returns the normalized-bbox event dict, or None."""
+        k, c = pose["kpts"], pose["conf"]
+        def ok(idx: int) -> bool:
+            return c[idx] >= _KP_CONF and (k[idx][0] > 0 or k[idx][1] > 0)
+        raise_l = ok(_L_WR) and ok(_NOSE) and k[_L_WR][1] < k[_NOSE][1]
+        raise_r = ok(_R_WR) and ok(_NOSE) and k[_R_WR][1] < k[_NOSE][1]
+        if not (raise_l or raise_r):
+            return None
+        x1, y1, x2, y2 = pose["bbox"]
+        return {"behavior": "HAND RAISE",
+                "bbox": [x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h]}
+
     def detect(self, frame: np.ndarray) -> list[dict]:
         """Return [{behavior, bbox(normalized)}] for hand-raise poses."""
         if not self._ensure():

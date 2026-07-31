@@ -29,6 +29,9 @@ class LivePlateReader:
         self._voted: dict[str, tuple[str, float]] = {}
         self._last_offer: dict[str, float] = {}
         self._queue: deque[tuple[str, object]] = deque()
+        # keep the last few distinct crops per track so feature 7 can fuse them into a super-res
+        # plate (the crops were previously read once and thrown away).
+        self._recent: dict[str, deque] = {}
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
         self._stop = threading.Event()
@@ -53,7 +56,18 @@ class LivePlateReader:
                 return
             self._last_offer[track_id] = now
             self._queue.append((track_id, crop))
+            ring = self._recent.get(track_id)
+            if ring is None:
+                if len(self._recent) >= self._max_tracks:            # bound memory: drop an old ring
+                    self._recent.pop(next(iter(self._recent)), None)
+                ring = self._recent[track_id] = deque(maxlen=10)
+            ring.append(crop.copy())
             self._cv.notify()
+
+    def recent_crops(self, track_id: str) -> list:
+        """The buffered distinct crops of one vehicle track, newest last (for super-res fusion)."""
+        with self._lock:
+            return list(self._recent.get(track_id, ()))
 
     def process_one(self) -> bool:
         """Read one queued crop and fold it into that track's vote. Returns True if it did
