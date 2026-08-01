@@ -69,6 +69,12 @@ Enrol a person, vehicle or object once, then locate it across every live feed by
 
 Set rules for zones and behaviour. Restricted area, loitering, crowding, fall, fight, abandoned object, line crossing and more. Or just type the rule in plain language and let the assistant build it for you.
 
+### Smart alert & zone suggestions
+
+![Smart alert and zone suggestions](demo/smart_alert_zone_suggestion.png)
+
+Overseer reads its own record and proposes the coverage you are missing, ranked by impact with the reason written out. A behaviour a camera keeps seeing with no rule yet becomes a one-click alert. And where foot traffic clusters, it works out where a watch zone belongs and draws it right on the camera: visible, editable by dragging its corners, and explained. Accept, and the zone and its rule go live at once, so you never have to guess where to look.
+
 ### Anomaly and threat reporting
 
 ![Anomaly and threat detection and reporting](demo/anomaly_threat_detection_and_reporting.png)
