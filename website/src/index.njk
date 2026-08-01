@@ -8,17 +8,17 @@ description: "Overseer is an AI computer vision and spatial intelligence platfor
     <div class="hero-copy">
       <p class="eyebrow">AI Computer Vision · Spatial Intelligence</p>
       <h1>Turn any camera into spatial intelligence.</h1>
-      <p class="lede">Real-time detection, depth, 3D reconstruction and cross-camera identity. Self-hosted, private, offline-capable.</p>
+      <p class="lede">Detection, depth, 3D reconstruction and cross-camera identity. Self-hosted and offline-capable.</p>
       <div class="cta">
         <a class="btn btn-primary" href="{{ '/docs/quick-start/' | url }}">Get started</a>
-        <a class="btn" href="{{ site.repo }}" target="_blank" rel="noopener">View on GitHub →</a>
+        <a class="btn" href="{{ site.repo }}" target="_blank" rel="noopener">GitHub →</a>
       </div>
-      <p class="meta">v{{ site.release.version }} “{{ site.release.codename }}” · <a href="{{ '/changelog/' | url }}">changelog</a> · MIT</p>
+      <p class="meta">v{{ site.release.version }} · <a href="{{ '/changelog/' | url }}">changelog</a> · MIT</p>
     </div>
     <figure class="hero-frame reveal">
-      <img src="{{ '/assets/img/shots/dashboard.webp' | url }}" width="1440" height="880"
-        alt="Overseer operator console: live camera with detection overlays, a top-down tactical radar, predictive ghosts, alerts and metrics." fetchpriority="high">
-      <figcaption class="frame-cap">Operator console · live detection, tactical god-view and foresight</figcaption>
+      <img src="{{ '/assets/img/shots/dock.webp' | url }}" width="1460" height="900"
+        alt="Overseer console on a live harbour camera: detections, a depth-locked tactical radar and metrics." fetchpriority="high">
+      <figcaption class="frame-cap">Live console · detection + depth-locked tactical radar</figcaption>
     </figure>
   </section>
 
@@ -26,62 +26,58 @@ description: "Overseer is an AI computer vision and spatial intelligence platfor
     {% for s in site.stats %}<div class="stat"><div class="v">{{ s.value }}</div><div class="l">{{ s.label }}</div></div>{% endfor %}
   </div>
 
-  <!-- feature rows: screenshot + short copy, alternating -->
   <section class="frow reveal">
-    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/dashboard.webp' | url }}" width="1440" height="880" alt="Detection overlays with track ids on a live feed" style="object-position: 20% 45%"></figure>
+    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/detect.webp' | url }}" width="1460" height="900" alt="Live detection overlays with track ids"></figure>
     <div class="frow-copy">
       <p class="section-label">Perception</p>
-      <h2>Detection &amp; tracking, every frame</h2>
+      <h2>Detection &amp; tracking</h2>
       <p class="muted">People, vehicles, animals and hazards, followed with stable identities through occlusion.</p>
-      <div class="chips">{% for t in ["YOLO11","ByteTrack","Class gating","Tiled recall"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
-      <a class="more" href="{{ '/features/' | url }}">Explore features →</a>
+      <div class="chips">{% for t in ["YOLO11","ByteTrack","Class gating"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
+      <a class="more" href="{{ '/features/' | url }}">Features →</a>
     </div>
   </section>
 
   <section class="frow reverse reveal">
-    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/dashboard.webp' | url }}" width="1440" height="880" alt="Top-down tactical radar with predictive ghost blips" style="object-position: 50% 96%"></figure>
+    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/spatial.webp' | url }}" width="1460" height="900" alt="A 3D point-cloud reconstruction of a scene from monocular depth"></figure>
     <div class="frow-copy">
-      <p class="section-label">Spatial foresight</p>
-      <h2>See the next few seconds</h2>
-      <p class="muted">A depth-locked, top-down radar places every contact by real scene depth, and predicts where each is heading, flagging paths about to converge.</p>
-      <div class="chips">{% for t in ["Tactical god-view","Predictive ghosts","Depth-locked"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
-      <a class="more" href="{{ '/technology/#spatial-computing' | url }}">How it works →</a>
+      <p class="section-label">Depth &amp; 3D</p>
+      <h2>Lift a frame into 3D</h2>
+      <p class="muted">Monocular depth reconstructs a navigable point cloud, and places contacts on a depth-locked radar.</p>
+      <div class="chips">{% for t in ["Depth Anything V2","Point cloud","Foresight"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
+      <a class="more" href="{{ '/models/depth-anything-v2/' | url }}">Depth model →</a>
     </div>
   </section>
 
   <section class="frow reveal">
-    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/heatmap.webp' | url }}" width="1440" height="880" alt="Crowd-density heatmap over a live feed with metrics panel"></figure>
+    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/density.webp' | url }}" width="1460" height="900" alt="Crowd-density heatmap over a live feed"></figure>
     <div class="frow-copy">
-      <p class="section-label">Live analytics</p>
-      <h2>Density, motion &amp; events</h2>
-      <p class="muted">Real-time crowd-density heatmaps, per-camera metrics and correlated threat scoring turn perception into the alerts that matter.</p>
-      <div class="chips">{% for t in ["Heatmaps","Zones & rules","Threat scoring"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
+      <p class="section-label">Analytics</p>
+      <h2>Density, events &amp; alerts</h2>
+      <p class="muted">Live heatmaps and correlated threat scoring turn perception into the alerts that matter.</p>
+      <div class="chips">{% for t in ["Heatmaps","Zones","Threat scoring"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
       <a class="more" href="{{ '/features/#analytics-operations' | url }}">Analytics →</a>
     </div>
   </section>
 
   <section class="frow reverse reveal">
-    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/map.webp' | url }}" width="1440" height="880" alt="Command-center map with multiple camera sources"></figure>
+    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/map.webp' | url }}" width="1460" height="900" alt="Command-center map with multiple camera sources"></figure>
     <div class="frow-copy">
       <p class="section-label">Multi-camera</p>
       <h2>One command center</h2>
-      <p class="muted">Every source on a live map, with cross-camera re-identification linking subjects across cameras and time into long-term dossiers.</p>
-      <div class="chips">{% for t in ["Re-ID + gait","Dossiers","Relationship graph"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
-      <a class="more" href="{{ '/models/reid-gait/' | url }}">Identity model →</a>
+      <p class="muted">Every source on a live map, with re-identification linking subjects across cameras and time.</p>
+      <div class="chips">{% for t in ["Re-ID + gait","Dossiers"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
+      <a class="more" href="{{ '/models/reid-gait/' | url }}">Identity →</a>
     </div>
   </section>
 
   <section class="section reveal">
     <div class="head"><p class="section-label">Pipeline</p><h2>Frame to 3D, in thirteen stages</h2></div>
     <div class="ribbon">{% for s in pipeline.stages %}<span class="node">{{ s.name }}</span>{% if not loop.last %}<span class="arr">→</span>{% endif %}{% endfor %}</div>
-    <p style="margin-top:18px"><a class="more" href="{{ '/pipeline/' | url }}">Read the pipeline →</a></p>
+    <p style="margin-top:18px"><a class="more" href="{{ '/pipeline/' | url }}">The pipeline →</a></p>
   </section>
 
   <section class="cta-band reveal">
-    <div>
-      <p class="section-label">Open source</p>
-      <h2 style="margin-top:6px">Built in the open, MIT licensed</h2>
-    </div>
+    <div><p class="section-label">Open source</p><h2 style="margin-top:6px">Built in the open, MIT licensed</h2></div>
     <div class="row">
       <a class="btn btn-primary" href="{{ '/docs/' | url }}">Read the docs</a>
       <a class="btn" href="{{ site.repo }}" target="_blank" rel="noopener">{{ site.repoShort }} →</a>
