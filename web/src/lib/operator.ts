@@ -8,13 +8,14 @@ import { get, writable } from 'svelte/store'
 import {
   mode, activeCam, cameras, stage, forensicSeed, zoneEditor, alertRules, watchlistOpen, operatorOpen,
   suggestionsOpen, spatialOpen, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
-  rosterInit, modules, toggleModule, detections, alerts, timeline, povZoom, muted, frame,
+  rosterInit, modules, toggleModule, detections, alerts, timeline, povZoom, muted, frame, system,
   flashBanner, triggerGlitch, type Mode,
 } from './stores'
 import { sendCommand } from './ws'
 import { SIM } from './sim'
 import { api } from './api'
 import { annotate } from './annotations'
+import { zones, delZone } from './zones'
 import { sfx, toggleMute } from './audio'
 
 // ---- operator state (read by the border overlay + the console transcript) ------------------
@@ -328,6 +329,117 @@ export const ACTIONS: Record<string, Action> = {
     const tags = (c.dna ?? []).join(', ') || 'still learning'
     return `${camName}: ${tags} (reputation ${Math.round((c.reputation ?? 0) * 100)}%)`
   },
+  system_status: () => {
+    const s = get(system)
+    return `CPU ${Math.round(s.cpu)}%, GPU ${s.gpu == null ? 'n/a' : Math.round(s.gpu) + '%'}, RAM ${Math.round(s.ram)}%, storage ${s.storageGB.toFixed(1)} GB`
+  },
+  storage_status: async () => {
+    const r = await api.storage().catch(() => null)
+    return r ? `${r.recordings} recordings, ${r.sizeGB.toFixed(2)} GB used` : 'storage info unavailable'
+  },
+  list_cameras: () => {
+    const names = get(cameras).map((c) => c.name)
+    return names.length ? `${names.length} cameras: ${names.join(', ')}` : 'no cameras'
+  },
+  offline_cameras: () => {
+    const off = get(cameras).filter((c) => c.health === 'offline').map((c) => c.name)
+    return off.length ? `offline: ${off.join(', ')}` : 'all cameras online'
+  },
+  busiest_camera: async ({ go }) => {
+    const r = await api.cameraDna().catch(() => null)
+    const cams = (r?.cameras ?? []) as Array<{ name?: string; person?: number; vehicle?: number }>
+    if (!cams.length) return 'no activity data yet'
+    const top = [...cams].sort((a, b) => ((b.person ?? 0) + (b.vehicle ?? 0)) - ((a.person ?? 0) + (a.vehicle ?? 0)))[0]
+    if (go === true) {
+      const c = get(cameras).find((x) => x.name === top.name)
+      if (c) { stage.set('live'); mode.set('pov'); activeCam.set(c.id); if (!SIM) sendCommand(`connect:${c.name}`) }
+    }
+    return `busiest is ${top.name} (${(top.person ?? 0) + (top.vehicle ?? 0)} seen)`
+  },
+  pan: ({ dir }) => {
+    const cur = get(povZoom); const d = S(dir).toLowerCase(); const step = 0.15
+    let x = cur.x, y = cur.y
+    if (/left|sol/.test(d)) x -= step; else if (/right|sağ/.test(d)) x += step
+    else if (/up|yukar/.test(d)) y -= step; else if (/down|aşağ/.test(d)) y += step
+    povZoom.set({ zoom: Math.max(1.4, cur.zoom), x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) })
+    return `panned ${d || 'view'}`
+  },
+
+  // ---- alerts: top / explain / advise / open a case -----------------------------------------
+  latest_alert: () => {
+    const a = get(alerts)[0]
+    return a ? `latest: ${a.severity} ${a.type} at ${a.cam} — ${a.summary}` : 'no alerts'
+  },
+  explain_alert: async () => {
+    const a = get(alerts)[0]; if (!a) return 'no alert to explain'
+    const r = await api.aiExplain({ type: a.type, summary: a.summary, cam: a.cam }).catch(() => null)
+    return r?.explanation || (r?.disabled ? 'explanations need the AI configured' : 'could not explain that alert')
+  },
+  advise_alert: async () => {
+    const a = get(alerts)[0]; if (!a) return 'no alert to advise on'
+    const r = await api.aiAdvise({ type: a.type, summary: a.summary, cam: a.cam }).catch(() => null)
+    return r?.action || (r?.disabled ? 'advice needs the AI configured' : 'no advice')
+  },
+  case_from_alert: async () => {
+    const a = get(alerts)[0]; if (!a) return 'no alert to open a case from'
+    const c = await api.caseFromAlert({ ts: String(a.ts), severity: a.severity, type: a.type, cam: a.cam, summary: a.summary }).catch(() => null)
+    if (c?.id == null) return 'could not open a case'
+    investigateCase.set(c.id); stage.set('live'); mode.set('case')
+    return `opened a case for ${a.type}`
+  },
+  search_events: async ({ query }) => {
+    const q = S(query); if (!q) return 'ask a question about recent events'
+    const ev = get(timeline).slice(0, 60).map((e) => ({ ts: new Date(e.ts).toLocaleTimeString(), type: e.type, cam: e.cam, label: e.label }))
+    if (!ev.length) return 'no events on the timeline yet'
+    const r = await api.aiSearchEvents(q, ev).catch(() => null)
+    return r?.result?.answer || (r?.disabled ? 'semantic search needs the AI configured' : 'no matching events')
+  },
+
+  // ---- roster stats ---------------------------------------------------------
+  count_subjects: async ({ cls, color, subtype }) => {
+    const rows = await api.roster().catch(() => [] as any[])
+    const c = S(cls).toLowerCase(), col = S(color).toLowerCase(), st = S(subtype).toLowerCase()
+    const n = rows.filter((r) =>
+      (!c || r.cls === c) &&
+      (!col || (r.attrs?.upper_color ?? '').toLowerCase() === col) &&
+      (!st || (r.attrs?.subtype ?? '').toLowerCase().includes(st))).length
+    const desc = [col, st, c].filter(Boolean).join(' ') || 'subjects'
+    return `${n} ${desc} seen this session`
+  },
+  list_watched: async () => {
+    const rows = await api.roster().catch(() => [] as any[])
+    const w = rows.filter((r) => r.watched)
+    return w.length
+      ? `${w.length} watched: ${w.slice(0, 6).map((r) => (r.attrs?.upper_color ? r.attrs.upper_color + ' ' : '') + r.cls).join(', ')}`
+      : 'no watched subjects'
+  },
+
+  // ---- zones ----------------------------------------------------------------
+  clear_zones: () => {
+    const zs = get(zones); const n = zs.length
+    zs.forEach((z) => delZone(z.id))
+    return n ? `cleared ${n} zone${n === 1 ? '' : 's'}` : 'no zones to clear'
+  },
+
+  // ---- forensic plate + stats + help ----------------------------------------
+  find_plate: ({ plate }) => {
+    const p = S(plate).toUpperCase().replace(/\s+/g, '')
+    if (!p) return 'give a plate to search for'
+    forensicSeed.set(p); stage.set('live'); mode.set('forensic')
+    return `searching for plate ${p}`
+  },
+  stats: async ({ period }) => {
+    const nowMs = Date.now()
+    const win = /week|hafta|7/.test(S(period)) ? 7 : 1
+    const r = await api.stats((nowMs - win * 86400000) / 1000, nowMs / 1000).catch(() => null)
+    if (!r) return 'stats unavailable'
+    const top = Object.entries(r).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => `${v} ${k.toLowerCase()}`)
+    return top.length ? `last ${win}d: ${top.join(', ')}` : 'no events in that window'
+  },
+  help: () => 'I can switch/compare cameras, open any screen, search and filter the roster and '
+    + 'forensics in detail, count people/vehicles/alerts, answer camera and system status, toggle any '
+    + 'detector or overlay, create zones/rules/cases, watch plates or subjects, super-fuse a photo, '
+    + 'brief you, and chain all of it together. Just say what you want.',
 
   say: ({ text }) => S(text),
 }
@@ -443,6 +555,14 @@ export function routeCommand(raw: string): Plan | null {
   if (/(özetle|brief(ing)?|summary|summarize|neler oldu|ne oldu|what happened|shift report)/i.test(low)) return { steps: [{ action: 'summarize', args: {} }], border: 'nav' }
   if (/(acknowledge|onayla|okundu işaretle|clear (the )?alerts|alarmları onayla)/i.test(low)) return { steps: [{ action: 'acknowledge_alerts', args: {} }], border: 'nav' }
   if (/(camera (status|health)|kamera durumu|nasıl (görünüyor|durumda))/i.test(low)) return { steps: [{ action: 'camera_status', args: {} }], border: 'nav' }
+  if (/(system|sistem).*(status|durum|load|yük)|kaynak kullanım|cpu.*gpu/i.test(low)) return { steps: [{ action: 'system_status', args: {} }], border: 'nav' }
+  if (/(offline|çevrimdışı|kapalı|down).*(camera|kamera)|(camera|kamera).*(offline|çevrimdışı)/i.test(low)) return { steps: [{ action: 'offline_cameras', args: {} }], border: 'nav' }
+  if (/(which|list|hangi).*(camera|kamera)|kameraları listele|list all cameras/i.test(low)) return { steps: [{ action: 'list_cameras', args: {} }], border: 'nav' }
+  if (/(busiest|en (yoğun|kalabalık)).*(camera|kamera)/i.test(low)) return { steps: [{ action: 'busiest_camera', args: {} }], border: 'nav' }
+  if (/(latest|last|son|en son).*(alert|alarm)/i.test(low)) return { steps: [{ action: 'latest_alert', args: {} }], border: 'nav' }
+  if (/(clear|remove).*(zone|bölge)|(zone|bölge).*(temizle|sil|kaldır)/i.test(low)) return { steps: [{ action: 'clear_zones', args: {} }], border: 'nav' }
+  if (/(what can you do|ne yapabilirsin|neler yapabilirsin|\bhelp\b|yardım|komutlar)/i.test(low)) return { steps: [{ action: 'help', args: {} }], border: 'nav' }
+  if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }
 
   // "search/find <q>" / "<q> ara/bul"
   const sm = low.match(/(?:forensic\s*)?(?:search|find|ara|bul|aratt?[ıi]r)\b[:\s]+(.{2,})/i) ||
@@ -462,7 +582,9 @@ export function planNavigates(plan: Plan): boolean {
 // Actions whose return value is an ANSWER to the operator (spoken + shown as a reply), not just a
 // step log. The last such answer in a chain becomes the plan's spoken reply.
 const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene',
-  'last_seen', 'camera_status', 'camera_dna', 'summarize', 'correlate_alerts', 'say'])
+  'last_seen', 'camera_status', 'camera_dna', 'summarize', 'correlate_alerts', 'system_status', 'storage_status',
+  'list_cameras', 'offline_cameras', 'busiest_camera', 'latest_alert', 'explain_alert', 'advise_alert',
+  'search_events', 'count_subjects', 'list_watched', 'stats', 'help', 'say'])
 
 export async function runPlan(plan: Plan): Promise<void> {
   if (plan.ask) { olog(plan.ask, 'ask'); return }
