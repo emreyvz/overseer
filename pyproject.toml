@@ -19,6 +19,7 @@ dependencies = [
     "reportlab>=5.0.0",
     "fastapi>=0.139.2",
     "uvicorn[standard]>=0.51.0",
+    "faster-whisper>=1.0",
     "yt-dlp>=2026.7.4",
     # Spatial 3D scene view (Feature 4): monocular depth via Depth Anything V2. Core so the view
     # works out of the box; the model weights themselves fetch lazily from the Hugging Face hub

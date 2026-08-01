@@ -73,6 +73,41 @@ export function speak(text: string, lang: Lang) {
 }
 export function stopSpeaking() { if (ttsSupported()) { try { speechSynthesis.cancel() } catch { /* noop */ } } }
 
+// ---- microphone capture for offline STT: record the mic, then POST the audio to the backend
+// (faster-whisper). This replaces the browser's Web Speech API, which fails in Electron and is
+// cloud-based. Click to start, click to stop; the blob goes to /api/stt.
+let recorder: MediaRecorder | null = null
+let chunks: Blob[] = []
+export const recordingSupported = () =>
+  typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+
+export async function startRecording(micId?: string): Promise<boolean> {
+  if (!recordingSupported()) return false
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: micId ? { deviceId: { exact: micId } } : true,
+    })
+    recorder = new MediaRecorder(stream)
+    chunks = []
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
+    recorder.start()
+    return true
+  } catch { return false }
+}
+
+export function stopRecording(): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const r = recorder
+    if (!r) { resolve(null); return }
+    r.onstop = () => {
+      r.stream.getTracks().forEach((t) => t.stop())
+      resolve(chunks.length ? new Blob(chunks, { type: r.mimeType || 'audio/webm' }) : null)
+      recorder = null
+    }
+    try { r.stop() } catch { resolve(null); recorder = null }
+  })
+}
+
 export type AudioDev = { id: string; label: string }
 export async function listAudioDevices(): Promise<{ inputs: AudioDev[]; outputs: AudioDev[] }> {
   if (!navigator.mediaDevices?.enumerateDevices) return { inputs: [], outputs: [] }

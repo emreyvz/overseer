@@ -12,7 +12,7 @@
   import { aiStatus, refreshAiStatus, AI_FEATURES } from '../lib/ai'
   import { api } from '../lib/api'
   import {
-    startSTT, stopSTT, speak, stopSpeaking, sttSupported, loadPrefs, savePrefs,
+    startRecording, stopRecording, recordingSupported, speak, stopSpeaking, loadPrefs, savePrefs,
     listAudioDevices, type Lang, type AudioDev,
   } from '../lib/speech'
   import { sfx } from '../lib/audio'
@@ -106,21 +106,25 @@
 
   function speakIf(t: string) { if (prefs.tts) speak(t, prefs.lang) }
 
-  function toggleMic() {
-    if (listening) { stopSTT(); listening = false; status = 'idle'; return }
-    if (!sttSupported()) {
-      // Browser STT is unavailable (common in Electron) — offline STT via the backend is the fix.
-      flashBanner('VOICE INPUT NOT AVAILABLE IN THIS BUILD', true, 1800); sfx('error'); flash('error'); return
+  // Offline voice: click to record, click again to stop -> transcribe on the backend -> run it.
+  async function toggleMic() {
+    if (listening) {
+      listening = false; status = 'thinking'
+      const blob = await stopRecording()
+      if (!blob) { flash('error'); return }
+      try {
+        const { text, disabled } = await api.stt(blob, prefs.lang)
+        if (disabled) { flashBanner('OFFLINE VOICE MODEL NOT INSTALLED', true, 2200); flash('error'); return }
+        if (text && text.trim()) run(text)
+        else { flashBanner('DIDN\'T CATCH THAT', true, 1400); flash('ok') }
+      } catch { flashBanner('VOICE TRANSCRIBE FAILED', true, 1800); flash('error') }
+      return
     }
+    if (!recordingSupported()) { flashBanner('NO MICROPHONE AVAILABLE', true, 1800); sfx('error'); flash('error'); return }
     stopSpeaking(); sfx('click', { volume: 0.3 })
-    const ok = startSTT(prefs.lang, {
-      interim: (t) => (interim = t),
-      final: (t) => { interim = ''; listening = false; run(t) },
-      end: () => { listening = false; if (status === 'listening') status = 'idle' },
-      error: (e) => { listening = false; flashBanner(`VOICE: ${e.toUpperCase()}`, true, 1800); sfx('error'); flash('error') },
-    })
-    listening = ok
-    status = ok ? 'listening' : 'error'
+    const ok = await startRecording(prefs.micId)
+    listening = ok; status = ok ? 'listening' : 'error'
+    if (!ok) { flashBanner('MICROPHONE PERMISSION DENIED', true, 1800); sfx('error') }
   }
 
   function setLang(l: Lang) { prefs.lang = l; savePrefs({ lang: l }) }

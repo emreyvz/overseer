@@ -215,9 +215,26 @@ def _export_face() -> str:
     return f"face: downloaded -> {dst}" if _download(url, dst) else "face: SKIPPED - download failed"
 
 
+def _export_whisper() -> str:
+    """Pre-fetch the offline STT model (faster-whisper / CTranslate2) so the Operator's voice input
+    works on first run without a download. Size via OVERSEER_STT_MODEL (default base ~140 MB)."""
+    import os
+    name = os.environ.get("OVERSEER_STT_MODEL", "base")
+    dst = MODELS / "whisper"
+    if (dst / f"models--Systran--faster-whisper-{name}").exists():
+        return f"whisper: already present ({name})"
+    try:
+        from faster_whisper import WhisperModel
+        dst.mkdir(parents=True, exist_ok=True)
+        WhisperModel(name, device="cpu", compute_type="int8", download_root=str(dst))
+        return f"whisper: downloaded '{name}' -> {dst}"
+    except Exception as exc:  # noqa: BLE001
+        return f"whisper: SKIPPED - `uv pip install faster-whisper` ({type(exc).__name__})"
+
+
 _STEPS = {"seg": _export_seg, "dinov2": _export_dinov2, "osnet": _export_osnet,
           "veri": _export_veri, "carbrand": _export_carbrand, "easyocr": _export_easyocr,
-          "face": _export_face}
+          "face": _export_face, "whisper": _export_whisper}
 
 
 def main() -> None:
