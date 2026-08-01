@@ -4,7 +4,9 @@
   import { aiOpen, forensicSeed, mode, stage, timeline, alerts, activeCam, flashBanner } from '../lib/stores'
   import { api, type AiRule } from '../lib/api'
   import { aiStatus, refreshAiStatus, aiOn, AI_FEATURES } from '../lib/ai'
+  import { routeCommand, runPlan, operatorLog } from '../lib/operator'
   import { sfx } from '../lib/audio'
+  import { get } from 'svelte/store'
   import { onMount, tick } from 'svelte'
 
   type Msg = { who: 'you' | 'ai' | 'sys'; text: string; filter?: any; rule?: AiRule; ruleText?: string }
@@ -79,6 +81,17 @@
     await scroll()
     const s = $aiStatus
     try {
+      // AI Operator: instant deterministic action / navigation commands (no LLM round-trip).
+      const plan = routeCommand(q)
+      if (plan) {
+        await runPlan(plan)
+        const tail = get(operatorLog).slice(-6).filter((e) => e.kind !== 'error')
+        msgs = [...msgs, { who: 'sys', text: (tail.map((e) => e.text).join(' · ') || 'DONE').toUpperCase() }]
+        // step out of the way for navigation actions so the operator sees the screen it opened
+        const informational = (plan.steps ?? []).every((st) => st.action === 'describe_scene' || st.action === 'say')
+        if (!informational) aiOpen.set(false)
+        busy = false; await scroll(); return
+      }
       if (aiOn(s, 'rules') && RULEY.test(q)) {
         await proposeRule(q)
       } else if (aiOn(s, 'search') && SEARCHY.test(q)) {

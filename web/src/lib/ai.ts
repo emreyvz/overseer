@@ -27,6 +27,7 @@ export function aiOn(s: AiStatus, feature: AiFeatureKey): boolean {
 
 // Feature catalogue for the settings panel — order shown top-to-bottom.
 export const AI_FEATURES: { key: AiFeatureKey; label: string; desc: string }[] = [
+  { key: 'operate', label: 'AI OPERATOR', desc: 'Drives the whole system from a spoken or typed command' },
   { key: 'search', label: 'NATURAL-LANGUAGE SEARCH', desc: 'Turns a sentence into a forensic filter' },
   { key: 'chat', label: 'ASSISTANT CHAT', desc: 'Free-form question and answer' },
   { key: 'summarize', label: 'SUMMARY / BRIEFING', desc: 'Summarizes events in plain language' },

@@ -300,6 +300,20 @@ async def api_ai_query(payload: dict[str, str]) -> Any:
     return {"filter": flt}
 
 
+@app.post("/api/ai/operate")
+async def api_ai_operate(payload: dict[str, Any]) -> Any:
+    """AI Operator: plan a natural-language command into a chain of UI actions. The frontend
+    router handles the common commands locally with zero latency and only falls back here for
+    complex / multi-step / referential ones."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    if not backend.ai.feature("operate"):
+        return {"steps": [], "disabled": True}
+    plan = await asyncio.to_thread(
+        backend.ai.plan_command, str(payload.get("command", "")), payload.get("context") or {})
+    return plan or {"steps": [], "say": "I could not turn that into an action."}
+
+
 @app.post("/api/ai/summarize")
 async def api_ai_summarize(payload: dict[str, Any]) -> Any:
     if backend is None:
