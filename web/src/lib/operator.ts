@@ -8,8 +8,8 @@ import { get, writable } from 'svelte/store'
 import {
   mode, activeCam, cameras, stage, forensicSeed, zoneEditor, alertRules, watchlistOpen, operatorOpen,
   suggestionsOpen, spatialOpen, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
-  rosterInit, modules, toggleModule, detections, alerts, timeline, povZoom, muted, frame, system,
-  flashBanner, triggerGlitch, type Mode,
+  rosterInit, modules, toggleModule, detections, alerts, timeline, timelineOpen, petRegistry,
+  povZoom, muted, frame, system, flashBanner, triggerGlitch, type Mode,
 } from './stores'
 import { sendCommand } from './ws'
 import { SIM } from './sim'
@@ -481,6 +481,41 @@ export const ACTIONS: Record<string, Action> = {
     return `reconnecting ${c.name}`
   },
 
+  // ---- cases / objects / pets / spatial / timeline / plates ------------------
+  open_case: async ({ id, name }) => {
+    if (id != null && !isNaN(Number(id))) { investigateCase.set(Number(id)); stage.set('live'); mode.set('case'); return `opened case ${id}` }
+    if (name) {
+      const list = await api.cases().catch(() => [])
+      const c = list.find((x) => x.name.toLowerCase().includes(S(name).toLowerCase()))
+      if (c) { investigateCase.set(c.id); stage.set('live'); mode.set('case'); return `opened case ${c.name}` }
+    }
+    stage.set('live'); mode.set('case'); return 'opened cases'
+  },
+  list_cases: async () => {
+    const list = await api.cases().catch(() => [])
+    return list.length ? `${list.length} case${list.length === 1 ? '' : 's'}: ${list.slice(0, 6).map((c) => c.name).join(', ')}` : 'no cases yet'
+  },
+  track_object: () => { stage.set('live'); mode.set('pov'); objectRegister.set(true); return 'draw a box around the object to track' },
+  find_pet: () => { stage.set('live'); mode.set('pov'); petRegistry.set(true); return 'pet finder opened' },
+  open_spatial: ({ camera }) => {
+    const id = findCam(S(camera))?.id ?? get(activeCam)
+    if (!id) return 'no camera for the 3D scene'
+    stage.set('live'); mode.set('pov'); spatialOpen.set(String(id))
+    return '3D scene'
+  },
+  timeline: ({ on }) => { timelineOpen.set(on !== false); return on === false ? 'timeline hidden' : 'timeline open' },
+  list_plates: async () => {
+    const r = await api.watchedPlates().catch(() => null)
+    const p = r?.plates ?? []
+    return p.length ? `watching ${p.length} plate${p.length === 1 ? '' : 's'}: ${p.join(', ')}` : 'no plates on the watchlist'
+  },
+  unwatch_plate: async ({ plate }) => {
+    const p = S(plate).toUpperCase().replace(/\s+/g, '')
+    if (!p) return 'which plate?'
+    await api.watchPlate(p, false).catch(() => {})
+    return `stopped watching ${p}`
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -605,6 +640,11 @@ export function routeCommand(raw: string): Plan | null {
   if (/(false alarm|yanlış alarm|mark.*false|hatalı alarm)/i.test(low)) return { steps: [{ action: 'mark_false', args: {} }], border: 'nav' }
   if (/(close|kapat|dismiss).*(panel|overlay|pencere)|panelleri kapat/i.test(low)) return { steps: [{ action: 'close_panels', args: {} }], border: 'nav' }
   if (/(reconnect|yeniden bağlan|tekrar bağlan)/i.test(low)) return { steps: [{ action: 'reconnect', args: {} }], border: 'nav' }
+  if (/(list|hangi|which).*(case|vaka|dava)|vakaları listele/i.test(low)) return { steps: [{ action: 'list_cases', args: {} }], border: 'nav' }
+  if (/(list|hangi|which).*(plate|plaka)|plakaları listele/i.test(low)) return { steps: [{ action: 'list_plates', args: {} }], border: 'nav' }
+  if (/(track|takip).*(object|nesne|obje)|nesne takip/i.test(low)) return { steps: [{ action: 'track_object', args: {} }], border: 'nav' }
+  if (/(find|bul).*(pet|evcil)|evcil hayvan/i.test(low)) return { steps: [{ action: 'find_pet', args: {} }], border: 'nav' }
+  if (/(timeline|zaman çizelgesi|olay geçmişi)/i.test(low)) return { steps: [{ action: 'timeline', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }
 
   // "search/find <q>" / "<q> ara/bul"
@@ -627,7 +667,8 @@ export function planNavigates(plan: Plan): boolean {
 const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene',
   'last_seen', 'camera_status', 'camera_dna', 'summarize', 'correlate_alerts', 'system_status', 'storage_status',
   'list_cameras', 'offline_cameras', 'busiest_camera', 'latest_alert', 'explain_alert', 'advise_alert',
-  'search_events', 'count_subjects', 'list_watched', 'stats', 'help', 'relationships', 'alerts_here', 'say'])
+  'search_events', 'count_subjects', 'list_watched', 'stats', 'help', 'relationships', 'alerts_here',
+  'list_cases', 'list_plates', 'say'])
 
 export async function runPlan(plan: Plan): Promise<void> {
   if (plan.ask) { olog(plan.ask, 'ask'); return }

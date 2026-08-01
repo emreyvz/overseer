@@ -113,6 +113,14 @@ _OPERATOR_ACTIONS = (
     "alerts_here {camera?} — answer how many active alerts a camera has.\n"
     "close_panels {} — close any open overlays/panels.\n"
     "reconnect {} — reconnect the active camera feed.\n"
+    "open_case {id?, name?} — open an investigation case (by id or name), or the case workspace.\n"
+    "list_cases {} — answer the open investigation cases.\n"
+    "track_object {} — open the draw-a-box tool to track an arbitrary object.\n"
+    "find_pet {} — open the pet finder.\n"
+    "open_spatial {camera?} — open the 3D spatial scene for a camera.\n"
+    "timeline {on?} — show/hide the event timeline.\n"
+    "list_plates {} — answer which licence plates are on the BOLO list.\n"
+    "unwatch_plate {plate} — remove a plate from the BOLO list.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 
