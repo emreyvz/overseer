@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { background: #05070a; color: #e6e8ea; overflow: hidden; user-select: none;
+      font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; }
+    .eye { color: #e10600; }
+    .brand { font-size: 22px; font-weight: 700; letter-spacing: 0.34em; }
+    .spin { width: 34px; height: 34px; border: 2px solid rgba(232,236,240,0.14);
+      border-top-color: #e10600; border-radius: 50%; animation: spin 900ms linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status { font-size: 12px; letter-spacing: 0.06em; color: #8b9298; min-height: 16px;
+      text-align: center; max-width: 72ch; padding: 0 24px; }
+    .hint { position: fixed; bottom: 22px; font-size: 10px; letter-spacing: 0.16em; color: #3a3e42; }
+  </style>
+</head>
+<body>
+  <svg class="eye" width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+    <path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z"/><circle cx="12" cy="12" r="3.2"/>
+  </svg>
+  <div class="brand">OVERSEER</div>
+  <div class="spin"></div>
+  <div class="status" id="st">Starting...</div>
+  <div class="hint">CTRL+Q TO QUIT</div>
+  <script>window.setStatus = function (m) { var e = document.getElementById('st'); if (e) e.textContent = m; };</script>
+</body>
+</html>
