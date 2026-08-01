@@ -79,19 +79,24 @@ class TrajectoryMonitor:
         return events
 
     def _check_running(self, tr: "_Track", tid: int) -> list[TrajectoryEvent]:
-        if len(tr.points) < 2:
+        pts = list(tr.points)
+        if len(pts) < 3:
             return []
-        (p0, t0), (p1, t1) = tr.points[-2], tr.points[-1]
-        dt = t1 - t0
-        if dt <= 0:
+        # Median inter-frame speed over the last few frames, not a single frame: a detection jump
+        # (tracker id swap, bbox jitter) spikes one frame's speed and used to fire a false RUNNING.
+        recent = pts[-5:]
+        speeds = [math.dist(pa, pb) / (tb - ta)
+                  for (pa, ta), (pb, tb) in zip(recent, recent[1:]) if tb - ta > 0]
+        if not speeds:
             return []
-        speed = math.dist(p0, p1) / dt
-        if speed < self._running_speed * 0.6:
+        speeds.sort()
+        med = speeds[len(speeds) // 2]
+        if med < self._running_speed * 0.6:
             tr.running_fired = False
-        if speed >= self._running_speed and not tr.running_fired:
+        if med >= self._running_speed and not tr.running_fired:
             tr.running_fired = True
             return [TrajectoryEvent(EventType.RUNNING, tid, "running",
-                                    {"speed": round(speed, 1)})]
+                                    {"speed": round(med, 1)})]
         return []
 
     def _check_stopped(self, tr: "_Track", tid: int,

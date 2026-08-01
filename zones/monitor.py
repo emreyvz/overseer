@@ -47,6 +47,11 @@ class ZoneMonitor:
         self._queue_min = int(config.get("zones.queue_min", 3))
         self._gate_last: dict[int, tuple[int, float]] = {}
         self._queue_fired: dict[int, bool] = {}
+        # Per-(zone, track, event) refire cooldown: a foot-point jittering across a zone boundary
+        # or tripwire used to re-fire RESTRICTED / LINE_CROSS every frame, inflating the counts the
+        # suggestions engine reports. Debounce so one crossing is one event.
+        self._refire = float(config.get("zones.refire_seconds", 3.0))
+        self._fired_at: dict[tuple[int, int, str], float] = {}
         # set_zones()/reset() are called from the UI thread (drawing/deleting
         # zones, connecting a source) while process()/occupancy()/counts()/
         # snapshot() run on the analysis worker thread; without this lock a
@@ -70,6 +75,7 @@ class ZoneMonitor:
             self._exits.clear()
             self._gate_last.clear()
             self._queue_fired.clear()
+            self._fired_at.clear()
 
     def _loiter_for(self, zone: Zone) -> float:
         return zone.loiter_seconds if zone.loiter_seconds is not None \
@@ -110,7 +116,7 @@ class ZoneMonitor:
             st.loiter_fired = False
             self._entries[zone.id] = self._entries.get(zone.id, 0) + 1
             if zone.type == "restricted":
-                events.append(self._event(EventType.RESTRICTED, zone, tid))
+                events += self._fire(EventType.RESTRICTED, zone, tid, now)
         elif inside and st.inside:
             if not st.loiter_fired and now - st.entered_ts >= self._loiter_for(zone):
                 st.loiter_fired = True
@@ -133,11 +139,11 @@ class ZoneMonitor:
         events: list[ZoneEvent] = []
         allowed = zone.allowed_direction
         if allowed is not None and direction != allowed:
-            events.append(self._event(EventType.WRONG_DIRECTION, zone, tid,
-                                      {"direction": direction}))
+            events += self._fire(EventType.WRONG_DIRECTION, zone, tid, now,
+                                 {"direction": direction})
         else:
-            events.append(self._event(EventType.LINE_CROSS, zone, tid,
-                                      {"direction": direction}))
+            events += self._fire(EventType.LINE_CROSS, zone, tid, now,
+                                 {"direction": direction})
         last = self._gate_last.get(zone.id)
         if last is not None and last[0] != tid and now - last[1] <= self._tailgate_seconds:
             events.append(self._event(EventType.TAILGATING, zone, tid,
@@ -152,6 +158,17 @@ class ZoneMonitor:
             meta.update(extra)
         return ZoneEvent(event_type=etype, zone_id=zone.id, zone_name=zone.name,
                          track_id=tid, label=zone.name, metadata=meta)
+
+    def _fire(self, etype: EventType, zone: Zone, tid: int, now: float,
+              extra: dict | None = None) -> list[ZoneEvent]:
+        """Emit an event unless the same (zone, track, type) fired within the refire cooldown —
+        so boundary/tripwire jitter counts as one event, not one per frame."""
+        k = (zone.id, tid, etype.name)
+        last = self._fired_at.get(k)
+        if last is not None and now - last < self._refire:
+            return []
+        self._fired_at[k] = now
+        return [self._event(etype, zone, tid, extra)]
 
     def _check_queues(self) -> list[ZoneEvent]:
         events: list[ZoneEvent] = []
@@ -178,6 +195,8 @@ class ZoneMonitor:
                 if self._state[key].inside:
                     self._exits[key[0]] = self._exits.get(key[0], 0) + 1
                 del self._state[key]
+            for k in [fk for fk in self._fired_at if fk[1] == tid]:
+                del self._fired_at[k]
 
     def occupancy(self) -> dict[int, int]:
         with self._lock:
