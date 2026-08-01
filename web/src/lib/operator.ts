@@ -160,15 +160,28 @@ export const ACTIONS: Record<string, Action> = {
     return `case created: ${S(name, 'CASE')}`
   },
 
-  // Enable/disable a detection class. "alarm on weapons" turns weapon detection on, which then
-  // auto-alerts on sight — so the operator is never stuck on that kind of command.
+  // Toggle ANY module/overlay by name (every checkbox in the panel): detection classes, the
+  // environment/sky analysers, and the visual overlays (heatmap, tactical, foresight, tracklet).
+  // "alarm on weapons" turns weapon detection on, which then auto-alerts on sight.
   set_module: ({ key, on }) => {
-    const k = S(key).toLowerCase()
-    const m = get(modules).find((x) => x.key === k)
-    if (!m) return `no such detector: ${k}`
+    const q = S(key).toLowerCase().trim()
+    const mods = get(modules)
+    const m = mods.find((x) => x.key === q)
+      || mods.find((x) => x.label.toLowerCase() === q)
+      || (/(foresight|ghost|predict)/.test(q) ? mods.find((x) => x.key === 'ghosts') : undefined)
+      || (/track/.test(q) ? mods.find((x) => x.key === 'track') : undefined)
+      || (/(day.?night|night)/.test(q) ? mods.find((x) => x.key === 'daynight') : undefined)
+      || mods.find((x) => x.key.includes(q) || x.label.toLowerCase().includes(q))
+    if (!m) return `no such module: ${q}`
     const want = on !== false
-    if (m.on !== want) toggleModule(k)
-    return `${k} detection ${want ? 'on' : 'off'}`
+    if (m.on !== want) toggleModule(m.key)
+    return `${m.label.toLowerCase()} ${want ? 'on' : 'off'}`
+  },
+  watch_plate: async ({ plate }) => {
+    const p = S(plate).toUpperCase().replace(/\s+/g, '')
+    if (!p) return 'no plate given'
+    await api.watchPlate(p, true).catch(() => {})
+    return `watching plate ${p} — a re-read on any camera will alert`
   },
 
   // Standing rule (e.g. "alarm if you see a weapon") — NOT an immediate alarm.
@@ -372,6 +385,20 @@ export function routeCommand(raw: string): Plan | null {
       }
     }
   }
+  // show / hide any overlay or analyser by name
+  if (/(show|hide|göster|gizle|enable|disable|toggle|\baç|kapat)/i.test(low)) {
+    const OV: Array<[RegExp, string]> = [
+      [/heat ?map|ısı ?harita/i, 'heatmap'], [/tactical|taktik|god ?view|radar/i, 'tactical'],
+      [/foresight|öngörü|ghost|predict/i, 'ghosts'], [/tracklet|iz(ler)?/i, 'tracklet'],
+      [/day.?night|gündüz|gece/i, 'daynight'], [/weather|hava durumu/i, 'weather'],
+    ]
+    for (const [re, key] of OV) {
+      if (re.test(low)) {
+        const on = !/(hide|gizle|kapat|disable|\boff\b|kaldır)/i.test(low)
+        return { steps: [{ action: 'set_module', args: { key, on } }], border: 'nav' }
+      }
+    }
+  }
 
   // "describe the scene" / "sahneyi anlat"
   if (/(sahneyi anlat|anlat|describe (the )?scene|ne görüyorsun|what do you see)/i.test(low)) {
@@ -384,7 +411,7 @@ export function routeCommand(raw: string): Plan | null {
   }
 
   // "open X screen" / "X ekranını aç" — needs an open verb OR the word "ekran/screen"
-  const wantsOpen = /(\baç\b|open|göster|show|ekran|screen|geçiş)/i.test(low)
+  const wantsOpen = /(\baç|open|göster|show|ekran|screen|geçiş)/i.test(low)
   if (wantsOpen) {
     for (const [re, screen] of SCREEN_WORDS) {
       if (re.test(low)) {

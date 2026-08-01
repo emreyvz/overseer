@@ -12,7 +12,7 @@
   import { aiStatus, refreshAiStatus, AI_FEATURES } from '../lib/ai'
   import { api } from '../lib/api'
   import {
-    startRecording, stopRecording, recordingSupported, speak, stopSpeaking, loadPrefs, savePrefs,
+    startRecording, stopRecording, toWav16k, recordingSupported, speak, stopSpeaking, loadPrefs, savePrefs,
     listAudioDevices, type Lang, type AudioDev,
   } from '../lib/speech'
   import { sfx } from '../lib/audio'
@@ -113,7 +113,8 @@
       const blob = await stopRecording()
       if (!blob) { flash('error'); return }
       try {
-        const { text, disabled } = await api.stt(blob, prefs.lang)
+        const wav = await toWav16k(blob)
+        const { text, disabled } = await api.stt(wav, prefs.lang)
         if (disabled) { flashBanner('OFFLINE VOICE MODEL NOT INSTALLED', true, 2200); flash('error'); return }
         if (text && text.trim()) run(text)
         else { flashBanner('DIDN\'T CATCH THAT', true, 1400); flash('ok') }

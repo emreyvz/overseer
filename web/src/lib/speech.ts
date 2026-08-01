@@ -114,6 +114,43 @@ export function stopRecording(): Promise<Blob | null> {
   })
 }
 
+// Decode the recorded blob and re-encode as 16 kHz mono 16-bit WAV, so the backend can transcribe
+// it without any ffmpeg/av dependency (the fragile part of offline STT). Falls back to the raw
+// blob if the Web Audio API can't decode it.
+export async function toWav16k(blob: Blob): Promise<Blob> {
+  try {
+    const AC = (globalThis as any).AudioContext || (globalThis as any).webkitAudioContext
+    if (!AC) return blob
+    const ctx = new AC()
+    const decoded: AudioBuffer = await ctx.decodeAudioData(await blob.arrayBuffer())
+    const chans = decoded.numberOfChannels, len = decoded.length
+    const mono = new Float32Array(len)
+    for (let c = 0; c < chans; c++) { const d = decoded.getChannelData(c); for (let i = 0; i < len; i++) mono[i] += d[i] / chans }
+    try { await ctx.close() } catch { /* noop */ }
+    const outRate = 16000, ratio = decoded.sampleRate / outRate
+    const outLen = Math.max(1, Math.floor(len / ratio))
+    const out = new Float32Array(outLen)
+    for (let i = 0; i < outLen; i++) {
+      const idx = i * ratio, i0 = Math.floor(idx), frac = idx - i0
+      out[i] = (mono[i0] || 0) * (1 - frac) + (mono[i0 + 1] || 0) * frac
+    }
+    return encodeWav16(out, outRate)
+  } catch { return blob }
+}
+
+function encodeWav16(samples: Float32Array, rate: number): Blob {
+  const buf = new ArrayBuffer(44 + samples.length * 2)
+  const dv = new DataView(buf)
+  const w = (o: number, s: string) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)) }
+  w(0, 'RIFF'); dv.setUint32(4, 36 + samples.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ')
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true)
+  dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true)
+  w(36, 'data'); dv.setUint32(40, samples.length * 2, true)
+  let o = 44
+  for (let i = 0; i < samples.length; i++) { const s = Math.max(-1, Math.min(1, samples[i])); dv.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true); o += 2 }
+  return new Blob([buf], { type: 'audio/wav' })
+}
+
 export type AudioDev = { id: string; label: string }
 export async function listAudioDevices(): Promise<{ inputs: AudioDev[]; outputs: AudioDev[] }> {
   if (!navigator.mediaDevices?.enumerateDevices) return { inputs: [], outputs: [] }
