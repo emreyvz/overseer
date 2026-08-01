@@ -659,6 +659,18 @@ async def api_roster_cutout(det_id: str) -> Response:
     return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/roster/{det_id}/face")
+async def api_roster_face(det_id: str) -> Response:
+    """The roster photo cropped to the subject's face (portrait). 404 when no face is found so
+    the UI falls back to the full snapshot."""
+    if backend is None:
+        return Response(status_code=503)
+    jpg = await asyncio.to_thread(backend.roster.face_png, det_id)
+    if not jpg:
+        return Response(status_code=404)
+    return Response(content=jpg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/inspect/{source_id}")
 async def api_inspect(source_id: int, payload: dict[str, float]) -> Any:
     """'Look closer' at a clicked point — returns any objects found there."""

@@ -385,6 +385,26 @@ class SessionRoster:
         ok, buf = cv2.imencode(".png", rgba)
         return buf.tobytes() if ok else None
 
+    def face_png(self, det_id: str) -> bytes | None:
+        """The entry's photo cropped to the subject's face (portrait), as JPEG bytes. Returns
+        None when there is no photo or no detectable face, so the caller falls back to the
+        full snapshot."""
+        import cv2
+        from .face import crop_face
+        with self._lock:
+            e = self._entries.get(det_id)
+            path = e["snapshot_path"] if e else None
+        if not path or not Path(path).exists():
+            return None
+        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        crop = crop_face(img)
+        if crop is None or crop.size == 0:
+            return None
+        ok, buf = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        return buf.tobytes() if ok else None
+
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()
