@@ -1,0 +1,101 @@
+---
+layout: layouts/page.njk
+pagination:
+  data: models
+  size: 1
+  alias: model
+permalink: "/models/{{ model.slug }}/"
+eyebrow: Model
+crumbs:
+  - { label: Models, url: /models/ }
+eleventyComputed:
+  title: "{{ model.name }}"
+  intro: "{{ model.purpose }}"
+  description: "{{ model.name }} in Overseer: {{ model.purpose }}"
+toc:
+  - { id: overview, text: Overview }
+  - { id: io, text: Inputs & Outputs }
+  - { id: performance, text: Performance }
+  - { id: tradeoffs, text: Advantages & Limits }
+  - { id: examples, text: Example outputs }
+  - { id: configuration, text: Configuration }
+  - { id: benchmarks, text: Benchmarks }
+---
+<div class="row" style="gap:8px;margin-bottom:8px">
+  <span class="badge {{ 'green' if model.status == 'shipped' else 'amber' }}">{{ model.status }}</span>
+  <span class="badge">{{ model.role }}</span>
+  {% for t in model.tags %}<span class="badge cyan">{{ t }}</span>{% endfor %}
+</div>
+
+<section id="overview">
+  <h2>Overview</h2>
+  <p>{{ model.description }}</p>
+  <div class="table-wrap spec">
+    <table>
+      <tbody>
+        <tr><th>Role</th><td>{{ model.role }}</td></tr>
+        <tr><th>Expected latency</th><td>{{ model.latency }}</td></tr>
+        <tr><th>Hardware requirements</th><td>{{ model.hardware }}</td></tr>
+        <tr><th>Memory requirements</th><td>{{ model.memory }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="io">
+  <h2>Inputs &amp; Outputs</h2>
+  <div class="grid cols-2">
+    <div><div class="mono-label">Inputs</div><ul style="margin-top:8px">{% for i in model.inputs %}<li>{{ i }}</li>{% endfor %}</ul></div>
+    <div><div class="mono-label">Outputs</div><ul style="margin-top:8px">{% for o in model.outputs %}<li>{{ o }}</li>{% endfor %}</ul></div>
+  </div>
+</section>
+
+<section id="performance">
+  <h2>Performance</h2>
+  <p>{{ model.performance }}</p>
+</section>
+
+<section id="tradeoffs">
+  <h2>Advantages &amp; Limitations</h2>
+  <div class="grid cols-2">
+    <div class="card">
+      <h3 style="margin-top:0;color:var(--green)">Advantages</h3>
+      <ul style="margin:0">{% for a in model.advantages %}<li>{{ a }}</li>{% endfor %}</ul>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;color:var(--amber)">Limitations</h3>
+      <ul style="margin:0">{% for l in model.limitations %}<li>{{ l }}</li>{% endfor %}</ul>
+    </div>
+  </div>
+</section>
+
+<section id="examples">
+  <h2>Example outputs</h2>
+  <div class="gallery-grid">
+    {% for ex in model.exampleOutputs %}
+    <div class="shot"><div class="ph"><span class="lab">{{ model.name }}</span></div><div class="cap"><div class="d">{{ ex }}</div></div></div>
+    {% endfor %}
+  </div>
+</section>
+
+<section id="configuration">
+  <h2>Configuration</h2>
+  <p class="muted">Keys in <code>config/default.yaml</code> that govern this model.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Key</th><th>Default</th></tr></thead>
+      <tbody>{% for c in model.config %}<tr><td><code>{{ c.key }}</code></td><td><code>{{ c.value }}</code></td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+
+<section id="benchmarks">
+  <h2>Benchmarks</h2>
+  <div class="callout warn"><div class="c-title">Placeholder</div><p>Benchmark figures below are illustrative and awaiting a standardised harness. Treat them as placeholders.</p></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Benchmark</th><th>Dataset</th><th>Metric</th><th>Value</th><th>Hardware</th></tr></thead>
+      <tbody>{% for b in model.benchmarks %}<tr><td>{{ b.name }}</td><td>{{ b.dataset }}</td><td>{{ b.metric }}</td><td><strong>{{ b.value }}</strong></td><td class="muted">{{ b.hardware }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>

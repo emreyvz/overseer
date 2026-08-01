@@ -1,0 +1,18 @@
+---
+layout: layouts/page.njk
+title: Models
+eyebrow: AI Models
+intro: "Every model in the Overseer catalogue, each with purpose, inputs and outputs, performance, hardware and memory needs, advantages, limitations and benchmark placeholders. Select a model for its full spec sheet."
+---
+<div class="grid cols-2">
+  {% for m in models %}
+  <a class="card link bracket" href="{{ '/models/' | url }}{{ m.slug }}/">
+    <div class="modelcard">
+      <div class="top"><span class="name">{{ m.name }}</span><span class="badge {{ 'green' if m.status == 'shipped' else 'amber' }}">{{ m.status }}</span></div>
+      <span class="role">{{ m.role }}</span>
+      <p>{{ m.purpose }}</p>
+      <div class="tags" style="margin-top:2px">{% for t in m.tags %}<span class="badge cyan">{{ t }}</span>{% endfor %}</div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
