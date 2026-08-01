@@ -250,13 +250,14 @@ class LLMClient:
             log.warning("LLM call failed: %s", str(exc)[:200])
             return None
 
-    def chat(self, prompt: str, system: str | None = None, max_tokens: int = 700) -> str | None:
+    def chat(self, prompt: str, system: str | None = None, max_tokens: int = 700,
+             temperature: float = 0.4) -> str | None:
         msgs = []
         if system:
             msgs.append({"role": "system", "content": system})
         msgs.append({"role": "user", "content": prompt})
         return self._post({"model": self.model, "messages": msgs, "max_tokens": max_tokens,
-                           "temperature": 0.4, "thinking": {"type": "disabled"}})
+                           "temperature": temperature, "thinking": {"type": "disabled"}})
 
     def summarize(self, events: list[dict]) -> str | None:
         """Short natural-language incident/shift summary (kept terse)."""
@@ -328,28 +329,50 @@ class LLMClient:
         active = ctx.get("active_camera") or "none"
         screen = ctx.get("mode") or "?"
         prompt = (
-            "You are the AI Operator of a video-surveillance system. Turn the operator's request "
-            "into a JSON plan of concrete actions the UI executes in order.\n\n"
-            "Available actions:\n" + _OPERATOR_ACTIONS + "\n\n"
-            'Reply with ONLY this JSON: {"steps":[{"action":"...","args":{...},"as":"name?"}], '
-            '"say":"one short spoken confirmation", "border":"nav"|"alert"}.\n'
-            'DATA PASSING: a step may name its result with "as", and a later step may reference it '
-            'in args as "$name". Example — "go to the street cam, if there is a car add it to the '
-            'watchlist as \'car\', enhance its photo, tell me when it was last seen":\n'
-            '{"steps":[{"action":"switch_camera","args":{"name":"street"}},'
-            '{"action":"find_subject","args":{"cls":"vehicle","camera":"street"},"as":"car"},'
+            "You are the planning brain of the AI Operator for a video-surveillance app. YOU decide "
+            "how to fulfil the operator's request by decomposing it into an ordered CHAIN of actions "
+            "from the list below. Do the WHOLE request, not just the first part — if it asks for "
+            "several things, output a step for each, in the right order.\n\n"
+            "ACTIONS (use only these):\n" + _OPERATOR_ACTIONS + "\n\n"
+            'Reply with ONLY this JSON (no prose): {"steps":[{"action":"...","args":{...},"as":"name?"}], '
+            '"say":"one short spoken confirmation or the answer", "border":"nav"|"alert"}.\n\n'
+            "RULES:\n"
+            "- Decompose fully. A request with 'and' / 'then' / 'after that' / commas / multiple verbs "
+            "becomes multiple steps.\n"
+            '- DATA PASSING: name a step\'s result with "as", then reference it later in args as "$name" '
+            "(e.g. find something, then act on it).\n"
+            "- CONDITIONALS ('if there is a car…'): just chain find_subject then the action on its "
+            "result — if nothing is found the later steps simply report that. Do not invent a branch.\n"
+            "- QUESTIONS about another camera: chain switch_camera first, then the query action.\n"
+            "- Resolve names against the live context; NEVER invent a camera name. If a needed camera/"
+            "target is truly unspecified and unguessable, return {\"ask\":\"...\",\"steps\":[]}.\n"
+            "- border is \"alert\" only when creating an alarm/critical rule, else \"nav\".\n\n"
+            "EXAMPLES:\n"
+            'Req: "go to the street cam, if there is a car add it to the watchlist as \'car\', enhance '
+            'its photo, and tell me when it was last seen"\n'
+            '=> {"steps":[{"action":"switch_camera","args":{"name":"Street Cam"}},'
+            '{"action":"find_subject","args":{"cls":"vehicle","camera":"Street Cam"},"as":"car"},'
             '{"action":"watch_subject","args":{"subject":"$car","name":"car"}},'
             '{"action":"super_fuse","args":{"subject":"$car"}},'
-            '{"action":"last_seen","args":{"subject":"$car"}}],"say":"Done","border":"nav"}\n'
-            "Chain as many steps as the request needs, in the correct order.\n"
-            'Use {"ask":"short question","steps":[]} ONLY when the request is too ambiguous to act '
-            "on (e.g. which camera). Set border to \"alert\" only when the plan creates an alarm or "
-            "critical rule, else \"nav\". Chain as many steps as the request needs. Resolve names "
-            "against the live context; never invent a camera name.\n"
-            f"Live context: cameras=[{cams}]; active_camera={active}; current_screen={screen}.\n"
-            "Request: " + command)
+            '{"action":"last_seen","args":{"subject":"$car"}}],"say":"On it.","border":"nav"}\n'
+            'Req: "switch to the hotel camera, turn on the heatmap and tell me how busy it is"\n'
+            '=> {"steps":[{"action":"switch_camera","args":{"name":"Hotel"}},'
+            '{"action":"set_module","args":{"key":"heatmap","on":true}},'
+            '{"action":"camera_status","args":{}}],"say":"Here you go.","border":"nav"}\n'
+            'Req: "show me the watched red trucks and how many there are"\n'
+            '=> {"steps":[{"action":"filter_roster","args":{"cls":"vehicle","color":"red","subtype":'
+            '"truck","watched":true}},{"action":"count_subjects","args":{"cls":"vehicle","color":"red",'
+            '"subtype":"truck"}}],"say":"Filtered.","border":"nav"}\n'
+            'Req: "how many people are on the plaza camera?"\n'
+            '=> {"steps":[{"action":"switch_camera","args":{"name":"Plaza"}},'
+            '{"action":"count","args":{"cls":"person"}}],"border":"nav"}\n\n'
+            f"LIVE CONTEXT: cameras=[{cams}]; active_camera={active}; current_screen={screen}.\n"
+            "REQUEST: " + command)
         plan = self._json(self.chat(
-            prompt, system="You output only strict JSON action plans for a surveillance UI.", max_tokens=600))
+            prompt, system=("You are a planner that outputs ONLY strict JSON action-chain plans for a "
+                            "surveillance UI. You break complex requests into many ordered steps and "
+                            "pass data between them."),
+            max_tokens=1400, temperature=0.15))
         if not isinstance(plan, dict):
             return None
         steps: list[dict] = []
