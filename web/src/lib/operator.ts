@@ -16,6 +16,7 @@ import { SIM } from './sim'
 import { api } from './api'
 import { annotate } from './annotations'
 import { zones, delZone } from './zones'
+import { recordFeedback } from './feedback'
 import { sfx, toggleMute } from './audio'
 
 // ---- operator state (read by the border overlay + the console transcript) ------------------
@@ -441,6 +442,45 @@ export const ACTIONS: Record<string, Action> = {
     + 'detector or overlay, create zones/rules/cases, watch plates or subjects, super-fuse a photo, '
     + 'brief you, and chain all of it together. Just say what you want.',
 
+  // ---- more alert / subject / panel control ----------------------------------
+  mark_false: () => {
+    const a = get(alerts)[0]; if (!a) return 'no alert to mark'
+    recordFeedback(a.type, a.cam, 'false')
+    alerts.update((l) => l.map((x) => (x === a ? { ...x, ack: true } : x)))
+    return `marked "${a.type}" at ${a.cam} as a false alarm`
+  },
+  unwatch_subject: async ({ subject }) => {
+    const s = subject as { id?: string; name?: string } | undefined
+    if (!s?.id) return 'no subject to remove'
+    await api.watchRoster(s.id, false).catch(() => {})
+    return `removed ${s.name || 'the subject'} from the watchlist`
+  },
+  relationships: async ({ subject }) => {
+    const s = subject as { id?: string } | undefined
+    if (!s?.id) return 'no subject given'
+    const r = await api.entityRelationships(s.id).catch(() => null)
+    const a = r?.associates ?? []
+    return a.length
+      ? `${a.length} associates; most often with a ${a[0].cls}${a[0].plate ? ' ' + a[0].plate : ''} (${a[0].count}×)`
+      : 'no associates found for that subject'
+  },
+  alerts_here: ({ camera }) => {
+    const camName = findCam(S(camera))?.name ?? get(cameras).find((c) => c.id === get(activeCam))?.name
+    const n = get(alerts).filter((x) => x.cam === camName && !x.ack).length
+    return `${n} active alert${n === 1 ? '' : 's'} on ${camName ?? 'this camera'}`
+  },
+  close_panels: () => {
+    zoneEditor.set(false); alertRules.set(false); objectRegister.set(false); storageScreen.set(false)
+    watchlistOpen.set(false); suggestionsOpen.set(false); alertsScreen.set(false); spatialOpen.set(null)
+    return 'closed the open panels'
+  },
+  reconnect: () => {
+    const c = get(cameras).find((x) => x.id === get(activeCam))
+    if (!c) return 'no active camera'
+    if (!SIM) sendCommand(`connect:${c.name}`)
+    return `reconnecting ${c.name}`
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -562,6 +602,9 @@ export function routeCommand(raw: string): Plan | null {
   if (/(latest|last|son|en son).*(alert|alarm)/i.test(low)) return { steps: [{ action: 'latest_alert', args: {} }], border: 'nav' }
   if (/(clear|remove).*(zone|bölge)|(zone|bölge).*(temizle|sil|kaldır)/i.test(low)) return { steps: [{ action: 'clear_zones', args: {} }], border: 'nav' }
   if (/(what can you do|ne yapabilirsin|neler yapabilirsin|\bhelp\b|yardım|komutlar)/i.test(low)) return { steps: [{ action: 'help', args: {} }], border: 'nav' }
+  if (/(false alarm|yanlış alarm|mark.*false|hatalı alarm)/i.test(low)) return { steps: [{ action: 'mark_false', args: {} }], border: 'nav' }
+  if (/(close|kapat|dismiss).*(panel|overlay|pencere)|panelleri kapat/i.test(low)) return { steps: [{ action: 'close_panels', args: {} }], border: 'nav' }
+  if (/(reconnect|yeniden bağlan|tekrar bağlan)/i.test(low)) return { steps: [{ action: 'reconnect', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }
 
   // "search/find <q>" / "<q> ara/bul"
@@ -584,7 +627,7 @@ export function planNavigates(plan: Plan): boolean {
 const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene',
   'last_seen', 'camera_status', 'camera_dna', 'summarize', 'correlate_alerts', 'system_status', 'storage_status',
   'list_cameras', 'offline_cameras', 'busiest_camera', 'latest_alert', 'explain_alert', 'advise_alert',
-  'search_events', 'count_subjects', 'list_watched', 'stats', 'help', 'say'])
+  'search_events', 'count_subjects', 'list_watched', 'stats', 'help', 'relationships', 'alerts_here', 'say'])
 
 export async function runPlan(plan: Plan): Promise<void> {
   if (plan.ask) { olog(plan.ask, 'ask'); return }

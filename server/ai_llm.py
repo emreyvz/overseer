@@ -107,6 +107,12 @@ _OPERATOR_ACTIONS = (
     "find_plate {plate} — search the record for a licence plate.\n"
     "stats {period?} — answer the top event types over the last day (or 'week').\n"
     "help {} — tell the operator what you can do.\n"
+    "mark_false {} — mark the latest alert as a false alarm (trains suppression).\n"
+    "unwatch_subject {subject} — remove a subject from the watchlist.\n"
+    "relationships {subject} — answer who a subject is usually seen with.\n"
+    "alerts_here {camera?} — answer how many active alerts a camera has.\n"
+    "close_panels {} — close any open overlays/panels.\n"
+    "reconnect {} — reconnect the active camera feed.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 
