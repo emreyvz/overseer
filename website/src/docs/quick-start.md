@@ -10,18 +10,18 @@ From the repository root:
 
 ```bash
 # macOS / Linux
-./run.sh
+./overseer.sh
 
 # Windows
-run.bat
+overseer.cmd
 ```
 
-This launches the backend (FastAPI bridge) at `http://127.0.0.1:8787`, which serves the REST API, the WebSocket stream and the MJPEG feeds. Open that URL, or start the desktop shell with `cd web && npm run desktop`.
+On the first run this sets up the Python dependencies and AI models, then launches Overseer: the desktop app if Node.js is installed, otherwise in your browser at `http://127.0.0.1:8787`. It is the recommended way to run the project.
 
 ## Or start it manually
 
 ```bash
-python main.py
+python main.py            # backend only, at http://127.0.0.1:8787
 ```
 
 ## Open the console

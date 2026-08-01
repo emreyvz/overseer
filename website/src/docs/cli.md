@@ -4,12 +4,12 @@ order: 5
 intro: "The commands you will actually use, on the backend and the frontend."
 ---
 
-## Backend
+## Run
 
 ```bash
-./run.sh                  # quick start (macOS / Linux)
-run.bat                   # quick start (Windows)
-python main.py            # or start the FastAPI bridge directly (http://127.0.0.1:8787)
+./overseer.sh             # setup + launch the full app (macOS / Linux)
+overseer.cmd              # setup + launch the full app (Windows)
+python main.py            # or start just the backend (http://127.0.0.1:8787)
 ```
 
 The backend serves REST, the WebSocket stream and MJPEG feeds. It loads models on first use and persists to a local SQLite database.

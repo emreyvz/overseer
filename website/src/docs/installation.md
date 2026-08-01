@@ -1,7 +1,7 @@
 ---
 title: Installation
 order: 1
-intro: "Clone the repository, set up a Python environment, install the frontend, and you are ready to run."
+intro: "Clone the repo and run one command. It sets up dependencies, models and the interface for you."
 ---
 
 ## 1. Clone
@@ -11,37 +11,30 @@ git clone https://github.com/emreyvz/overseer.git
 cd overseer
 ```
 
-## 2. Python backend
+## 2. One command
 
-Create a virtual environment and install dependencies:
+The launcher installs the Python toolchain ([uv](https://github.com/astral-sh/uv)), syncs dependencies, fetches the AI models, builds the interface, and starts the app:
 
 ```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
 # macOS / Linux
-source .venv/bin/activate
+./overseer.sh
 
-pip install -r requirements.txt
+# Windows
+overseer.cmd
 ```
 
-The first backend run downloads and caches the model weights under `models/`. After that, Overseer can run offline.
+If Node.js is installed you get the desktop app; otherwise Overseer opens in your browser at `http://127.0.0.1:8787`. The first run downloads model weights into `models/`; after that it can run fully offline.
 
-## 3. Frontend / desktop shell
+## Manual setup (optional)
+
+Prefer to do it yourself:
 
 ```bash
-cd web
-npm install
+uv sync                    # Python dependencies
+cd web && npm install      # frontend dependencies
 ```
 
-## 4. Verify
-
-Start the backend, then open the desktop shell (see [Quick Start]({{ '/docs/quick-start/' | url }})):
-
-```bash
-python main.py            # backend at http://127.0.0.1:8787
-cd web && npm run desktop # Electron desktop app
-```
+Then run the backend with `python main.py` (or `uv run python -m server`) and the desktop shell with `cd web && npm run desktop`.
 
 <div class="callout warn"><div class="c-title">GPU</div><p>For CUDA acceleration, install a PyTorch build matching your CUDA version. Overseer falls back to CPU automatically if no GPU is found.</p></div>
 
