@@ -10,8 +10,8 @@ skipped — the engine still runs (baseline / DINOv2 fallback), just with less c
 Steps:
   seg     YOLO-seg foreground model                 -> models/yolo11n-seg.pt
   dinov2  DINOv2 ViT-S/14 generic embedder (TS)     -> models/dinov2_vits14.torchscript
-  osnet   OSNet-AIN person ReID (needs torchreid)   -> models/osnet_ain_x1_0.torchscript
-  veri    fast-reid VeRi vehicle ReID (FASTREID_ROOT) -> models/veri_sbs_R50-ibn.torchscript
+  osnet   OSNet-AIN person ReID (auto-download; or convert your own) -> models/osnet_ain_x1_0.torchscript
+  veri    VeRi vehicle ReID     (auto-download; or convert your own) -> models/veri_sbs_R50-ibn.torchscript
   carbrand ViT car-make classifier (needs transformers) -> models/vehicle_make.torchscript
   easyocr trigger EasyOCR model download (ANPR)     -> ~/.EasyOCR cache
 
@@ -26,6 +26,28 @@ import shutil
 from pathlib import Path
 
 MODELS = Path("models")
+
+# Converted ReID embedders are hosted as release assets, so a fresh install is fully automatic
+# (no torchreid / fast-reid, no Google Drive). Operators can still convert their own checkpoint.
+_RELEASE = "https://github.com/emreyvz/overseer/releases/download/weights-v1"
+
+
+def _download(url: str, dst: Path) -> bool:
+    """Stream a file to dst (atomic via a .part temp). Returns False on any error, never raises."""
+    import urllib.request
+    tmp = dst.with_name(dst.name + ".part")
+    try:
+        print(f"  downloading {dst.name} (one time)...")
+        with urllib.request.urlopen(url, timeout=120) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f)
+        tmp.replace(dst)
+        return True
+    except Exception:  # noqa: BLE001
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
 
 
 def _export_seg() -> str:
@@ -65,33 +87,33 @@ def _find_osnet_ain_def() -> Path | None:
 
 
 def _export_osnet() -> str:
-    """Convert an OSNet-AIN ReID checkpoint (.pth.tar, e.g. osnet_ain_ms_d_c from the
-    torchreid MODEL_ZOO) that the operator dropped in models/ into a TorchScript embedder.
-    Best for surveillance: OSNet-AIN is domain-generalizable to unseen cameras."""
+    """Provide the OSNet-AIN person-ReID TorchScript embedder. Prefers converting a checkpoint
+    the operator dropped in models/ (torchreid MODEL_ZOO); otherwise downloads the ready-made
+    TorchScript from the release. OSNet-AIN is domain-generalizable to unseen cameras."""
     dst = MODELS / "osnet_ain_x1_0.torchscript"
     if dst.exists():
         return f"osnet: already present ({dst})"
     ckpts = (sorted(MODELS.glob("*osnet*ain*.pth*")) or sorted(MODELS.glob("*osnet*.pth*")))
-    if not ckpts:
-        return ("osnet: SKIPPED - place an OSNet-AIN .pth.tar in models/ (torchreid "
-                "MODEL_ZOO), then re-run")
     defn = _find_osnet_ain_def()
-    if defn is None:
-        return "osnet: SKIPPED - `uv pip install torchreid gdown` (for the model def)"
-    import importlib.util
-    import torch
-    spec = importlib.util.spec_from_file_location("osnet_ain", str(defn))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    ckpt = torch.load(str(ckpts[0]), map_location="cpu", weights_only=False)
-    sd = {k.replace("module.", ""): v for k, v in ckpt["state_dict"].items()}
-    n_cls = sd["classifier.weight"].shape[0]        # match the training set's class count
-    model = mod.osnet_ain_x1_0(num_classes=n_cls, pretrained=False)
-    missing, _ = model.load_state_dict(sd, strict=False)
-    model.eval()
-    with torch.no_grad():                            # eval() forward returns the embedding
-        torch.jit.trace(model, torch.zeros(1, 3, 256, 128)).save(str(dst))
-    return f"osnet: exported {ckpts[0].name} -> {dst} (missing keys: {len(missing)})"
+    if ckpts and defn:                               # convert the operator's own checkpoint
+        import importlib.util
+        import torch
+        spec = importlib.util.spec_from_file_location("osnet_ain", str(defn))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        ckpt = torch.load(str(ckpts[0]), map_location="cpu", weights_only=False)
+        sd = {k.replace("module.", ""): v for k, v in ckpt["state_dict"].items()}
+        n_cls = sd["classifier.weight"].shape[0]     # match the training set's class count
+        model = mod.osnet_ain_x1_0(num_classes=n_cls, pretrained=False)
+        missing, _ = model.load_state_dict(sd, strict=False)
+        model.eval()
+        with torch.no_grad():                        # eval() forward returns the embedding
+            torch.jit.trace(model, torch.zeros(1, 3, 256, 128)).save(str(dst))
+        return f"osnet: converted {ckpts[0].name} -> {dst} (missing keys: {len(missing)})"
+    if _download(f"{_RELEASE}/osnet_ain_x1_0.torchscript", dst):
+        return f"osnet: downloaded -> {dst}"
+    return ("osnet: SKIPPED - download failed; check your connection, or place an "
+            "OSNet-AIN .pth.tar in models/ (torchreid MODEL_ZOO) and re-run")
 
 
 def _export_veri() -> str:
@@ -104,37 +126,35 @@ def _export_veri() -> str:
     if dst.exists():
         return f"veri: already present ({dst})"
     ckpts = sorted(MODELS.glob("*veri*.pth")) + sorted(MODELS.glob("*veri*.pth.tar"))
-    if not ckpts:
-        return ("veri: SKIPPED - download veri_sbs_R50-ibn.pth (fast-reid releases) into "
-                "models/, then re-run")
     root = os.environ.get("FASTREID_ROOT")
-    if not root or not Path(root, "fastreid").exists():
-        return ("veri: SKIPPED - set FASTREID_ROOT to a fast-reid clone "
-                "(git clone https://github.com/JDAI-CV/fast-reid) and re-run")
-    import sys
+    if ckpts and root and Path(root, "fastreid").exists():   # convert with the operator's fast-reid
+        import sys
 
-    import torch
-    sys.path.insert(0, root)
-    from fastreid.config import get_cfg
-    from fastreid.modeling.meta_arch import build_model
-    from fastreid.utils.checkpoint import Checkpointer
-    cfg = get_cfg()
-    cfg.merge_from_file(str(Path(root, "configs/VeRi/sbs_R50-ibn.yml")))
-    cfg.MODEL.WEIGHTS = str(ckpts[0])
-    cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    cfg.MODEL.BACKBONE.PRETRAIN = False
-    if cfg.MODEL.HEADS.POOL_LAYER == "FastGlobalAvgPool":
-        cfg.MODEL.HEADS.POOL_LAYER = "GlobalAvgPool"
-    cfg.freeze()
-    model = build_model(cfg)
-    Checkpointer(model).load(cfg.MODEL.WEIGHTS)
-    if hasattr(model.backbone, "deploy"):
-        model.backbone.deploy(True)
-    model.eval()
-    h, w = cfg.INPUT.SIZE_TEST
-    dummy = torch.randn(1, 3, h, w).to(model.device)
-    torch.jit.trace(model, dummy).save(str(dst))
-    return f"veri: exported {ckpts[0].name} -> {dst} (raw [0,255] input, 2048-d)"
+        import torch
+        sys.path.insert(0, root)
+        from fastreid.config import get_cfg
+        from fastreid.modeling.meta_arch import build_model
+        from fastreid.utils.checkpoint import Checkpointer
+        cfg = get_cfg()
+        cfg.merge_from_file(str(Path(root, "configs/VeRi/sbs_R50-ibn.yml")))
+        cfg.MODEL.WEIGHTS = str(ckpts[0])
+        cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+        cfg.MODEL.BACKBONE.PRETRAIN = False
+        if cfg.MODEL.HEADS.POOL_LAYER == "FastGlobalAvgPool":
+            cfg.MODEL.HEADS.POOL_LAYER = "GlobalAvgPool"
+        cfg.freeze()
+        model = build_model(cfg)
+        Checkpointer(model).load(cfg.MODEL.WEIGHTS)
+        if hasattr(model.backbone, "deploy"):
+            model.backbone.deploy(True)
+        model.eval()
+        h, w = cfg.INPUT.SIZE_TEST
+        dummy = torch.randn(1, 3, h, w).to(model.device)
+        torch.jit.trace(model, dummy).save(str(dst))
+        return f"veri: converted {ckpts[0].name} -> {dst} (raw [0,255] input, 2048-d)"
+    if _download(f"{_RELEASE}/veri_sbs_R50-ibn.torchscript", dst):
+        return f"veri: downloaded -> {dst}"
+    return "veri: SKIPPED - download failed; check your connection"
 
 
 def _export_carbrand() -> str:
