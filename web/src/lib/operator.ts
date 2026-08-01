@@ -8,7 +8,7 @@ import { get, writable } from 'svelte/store'
 import {
   mode, activeCam, cameras, stage, forensicSeed, zoneEditor, alertRules, watchlistOpen, aiOpen,
   suggestionsOpen, spatialOpen, storageScreen, commandOpen, investigateCase, alertsScreen,
-  rosterInit, flashBanner, triggerGlitch, type Mode,
+  rosterInit, modules, toggleModule, flashBanner, triggerGlitch, type Mode,
 } from './stores'
 import { sendCommand } from './ws'
 import { SIM } from './sim'
@@ -117,6 +117,17 @@ export const ACTIONS: Record<string, Action> = {
     return `case created: ${S(name, 'CASE')}`
   },
 
+  // Enable/disable a detection class. "alarm on weapons" turns weapon detection on, which then
+  // auto-alerts on sight — so the operator is never stuck on that kind of command.
+  set_module: ({ key, on }) => {
+    const k = S(key).toLowerCase()
+    const m = get(modules).find((x) => x.key === k)
+    if (!m) return `no such detector: ${k}`
+    const want = on !== false
+    if (m.on !== want) toggleModule(k)
+    return `${k} detection ${want ? 'on' : 'off'}`
+  },
+
   // Standing rule (e.g. "alarm if you see a weapon") — NOT an immediate alarm.
   create_alert_rule: async ({ text }) => {
     const r = await api.aiRule(S(text), true).catch(() => null)
@@ -162,6 +173,24 @@ export function routeCommand(raw: string): Plan | null {
   // side-by-side / live wall
   if (/(yan ?yana|side ?by ?side|live ?wall)/i.test(low)) {
     return { steps: [{ action: 'side_by_side', args: {} }], border: 'nav' }
+  }
+
+  // enable/disable a detector; "alarm on / if you see a weapon" turns weapon detection on
+  const MODS: Array<[RegExp, string]> = [
+    [/silah|weapon|gun|knife|bıçak/i, 'weapon'],
+    [/insan|kişi|person|people|pedestrian/i, 'person'],
+    [/araç|araba|vehicle|\bcar\b/i, 'vehicle'],
+    [/hayvan|animal/i, 'animal'],
+    [/hareket|motion/i, 'motion'],
+  ]
+  if (/(tespit|detection|algıla|modül|module|dedekt)/i.test(low) ||
+      /(silah|weapon|gun).*(alarm|gör|see|tetikle|trigger)|(alarm|gör|see).*(silah|weapon|gun)/i.test(low)) {
+    for (const [re, key] of MODS) {
+      if (re.test(low)) {
+        const on = !/(kapat|disable|\boff\b|durdur|stop)/i.test(low)
+        return { steps: [{ action: 'set_module', args: { key, on } }], border: key === 'weapon' ? 'alert' : 'nav' }
+      }
+    }
   }
 
   // "describe the scene" / "sahneyi anlat"
