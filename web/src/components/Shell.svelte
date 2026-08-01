@@ -12,7 +12,7 @@
   import DominantRail from './rails/DominantRail.svelte'
   import AuxiliaryRail from './rails/AuxiliaryRail.svelte'
   import TimelineDrawer from './TimelineDrawer.svelte'
-  import { mode, stage, pickerView, watchlistOpen, aiOpen, suggestionsOpen, commandOpen, triggerGlitch } from '../lib/stores'
+  import { mode, stage, pickerView, watchlistOpen, operatorOpen, suggestionsOpen, commandOpen, triggerGlitch } from '../lib/stores'
   import { sfx } from '../lib/audio'
 
   // Bottom nav — clickable, active-highlighted. Kept lean; heavier tools live in ⌘.
@@ -22,7 +22,7 @@
     { label: 'FORENSIC', key: 'A', mode: 'forensic', act: () => mode.set('forensic') },
     { label: 'CASES', key: 'K', mode: 'case', act: () => mode.set('case') },
     { label: 'WATCHLIST', key: 'W', mode: '', act: () => watchlistOpen.set(true) },
-    { label: 'ASSISTANT', key: 'I', mode: '', act: () => aiOpen.set(true) },
+    { label: 'OPERATOR', key: 'I', mode: '', act: () => operatorOpen.set(true) },
     { label: 'SUGGEST', key: 'G', mode: '', act: () => suggestionsOpen.set(true) },
     { label: 'ARCHIVE', key: 'R', mode: 'archive', act: () => mode.set('archive') },
   ]

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
-    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, hydrateAlerts, hydrateModules, type Mode,
+    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, hydrateAlerts, hydrateModules, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
@@ -34,6 +34,7 @@
   import EnrollModal from './components/pov/EnrollModal.svelte'
   import Watchlist from './components/Watchlist.svelte'
   import AiConsole from './components/AiConsole.svelte'
+  import OperatorConsole from './components/OperatorConsole.svelte'
   import OperatorBorder from './components/OperatorBorder.svelte'
   import AlertsBoard from './components/AlertsBoard.svelte'
   import SmartSuggestions from './components/suggestions/SmartSuggestions.svelte'
@@ -109,10 +110,10 @@
     const k = e.key.toLowerCase()
     if (k === ' ' || k === ':') { e.preventDefault(); commandOpen.set(true); sfx('click'); return }
 
-    if (k === 'i') { aiOpen.set(true); sfx('click'); return }
+    if (k === 'i') { e.preventDefault(); operatorOpen.set(true); sfx('click'); return }
     // The map / picker screen also honours the shortcuts + search + bottom bar.
     if ($stage === 'select') {
-      if (k === 'escape') { if ($aiOpen) { aiOpen.set(false); return } if ($enrollOpen) { enrollOpen.set(null); return } if ($watchlistOpen) { watchlistOpen.set(false); return } return }
+      if (k === 'escape') { if ($operatorOpen) { operatorOpen.set(false); return } if ($aiOpen) { aiOpen.set(false); return } if ($enrollOpen) { enrollOpen.set(null); return } if ($watchlistOpen) { watchlistOpen.set(false); return } return }
       if (k === 'g') { pickerView.set('map'); return }
       if (k === 'c') { pickerView.set('grid'); return }
       if (k === 'a') { sfx('whoosh'); triggerGlitch(160); stage.set('live'); mode.set('forensic'); return }
@@ -123,6 +124,7 @@
     }
     if ($stage !== 'live') return
     if (k === 'escape') {
+      if ($operatorOpen) { operatorOpen.set(false); return }
       if ($alertsScreen) { alertsScreen.set(false); return }
       if ($suggestionsOpen) { suggestionsOpen.set(false); return }
       if ($aiOpen) { aiOpen.set(false); return }
@@ -172,7 +174,7 @@
       <button class="mode" onclick={() => pickerView.set('grid')}>SOURCES<span class="key">C</span></button>
       <button class="mode" onclick={() => { triggerGlitch(160); stage.set('live'); mode.set('forensic') }}>FORENSIC<span class="key">A</span></button>
       <button class="mode" onclick={() => watchlistOpen.set(true)}>WATCHLIST<span class="key">W</span></button>
-      <button class="mode" onclick={() => aiOpen.set(true)}>ASSISTANT<span class="key">I</span></button>
+      <button class="mode" onclick={() => operatorOpen.set(true)}>OPERATOR<span class="key">I</span></button>
       <button class="mode" onclick={() => { triggerGlitch(160); stage.set('live'); mode.set('archive') }}>ARCHIVE<span class="key">R</span></button>
       <button class="mode cmd" onclick={() => commandOpen.set(true)}>COMMAND<span class="key">SPACE</span></button>
     </nav>
@@ -196,6 +198,7 @@
 {/if}
 
 {#if $aiOpen}<AiConsole />{/if}
+{#if $operatorOpen}<OperatorConsole />{/if}
 {#if $alertsScreen}<AlertsBoard onclose={() => alertsScreen.set(false)} />{/if}
 {#if $suggestionsOpen}<SmartSuggestions onclose={() => suggestionsOpen.set(false)} />{/if}
 <OperatorBorder />
