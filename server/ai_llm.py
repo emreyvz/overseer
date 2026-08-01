@@ -57,6 +57,11 @@ _OPERATOR_ACTIONS = (
     "count {cls} — answer how many are on the ACTIVE camera right now; cls is person/vehicle/any. "
     "To count on another camera, chain switch_camera first, then count.\n"
     "count_alerts {severity?} — answer how many alerts are active (optionally critical/warning/info).\n"
+    "find_subject {cls?, camera?, color?} — find the most recent matching subject (person/vehicle) "
+    "in the roster; give the step an \"as\" name so later steps can use it.\n"
+    "watch_subject {subject, name?} — add a found subject to the watchlist and optionally name it.\n"
+    "super_fuse {subject} — enhance / clarify a subject's photo (super-resolution).\n"
+    "last_seen {subject} — answer when a subject was last seen.\n"
     "describe_scene {camera?} — describe what a camera currently sees.\n"
     "create_case {name} — open a new investigation case.\n"
     "create_alert_rule {text} — create a STANDING alert rule from a natural-language instruction "
@@ -282,8 +287,17 @@ class LLMClient:
             "You are the AI Operator of a video-surveillance system. Turn the operator's request "
             "into a JSON plan of concrete actions the UI executes in order.\n\n"
             "Available actions:\n" + _OPERATOR_ACTIONS + "\n\n"
-            'Reply with ONLY this JSON: {"steps":[{"action":"...","args":{...}}], '
+            'Reply with ONLY this JSON: {"steps":[{"action":"...","args":{...},"as":"name?"}], '
             '"say":"one short spoken confirmation", "border":"nav"|"alert"}.\n'
+            'DATA PASSING: a step may name its result with "as", and a later step may reference it '
+            'in args as "$name". Example — "go to the street cam, if there is a car add it to the '
+            'watchlist as \'car\', enhance its photo, tell me when it was last seen":\n'
+            '{"steps":[{"action":"switch_camera","args":{"name":"street"}},'
+            '{"action":"find_subject","args":{"cls":"vehicle","camera":"street"},"as":"car"},'
+            '{"action":"watch_subject","args":{"subject":"$car","name":"car"}},'
+            '{"action":"super_fuse","args":{"subject":"$car"}},'
+            '{"action":"last_seen","args":{"subject":"$car"}}],"say":"Done","border":"nav"}\n'
+            "Chain as many steps as the request needs, in the correct order.\n"
             'Use {"ask":"short question","steps":[]} ONLY when the request is too ambiguous to act '
             "on (e.g. which camera). Set border to \"alert\" only when the plan creates an alarm or "
             "critical rule, else \"nav\". Chain as many steps as the request needs. Resolve names "
@@ -300,8 +314,11 @@ class LLMClient:
             for s in raw:
                 if isinstance(s, dict) and s.get("action"):
                     args = s.get("args")
-                    steps.append({"action": str(s["action"]),
-                                  "args": args if isinstance(args, dict) else {}})
+                    step = {"action": str(s["action"]),
+                            "args": args if isinstance(args, dict) else {}}
+                    if s.get("as"):
+                        step["as"] = str(s["as"])   # named result for data passing
+                    steps.append(step)
         border = plan.get("border")
         ask = str(plan.get("ask") or "").strip() or None
         say = str(plan.get("say") or "").strip() or None
