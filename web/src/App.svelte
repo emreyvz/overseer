@@ -33,8 +33,8 @@
   import StorageScreen from './components/StorageScreen.svelte'
   import EnrollModal from './components/pov/EnrollModal.svelte'
   import Watchlist from './components/Watchlist.svelte'
-  import AiConsole from './components/AiConsole.svelte'
   import OperatorConsole from './components/OperatorConsole.svelte'
+  import OperatorLauncher from './components/OperatorLauncher.svelte'
   import OperatorBorder from './components/OperatorBorder.svelte'
   import AlertsBoard from './components/AlertsBoard.svelte'
   import SmartSuggestions from './components/suggestions/SmartSuggestions.svelte'
@@ -197,8 +197,8 @@
   <CommandBar />
 {/if}
 
-{#if $aiOpen}<AiConsole />{/if}
 {#if $operatorOpen}<OperatorConsole />{/if}
+{#if !$operatorOpen && ($stage === 'live' || $stage === 'select')}<OperatorLauncher />{/if}
 {#if $alertsScreen}<AlertsBoard onclose={() => alertsScreen.set(false)} />{/if}
 {#if $suggestionsOpen}<SmartSuggestions onclose={() => suggestionsOpen.set(false)} />{/if}
 <OperatorBorder />

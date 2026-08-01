@@ -19,7 +19,7 @@ import { sfx } from './audio'
 export type BorderKind = 'nav' | 'alert'
 export const operatorActive = writable<BorderKind | null>(null)
 export const operatorBusy = writable(false)
-export type LogKind = 'step' | 'say' | 'ask' | 'error'
+export type LogKind = 'you' | 'step' | 'say' | 'ask' | 'error'
 export type LogEntry = { t: number; text: string; kind: LogKind }
 export const operatorLog = writable<LogEntry[]>([])
 
@@ -252,7 +252,7 @@ export async function runPlan(plan: Plan): Promise<void> {
 export async function operate(command: string): Promise<Plan> {
   const cmd = command.trim()
   if (!cmd) return { say: '' }
-  olog(cmd, 'say')
+  olog(cmd, 'you')
   const local = routeCommand(cmd)
   if (local) { await runPlan(local); return local }
   // LLM fallback: give the planner live context so it can resolve references.
@@ -264,7 +264,15 @@ export async function operate(command: string): Promise<Plan> {
   }
   try {
     const plan = (await api.aiOperate(cmd, context)) as Plan
-    if (plan?.disabled) { olog('AI Operator needs the assistant configured', 'error'); return plan }
+    if (plan?.disabled) { olog('the AI Operator needs a provider configured (settings ⚙)', 'error'); return plan }
+    // A question the planner didn't turn into actions or an answer -> answer it as chat.
+    if (!plan?.steps?.length && !plan?.say && !plan?.ask) {
+      const { reply, disabled } = await api.aiChat(
+        cmd, 'You are Overseer, a concise surveillance operations assistant. Answer in 1-2 sentences.')
+      const say = disabled ? 'chat needs a provider configured (settings ⚙)' : (reply || 'no answer')
+      olog(say, 'say')
+      return { say }
+    }
     await runPlan(plan)
     return plan
   } catch (e) {

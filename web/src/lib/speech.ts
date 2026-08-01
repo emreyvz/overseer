@@ -9,7 +9,7 @@
 export type Lang = 'tr' | 'en'
 const LS = 'overseer.voice'
 export type VoicePrefs = { lang: Lang; tts: boolean; micId?: string; outId?: string }
-const DEFAULTS: VoicePrefs = { lang: 'tr', tts: true }
+const DEFAULTS: VoicePrefs = { lang: 'en', tts: true }
 
 export function loadPrefs(): VoicePrefs {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(LS) || '{}') } } catch { return { ...DEFAULTS } }
