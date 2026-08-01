@@ -4,9 +4,7 @@ module.exports = {
   header: [
     { label: "Features", url: "/features/" },
     { label: "Technology", url: "/technology/" },
-    { label: "Architecture", url: "/architecture/" },
     { label: "Docs", url: "/docs/" },
-    { label: "Examples", url: "/examples/" },
   ],
   groups: [
     {
