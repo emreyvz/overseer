@@ -843,14 +843,17 @@ class Backend:
     def _roster_plate_hit(self, plate: str, cam: str | None) -> None:
         self._check_plate_watch(plate, cam)
 
-    def _roster_profile_frame(self, sid: object, brightness: float, dets: list) -> None:
+    def _roster_profile_frame(self, sid: object, brightness: float, dets: list,
+                              points: list | None = None) -> None:
         """Feed a passively-scanned camera's frame into its DNA/reputation profile, so EVERY
-        camera builds a fingerprint (crowd / quiet / night / low-light / pedestrian-vs-vehicle),
-        not only the one being actively analysed. Motion/fps aren't measurable in the sweep, so
-        neutral values are passed and the tags come from brightness + the detection mix."""
+        camera builds a fingerprint (crowd / quiet / night / low-light / pedestrian-vs-vehicle)
+        AND a foot-point density grid for auto zone suggestions, not only the one being actively
+        analysed. Motion/fps aren't measurable in the sweep, so neutral values are passed and the
+        tags come from brightness + the detection mix."""
         if sid is None:
             return
-        self.cam_profiles.observe_frame(sid, brightness=brightness, motion=0.0, fps=15.0, dets=dets)
+        self.cam_profiles.observe_frame(sid, brightness=brightness, motion=0.0, fps=15.0,
+                                        dets=dets, points=points)
 
     # ---- investigation cases -----------------------------------------
     def open_case_from_alert(self, alert: dict) -> int:
