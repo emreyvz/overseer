@@ -22,8 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest = Apple Silicon (arm64); macos-13 = Intel (x64)
-        os: [windows-latest, macos-latest, macos-13, ubuntu-latest]
+        # macos-latest builds BOTH arm64 (Apple Silicon) and x64 (Intel) in one job (see the
+        # package step), avoiding the scarce/deprecated macos-13 Intel runners.
+        os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -64,10 +65,13 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"   # unsigned builds
         run: |
+          # On macOS build both architectures from the one (arm64) runner.
+          ARCH=""
+          if [ "$RUNNER_OS" = "macOS" ]; then ARCH="--mac --arm64 --x64"; fi
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            npx electron-builder --publish never -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
+            npx electron-builder --publish never $ARCH -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
           else
-            npx electron-builder --publish never
+            npx electron-builder --publish never $ARCH
           fi
 
       - name: Upload installers
