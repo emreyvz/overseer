@@ -1,9 +1,13 @@
 name: Build & publish desktop apps
 
-# Builds the Overseer desktop app (Electron) for Windows, macOS and Linux and publishes the
-# installers to the GitHub Release for a pushed v* tag. The installer is thin: on first launch
-# the app sets up the Python backend (uv sync) and downloads the AI models, matched to the
-# machine (GPU if present). See web/electron/main.cjs (packaged path).
+# Builds the Overseer desktop app (Electron) for Windows, macOS and Linux, then a single release
+# job publishes the installers to the GitHub Release for a pushed v* tag. The matrix jobs only
+# BUILD (no per-job publish) so they never race to create the release, and macOS builds cleanly
+# unsigned. The installer is thin: on first launch the app sets up the Python backend (uv sync)
+# and downloads the AI models, matched to the machine. See web/electron/main.cjs.
+#
+# Builds are unsigned for now (users see a Gatekeeper / SmartScreen warning). To sign later, add
+# a certificate via the CSC_LINK / CSC_KEY_PASSWORD secrets and drop CSC_IDENTITY_AUTO_DISCOVERY.
 
 on:
   push:
@@ -43,48 +47,32 @@ jobs:
         run: |
           set -e
           mkdir -p web/resources/backend web/resources/bin
-          # ship the whole tracked source (git archive excludes git-ignored models/data/.venv)
           git archive --format=tar HEAD | tar -x -C web/resources/backend
           rm -rf web/resources/backend/website web/resources/backend/demo \
                  web/resources/backend/.github web/resources/backend/web/src \
                  web/resources/backend/web/node_modules web/resources/backend/web/dist
-          # ship the freshly built UI so the backend can serve it same-origin
           mkdir -p web/resources/backend/web
           cp -r web/dist web/resources/backend/web/dist
-          # bundle the uv binary for the first-run environment setup
           uvbin="$(command -v uv || true)"
           if [ -n "$uvbin" ]; then cp "$uvbin" web/resources/bin/ 2>/dev/null || cp "${uvbin}.exe" web/resources/bin/ 2>/dev/null || true; fi
           ls -la web/resources/bin || true
 
-      - name: Package & publish (electron-builder)
+      - name: Package (electron-builder, unsigned, no publish)
         working-directory: web
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Code signing is OPTIONAL. Add these repo secrets to produce signed builds; without
-          # them the builds are unsigned (users see a Gatekeeper / SmartScreen warning).
-          #   Windows + macOS certificate (base64 .pfx/.p12) and its password:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          #   macOS notarization (Apple Developer account):
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Skip macOS signing only when no certificate is provided, so unsigned builds succeed
-          # (arm64 otherwise attempts ad-hoc signing and fails). Signs automatically once CSC_LINK is set.
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK == '' && 'false' || 'true' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"   # unsigned builds
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            npx electron-builder --publish always -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
+            npx electron-builder --publish never -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
           else
             npx electron-builder --publish never
           fi
 
-      - name: Upload build artifacts (workflow_dispatch runs)
-        if: github.ref_type != 'tag'
+      - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: overseer-${{ matrix.os }}
+          name: installers-${{ matrix.os }}
           path: |
             web/release/*.exe
             web/release/*.dmg
@@ -92,3 +80,24 @@ jobs:
             web/release/*.AppImage
             web/release/*.deb
           if-no-files-found: ignore
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: installers-*
+          merge-multiple: true
+
+      - name: Publish GitHub Release (draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Overseer ${{ github.ref_name }}
+          draft: true
+          fail_on_unmatched_files: false
+          files: dist/*
