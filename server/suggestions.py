@@ -18,6 +18,8 @@ BEHAVIOR_EVENTS = {
 }
 # Behaviours severe enough that the proposed rule defaults to critical severity.
 CRITICAL_EVENTS = {"FIGHTING", "FALLING", "ABANDONED_OBJECT", "WEAPON"}
+# Behaviours that are DEFINED by a zone (so a zone suggestion can seed a rule for them).
+ZONE_BEHAVIORS = {"LOITERING", "LINE_CROSS", "RESTRICTED", "WRONG_DIRECTION", "TAILGATING"}
 
 
 def alert_suggestions(
@@ -49,6 +51,43 @@ def alert_suggestions(
                     "severity": "critical" if etype in CRITICAL_EVENTS else "warning",
                 },
             })
+    return out
+
+
+def zone_suggestions(
+    zone_by_source: dict[int, dict],
+    names: dict[int, str],
+    existing_rules: set[tuple[str, int | None]],
+    *,
+    min_coverage: float = 0.30,
+) -> list[dict]:
+    """Proactively propose WHERE to draw a watch zone: for each camera whose foot-traffic clearly
+    clusters in one area (from the density grid) and that has no zone-behaviour rule yet, suggest a
+    ready-to-edit zone polygon + a loitering rule, with the reason (how much traffic it covers).
+    This is the 'zone detection' step — the operator no longer has to guess where to draw."""
+    out: list[dict] = []
+    for sid, z in zone_by_source.items():
+        if not z or not z.get("polygon"):
+            continue
+        cov = float(z.get("coverage", 0.0))
+        if cov < min_coverage:
+            continue
+        if any((b, sid) in existing_rules or (b, None) in existing_rules for b in ZONE_BEHAVIORS):
+            continue  # camera already has a zone-behaviour rule; don't nag
+        name = names.get(sid, f"CAM {sid}")
+        pct = int(round(cov * 100))
+        samples = int(z.get("samples", 0))
+        out.append({
+            "kind": "zone", "cam": name, "count": samples,
+            "title": f"Set up a watch zone at {name}",
+            "why": f"{pct}% of the foot traffic here clusters in one area ({samples} tracks seen) "
+                   "and no zone watches it yet — this is where a loitering/intrusion zone belongs",
+            "zone": z["polygon"],
+            "rule": {
+                "name": f"LOITERING · {name}", "event_type": "LOITERING", "source_id": sid,
+                "severity": "warning",
+            },
+        })
     return out
 
 
