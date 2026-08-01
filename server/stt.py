@@ -52,18 +52,46 @@ class STT:
     def available(self) -> bool:
         return self._ensure()
 
+    @staticmethod
+    def _wav_to_array(audio: bytes):
+        """Decode a 16-bit PCM WAV (what the client sends, already 16 kHz mono) into a float32
+        numpy array — so we never depend on ffmpeg/av to decode webm. Returns None if not a WAV."""
+        if len(audio) < 44 or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+            return None
+        try:
+            import io
+            import wave
+            import numpy as np
+            with wave.open(io.BytesIO(audio), "rb") as w:
+                ch, sw = w.getnchannels(), w.getsampwidth()
+                raw = w.readframes(w.getnframes())
+            if sw != 2:
+                return None
+            arr = np.frombuffer(raw, dtype="<i2").astype("float32") / 32768.0
+            if ch > 1:
+                arr = arr.reshape(-1, ch).mean(axis=1)
+            return arr
+        except Exception:  # noqa: BLE001
+            return None
+
     def transcribe(self, audio: bytes, lang: str | None = None) -> str | None:
-        """Transcribe recorded audio (webm/opus/wav bytes). lang 'en'/'tr' or None to auto-detect.
+        """Transcribe recorded audio. The client sends 16 kHz mono WAV (decoded here without
+        ffmpeg); a webm/opus fallback is decoded by faster-whisper. lang 'en'/'tr' or auto.
         Returns the text, or None when unavailable / nothing was said."""
         if not audio or not self._ensure():
             return None
         tmp = None
         try:
-            with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
-                f.write(audio)
-                tmp = f.name
-            segments, _info = self._model.transcribe(
-                tmp, language=(lang or None), vad_filter=True, beam_size=1)
+            arr = self._wav_to_array(audio)
+            if arr is not None:
+                segments, _info = self._model.transcribe(
+                    arr, language=(lang or None), vad_filter=True, beam_size=1)
+            else:
+                with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
+                    f.write(audio)
+                    tmp = f.name
+                segments, _info = self._model.transcribe(
+                    tmp, language=(lang or None), vad_filter=True, beam_size=1)
             return " ".join(s.text for s in segments).strip() or None
         except Exception as exc:  # noqa: BLE001
             log.warning("STT transcribe failed: {}", str(exc)[:200])
