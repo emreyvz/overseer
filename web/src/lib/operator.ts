@@ -516,6 +516,51 @@ export const ACTIONS: Record<string, Action> = {
     return `stopped watching ${p}`
   },
 
+  // ---- camera analytics / locate / recap ------------------------------------
+  list_zones: () => {
+    const zs = get(zones)
+    return zs.length ? `${zs.length} zone${zs.length === 1 ? '' : 's'}: ${zs.map((z) => z.name).join(', ')}` : 'no zones drawn'
+  },
+  quietest_camera: async () => {
+    const r = await api.cameraDna().catch(() => null)
+    const cams = (r?.cameras ?? []).filter((c) => (c.frames ?? 0) > 20)
+    if (!cams.length) return 'not enough data yet'
+    const q = [...cams].sort((a, b) => ((a.person ?? 0) + (a.vehicle ?? 0)) - ((b.person ?? 0) + (b.vehicle ?? 0)))[0]
+    return `quietest is ${q.name} (${(q.person ?? 0) + (q.vehicle ?? 0)} seen)`
+  },
+  night_cameras: async () => {
+    const r = await api.cameraDna().catch(() => null)
+    const n = (r?.cameras ?? []).filter((c) => (c.dna ?? []).some((t) => /night/.test(t))).map((c) => c.name)
+    return n.length ? `night-dominant: ${n.join(', ')}` : 'no night-dominant cameras'
+  },
+  flagged_cameras: async () => {
+    const r = await api.cameraDna().catch(() => null)
+    const f = (r?.cameras ?? []).filter((c) => (c.reputation ?? 1) < 0.4 && (c.frames ?? 0) > 30).map((c) => c.name)
+    return f.length ? `low detection quality: ${f.join(', ')}` : 'all cameras look healthy'
+  },
+  where_seen: async ({ subject }) => {
+    const s = subject as { id?: string } | undefined
+    if (!s?.id) return 'no subject given'
+    const e = await api.rosterGet(s.id).catch(() => null)
+    const trailCams = (e?.trail ?? []).map((t) => (t as { cam?: string }).cam).filter(Boolean)
+    const uniq = [...new Set([e?.first_cam, ...trailCams, e?.cam].filter(Boolean))]
+    return uniq.length ? `seen on: ${uniq.join(' → ')}` : 'no camera trail recorded'
+  },
+  locate: async ({ subject }) => {
+    const s = subject as { id?: string; name?: string } | undefined
+    if (!s?.id) return 'no subject to locate'
+    const r = await api.findAcross(s.id).catch(() => null)
+    const top = (r?.matches ?? []).slice().sort((a, b) => b.score - a.score)[0]
+    if (!top) return `couldn't locate ${s.name || 'the subject'} right now`
+    const cam = get(cameras).find((c) => c.id === top.camId || c.name === top.cam)
+    if (cam) { stage.set('live'); mode.set('pov'); activeCam.set(cam.id); if (!SIM) sendCommand(`connect:${cam.name}`) }
+    return `${s.name || 'the subject'} is on ${top.cam} (${Math.round(top.score * 100)}% match)`
+  },
+  repeat_last: () => {
+    const last = [...get(operatorLog)].reverse().find((e) => e.kind === 'say')
+    return last ? last.text : 'nothing to repeat'
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -645,6 +690,10 @@ export function routeCommand(raw: string): Plan | null {
   if (/(track|takip).*(object|nesne|obje)|nesne takip/i.test(low)) return { steps: [{ action: 'track_object', args: {} }], border: 'nav' }
   if (/(find|bul).*(pet|evcil)|evcil hayvan/i.test(low)) return { steps: [{ action: 'find_pet', args: {} }], border: 'nav' }
   if (/(timeline|zaman çizelgesi|olay geçmişi)/i.test(low)) return { steps: [{ action: 'timeline', args: {} }], border: 'nav' }
+  if (/(quietest|en (sakin|sessiz)).*(camera|kamera)/i.test(low)) return { steps: [{ action: 'quietest_camera', args: {} }], border: 'nav' }
+  if (/(night|gece).*(camera|kamera)|karanlık kamera/i.test(low)) return { steps: [{ action: 'night_cameras', args: {} }], border: 'nav' }
+  if (/(list|hangi|which).*(zone|bölge)|bölgeleri listele/i.test(low)) return { steps: [{ action: 'list_zones', args: {} }], border: 'nav' }
+  if (/(repeat|tekrar( et| söyle)|ne demiştin)/i.test(low)) return { steps: [{ action: 'repeat_last', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }
 
   // "search/find <q>" / "<q> ara/bul"
@@ -668,7 +717,8 @@ const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'coun
   'last_seen', 'camera_status', 'camera_dna', 'summarize', 'correlate_alerts', 'system_status', 'storage_status',
   'list_cameras', 'offline_cameras', 'busiest_camera', 'latest_alert', 'explain_alert', 'advise_alert',
   'search_events', 'count_subjects', 'list_watched', 'stats', 'help', 'relationships', 'alerts_here',
-  'list_cases', 'list_plates', 'say'])
+  'list_cases', 'list_plates', 'list_zones', 'quietest_camera', 'night_cameras', 'flagged_cameras',
+  'where_seen', 'repeat_last', 'say'])
 
 export async function runPlan(plan: Plan): Promise<void> {
   if (plan.ask) { olog(plan.ask, 'ask'); return }
