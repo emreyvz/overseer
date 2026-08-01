@@ -46,6 +46,9 @@ class TrajectoryMonitor:
         self._stopped_eps = float(config.get("trajectory.stopped_eps", 15.0))
         self._uturn_window = int(config.get("trajectory.uturn_window", 12))
         self._uturn_angle = float(config.get("trajectory.uturn_angle", 150.0))
+        # each leg of a real U-turn must be an actual move, not detector jitter on a
+        # near-stationary track (px). Without this, jitter fired constant false U-turns.
+        self._uturn_min_disp = float(config.get("trajectory.uturn_min_disp", 28.0))
         self._tracks: dict[int, _Track] = {}
 
     def reset(self) -> None:
@@ -110,12 +113,18 @@ class TrajectoryMonitor:
         v2 = (pts[-1][0] - pts[mid][0], pts[-1][1] - pts[mid][1])
         m1 = math.hypot(*v1)
         m2 = math.hypot(*v2)
-        if m1 < 1.0 or m2 < 1.0:
+        # both legs must be genuine movement, not jitter on a near-stationary track
+        if m1 < self._uturn_min_disp or m2 < self._uturn_min_disp:
+            tr.uturn_fired = False
             return []
         cos = (v1[0] * v2[0] + v1[1] * v2[1]) / (m1 * m2)
         if cos > 0.5:
             tr.uturn_fired = False
-        if cos <= math.cos(math.radians(self._uturn_angle)) and not tr.uturn_fired:
+        # a real U-turn goes out and comes back: the net start->end distance must be small
+        # relative to the path travelled (otherwise it is just a turn / a curve).
+        net = math.hypot(pts[-1][0] - pts[0][0], pts[-1][1] - pts[0][1])
+        came_back = net < 0.5 * (m1 + m2)
+        if cos <= math.cos(math.radians(self._uturn_angle)) and came_back and not tr.uturn_fired:
             tr.uturn_fired = True
             return [TrajectoryEvent(EventType.U_TURN, tid, "u-turn", {})]
         return []
