@@ -3,7 +3,7 @@ module.exports = {
   categories: [
     { id: "detection", title: "Detection Results",
       items: [
-        { label: "Operator console", caption: "Detection overlays with stable track ids on a live feed", img: "/assets/img/shots/dashboard.webp" },
+        { label: "Operator console", caption: "Detection overlays with stable track ids on a live feed", img: "/assets/img/shots/detect.webp" },
         { label: "Night recall", caption: "Low-light enhance recovering faint pedestrians" },
         { label: "Tiled pass", caption: "Small distant objects recovered via tiling" },
       ] },
@@ -20,18 +20,18 @@ module.exports = {
       ] },
     { id: "meshes", title: "3D Meshes",
       items: [
-        { label: "Scene mesh", caption: "Triangulated surface with edge culling" },
+        { label: "Scene reconstruction", caption: "A frame lifted into 3D from monocular depth", img: "/assets/img/shots/spatial.webp" },
         { label: "Background layer", caption: "Reconstructed wall / floor behind objects" },
       ] },
     { id: "point-clouds", title: "Point Clouds",
       items: [
-        { label: "Coloured cloud", caption: "Depth back-projected with RGB" },
+        { label: "Reconstructed scene", caption: "Depth back-projected into a navigable cloud", img: "/assets/img/shots/spatial.webp" },
         { label: "Fly-through", caption: "Navigable three.js viewport" },
       ] },
     { id: "spatial", title: "Spatial Maps",
       items: [
-        { label: "Tactical god-view", caption: "Top-down radar with depth-locked contacts + ghosts", img: "/assets/img/shots/dashboard.webp" },
-        { label: "Density heatmap", caption: "Crowd density over the live feed", img: "/assets/img/shots/heatmap.webp" },
+        { label: "Tactical god-view", caption: "Top-down radar with depth-locked contacts + ghosts", img: "/assets/img/shots/dock.webp" },
+        { label: "Density heatmap", caption: "Crowd density over the live feed", img: "/assets/img/shots/density.webp" },
         { label: "Predictive ghosts", caption: "Near-future positions and path convergence" },
       ] },
     { id: "videos", title: "Videos",
@@ -41,9 +41,9 @@ module.exports = {
       ] },
     { id: "screenshots", title: "Screenshots",
       items: [
-        { label: "POV console", caption: "Operator view with modules rail, overlays and alerts", img: "/assets/img/shots/dashboard.webp" },
+        { label: "POV console", caption: "Operator view with modules rail, overlays and alerts", img: "/assets/img/shots/dock.webp" },
         { label: "Command center", caption: "Every source on a live map", img: "/assets/img/shots/map.webp" },
-        { label: "Density analytics", caption: "Heatmap + per-camera metrics", img: "/assets/img/shots/heatmap.webp" },
+        { label: "Density analytics", caption: "Heatmap + per-camera metrics", img: "/assets/img/shots/density.webp" },
       ] },
   ],
 };

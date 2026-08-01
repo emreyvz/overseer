@@ -2,7 +2,7 @@
 layout: layouts/page.njk
 title: Changelog
 eyebrow: Releases
-intro: "Version history for Overseer, newest first. Expand a release for its notes. Follows a Keep a Changelog style."
+intro: "Version history, newest first. Expand a release for notes."
 ---
 {% for r in changelog.releases %}
 <details class="accordion"{% if loop.first %} open{% endif %}>

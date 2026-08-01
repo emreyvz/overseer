@@ -2,7 +2,7 @@
 layout: layouts/page.njk
 title: Features
 eyebrow: Platform
-intro: "Every capability Overseer ships, grouped from frame-level perception to spatial reasoning, analytics and runtime. Each is described in plain terms and then technically."
+intro: "Every capability Overseer ships, from perception to 3D, analytics and runtime."
 toc:
   - { id: perception, text: Perception }
   - { id: spatial-3d, text: "Spatial & 3D" }
@@ -26,8 +26,7 @@ toc:
         <h3 style="margin:0">{{ f.name }}</h3>
         <span class="badge {{ 'green' if f.status == 'shipped' else ('amber' if f.status == 'beta' else '') }}">{{ f.status }}</span>
       </div>
-      <p style="margin:8px 0 0;font-size:13px">{{ f.blurb }}</p>
-      <p class="muted" style="font-size:12.5px;margin:8px 0 0">{{ f.detail }}</p>
+      <p class="muted" style="margin:8px 0 0;font-size:13px">{{ f.blurb }}</p>
       <div class="tags" style="margin-top:12px">{% for t in f.tags %}<span class="badge cyan">{{ t }}</span>{% endfor %}</div>
     </div>
     {% endfor %}

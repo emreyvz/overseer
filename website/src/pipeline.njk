@@ -2,14 +2,14 @@
 layout: layouts/page.njk
 title: Processing Pipeline
 eyebrow: How it works
-intro: "Every analysed frame flows through thirteen stages, from raw input to a navigable 3D scene and live output. Expand any stage for its inputs, outputs and internals."
+intro: "Thirteen stages, from raw input to a 3D scene. Expand any stage for details."
 ---
 <div class="ribbon" style="margin-bottom:22px">
   {% for s in pipeline.stages %}<span class="node">{{ s.no }} {{ s.name }}</span>{% if not loop.last %}<span class="arr">→</span>{% endif %}{% endfor %}
 </div>
 
 {% for st in pipeline.stages %}
-<details class="accordion"{% if loop.index <= 2 %} open{% endif %} id="stage-{{ st.name | slug }}">
+<details class="accordion" id="stage-{{ st.name | slug }}">
   <summary>
     <span><span class="stage-no">{{ st.no }}</span> <strong>{{ st.name }}</strong> <span class="muted" style="font-weight:400">· {{ st.purpose }}</span></span>
   </summary>
