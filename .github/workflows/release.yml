@@ -70,9 +70,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Skip macOS signing only when no certificate is provided, so unsigned builds succeed
+          # (arm64 otherwise attempts ad-hoc signing and fails). Signs automatically once CSC_LINK is set.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK == '' && 'false' || 'true' }}
         run: |
-          # No cert supplied -> skip macOS signing so unsigned builds still succeed.
-          if [ -z "$CSC_LINK" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             npx electron-builder --publish always -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
           else
