@@ -3,7 +3,7 @@ module.exports = {
   categories: [
     { id: "detection", title: "Detection Results",
       items: [
-        { label: "Street scene", caption: "4 persons + 6 vehicles, per-box track ids" },
+        { label: "Operator console", caption: "Detection overlays with stable track ids on a live feed", img: "/assets/img/shots/dashboard.webp" },
         { label: "Night recall", caption: "Low-light enhance recovering faint pedestrians" },
         { label: "Tiled pass", caption: "Small distant objects recovered via tiling" },
       ] },
@@ -30,9 +30,9 @@ module.exports = {
       ] },
     { id: "spatial", title: "Spatial Maps",
       items: [
-        { label: "Tactical god-view", caption: "Top-down radar, depth-locked contacts" },
-        { label: "Predictive ghosts", caption: "Near-future positions + convergence" },
-        { label: "Density heatmap", caption: "Crowd density over the feed" },
+        { label: "Tactical god-view", caption: "Top-down radar with depth-locked contacts + ghosts", img: "/assets/img/shots/dashboard.webp" },
+        { label: "Density heatmap", caption: "Crowd density over the live feed", img: "/assets/img/shots/heatmap.webp" },
+        { label: "Predictive ghosts", caption: "Near-future positions and path convergence" },
       ] },
     { id: "videos", title: "Videos",
       items: [
@@ -41,9 +41,9 @@ module.exports = {
       ] },
     { id: "screenshots", title: "Screenshots",
       items: [
-        { label: "POV console", caption: "Operator view with modules rail" },
-        { label: "Identity dossier", caption: "Long-term subject profile" },
-        { label: "Spatial viewport", caption: "3D reconstruction of a frame" },
+        { label: "POV console", caption: "Operator view with modules rail, overlays and alerts", img: "/assets/img/shots/dashboard.webp" },
+        { label: "Command center", caption: "Every source on a live map", img: "/assets/img/shots/map.webp" },
+        { label: "Density analytics", caption: "Heatmap + per-camera metrics", img: "/assets/img/shots/heatmap.webp" },
       ] },
   ],
 };

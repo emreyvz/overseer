@@ -61,4 +61,17 @@
     }, { rootMargin: "-15% 0px -75% 0px", threshold: 0 });
     targets.forEach(function (t) { obs.observe(t); });
   }
+
+  /* ---- scroll reveal ----------------------------------------------------- */
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var reveals = document.querySelectorAll(".reveal");
+  if (reveals.length && !reduce && "IntersectionObserver" in window) {
+    root.classList.add("js-anim");
+    var rObs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { en.target.classList.add("in"); rObs.unobserve(en.target); }
+      });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.05 });
+    reveals.forEach(function (el) { rObs.observe(el); });
+  }
 })();
