@@ -74,4 +74,29 @@
     }, { rootMargin: "0px 0px -8% 0px", threshold: 0.05 });
     reveals.forEach(function (el) { rObs.observe(el); });
   }
+
+  /* ---- lightbox (click a gallery image to enlarge) ----------------------- */
+  var zoomables = document.querySelectorAll(".zoomable");
+  if (zoomables.length) {
+    var lb = null;
+    function closeLb() { if (lb) { lb.remove(); lb = null; document.removeEventListener("keydown", escLb); } }
+    function escLb(e) { if (e.key === "Escape") closeLb(); }
+    function openLb(src, cap) {
+      closeLb();
+      lb = document.createElement("div"); lb.className = "lightbox";
+      var img = document.createElement("img"); img.src = src; img.alt = cap || "";
+      var btn = document.createElement("button"); btn.className = "lb-close"; btn.type = "button";
+      btn.setAttribute("aria-label", "Close"); btn.innerHTML = "✕";
+      lb.appendChild(btn); lb.appendChild(img);
+      if (cap) { var c = document.createElement("div"); c.className = "lb-cap"; c.textContent = cap; lb.appendChild(c); }
+      lb.addEventListener("click", function (e) { if (e.target === lb || e.target === btn) closeLb(); });
+      document.body.appendChild(lb);
+      document.addEventListener("keydown", escLb);
+    }
+    zoomables.forEach(function (el) {
+      el.setAttribute("role", "button"); el.setAttribute("tabindex", "0");
+      el.addEventListener("click", function () { openLb(el.getAttribute("src"), el.getAttribute("data-cap") || ""); });
+      el.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openLb(el.getAttribute("src"), el.getAttribute("data-cap") || ""); } });
+    });
+  }
 })();

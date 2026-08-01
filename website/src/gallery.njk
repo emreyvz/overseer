@@ -2,16 +2,13 @@
 layout: layouts/page.njk
 title: Gallery
 eyebrow: Showcase
-intro: "Representative outputs across the platform."
+intro: "Real captures from the app. Click any image to enlarge."
 toc:
-  - { id: detection, text: Detection Results }
-  - { id: depth, text: Depth Maps }
-  - { id: segmentation, text: Segmentation }
-  - { id: meshes, text: 3D Meshes }
-  - { id: point-clouds, text: Point Clouds }
-  - { id: spatial, text: Spatial Maps }
-  - { id: videos, text: Videos }
-  - { id: screenshots, text: Screenshots }
+  - { id: console, text: Console & Detection }
+  - { id: depth-3d, text: Depth & 3D }
+  - { id: spatial, text: Spatial & Analytics }
+  - { id: identity, text: Identity }
+  - { id: operations, text: Operations }
 ---
 {% for cat in gallery.categories %}
 <section id="{{ cat.id }}">
@@ -19,12 +16,10 @@ toc:
   <div class="gallery-grid" style="margin-top:14px">
     {% for it in cat.items %}
     <figure class="shot">
-      {% if it.img %}<img loading="lazy" src="{{ it.img | url }}" alt="{{ it.caption }}">{% else %}<div class="ph"><span class="lab">{{ it.label }}</span></div>{% endif %}
+      {% if it.img %}<img class="zoomable" loading="lazy" src="{{ it.img | url }}" alt="{{ it.caption }}" data-cap="{{ it.label }} · {{ it.caption }}">{% else %}<div class="ph"><span class="lab">{{ it.label }}</span></div>{% endif %}
       <figcaption class="cap"><div class="t">{{ it.label }}</div><div class="d">{{ it.caption }}</div></figcaption>
     </figure>
     {% endfor %}
   </div>
 </section>
 {% endfor %}
-
-<div class="callout"><div class="c-title">Contribute a capture</div><p>Replace any placeholder with a real image by dropping it into <code>src/assets/img/</code> and pointing the tile at it in <code>src/_data/gallery.js</code>.</p></div>

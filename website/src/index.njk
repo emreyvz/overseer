@@ -13,18 +13,16 @@ description: "Overseer is an AI computer vision and spatial intelligence platfor
         <a class="btn btn-primary" href="{{ '/docs/quick-start/' | url }}">Get started</a>
         <a class="btn" href="{{ site.repo }}" target="_blank" rel="noopener">GitHub →</a>
       </div>
-      <p class="meta">v{{ site.release.version }} · <a href="{{ '/changelog/' | url }}">changelog</a> · MIT</p>
     </div>
     <figure class="hero-frame reveal">
-      <img src="{{ '/assets/img/shots/dock.webp' | url }}" width="1460" height="900"
-        alt="Overseer console on a live harbour camera: detections, a depth-locked tactical radar and metrics." fetchpriority="high">
-      <figcaption class="frame-cap">Live console · detection + depth-locked tactical radar</figcaption>
+      <video autoplay muted loop playsinline preload="metadata" poster="{{ '/assets/img/shots/demo-map-poster.webp' | url }}">
+        <source src="{{ '/assets/img/shots/demo-map.mp4' | url }}" type="video/mp4">
+      </video>
+      <figcaption class="frame-cap">Live command center · cameras, detection and analysis</figcaption>
     </figure>
   </section>
 
-  <div class="statbar reveal">
-    {% for s in site.stats %}<div class="stat"><div class="v">{{ s.value }}</div><div class="l">{{ s.label }}</div></div>{% endfor %}
-  </div>
+  <div class="divider reveal"><span>Detection · Depth · 3D · Identity · Analytics</span></div>
 
   <section class="frow reveal">
     <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/detect.webp' | url }}" width="1460" height="900" alt="Live detection overlays with track ids"></figure>
@@ -33,47 +31,41 @@ description: "Overseer is an AI computer vision and spatial intelligence platfor
       <h2>Detection &amp; tracking</h2>
       <p class="muted">People, vehicles, animals and hazards, followed with stable identities through occlusion.</p>
       <div class="chips">{% for t in ["YOLO11","ByteTrack","Class gating"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
-      <a class="more" href="{{ '/features/' | url }}">Features →</a>
     </div>
   </section>
 
   <section class="frow reverse reveal">
-    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/spatial.webp' | url }}" width="1460" height="900" alt="A 3D point-cloud reconstruction of a scene from monocular depth"></figure>
+    <figure class="shot-frame">
+      <video autoplay muted loop playsinline preload="none" poster="{{ '/assets/img/shots/recon-poster.webp' | url }}">
+        <source src="{{ '/assets/img/shots/recon.mp4' | url }}" type="video/mp4">
+      </video>
+    </figure>
     <div class="frow-copy">
       <p class="section-label">Depth &amp; 3D</p>
       <h2>Lift a frame into 3D</h2>
-      <p class="muted">Monocular depth reconstructs a navigable point cloud, and places contacts on a depth-locked radar.</p>
-      <div class="chips">{% for t in ["Depth Anything V2","Point cloud","Foresight"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
-      <a class="more" href="{{ '/models/depth-anything-v2/' | url }}">Depth model →</a>
+      <p class="muted">Monocular depth reconstructs a navigable point cloud you can fly through.</p>
+      <div class="chips">{% for t in ["Depth Anything V2","Point cloud","Mesh"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
     </div>
   </section>
 
   <section class="frow reveal">
-    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/density.webp' | url }}" width="1460" height="900" alt="Crowd-density heatmap over a live feed"></figure>
+    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/profile.webp' | url }}" width="1280" height="800" alt="A subject profile: who, when and where they were seen"></figure>
     <div class="frow-copy">
-      <p class="section-label">Analytics</p>
-      <h2>Density, events &amp; alerts</h2>
-      <p class="muted">Live heatmaps and correlated threat scoring turn perception into the alerts that matter.</p>
-      <div class="chips">{% for t in ["Heatmaps","Zones","Threat scoring"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
-      <a class="more" href="{{ '/features/#analytics-operations' | url }}">Analytics →</a>
+      <p class="section-label">Identity</p>
+      <h2>Know who, when &amp; where</h2>
+      <p class="muted">Cross-camera re-identification builds a long-term profile of every subject: sightings, movement and links.</p>
+      <div class="chips">{% for t in ["Re-ID + gait","Dossiers","Relationship graph"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
     </div>
   </section>
 
   <section class="frow reverse reveal">
-    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/map.webp' | url }}" width="1460" height="900" alt="Command-center map with multiple camera sources"></figure>
+    <figure class="shot-frame"><img loading="lazy" src="{{ '/assets/img/shots/map.webp' | url }}" width="1280" height="800" alt="Command-center map with every camera source"></figure>
     <div class="frow-copy">
       <p class="section-label">Multi-camera</p>
       <h2>One command center</h2>
-      <p class="muted">Every source on a live map, with re-identification linking subjects across cameras and time.</p>
-      <div class="chips">{% for t in ["Re-ID + gait","Dossiers"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
-      <a class="more" href="{{ '/models/reid-gait/' | url }}">Identity →</a>
+      <p class="muted">Every source on a live map, correlated into one operational picture with zones, rules and alerts.</p>
+      <div class="chips">{% for t in ["Live map","Zones","Threat scoring"] %}<span class="chip">{{ t }}</span>{% endfor %}</div>
     </div>
-  </section>
-
-  <section class="section reveal">
-    <div class="head"><p class="section-label">Pipeline</p><h2>Frame to 3D, in thirteen stages</h2></div>
-    <div class="ribbon">{% for s in pipeline.stages %}<span class="node">{{ s.name }}</span>{% if not loop.last %}<span class="arr">→</span>{% endif %}{% endfor %}</div>
-    <p style="margin-top:18px"><a class="more" href="{{ '/pipeline/' | url }}">The pipeline →</a></p>
   </section>
 
   <section class="cta-band reveal">

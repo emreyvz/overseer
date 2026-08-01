@@ -339,3 +339,23 @@ td code { white-space: nowrap; }
   .cta-band { flex-direction: column; align-items: flex-start; }
 }
 .shot > img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; }
+
+/* labelled divider (replaces the stat bar) */
+.divider { display: flex; align-items: center; gap: 18px; margin: 46px 0; }
+.divider::before, .divider::after { content: ""; height: 1px; background: var(--hairline); flex: 1; }
+.divider span { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-ghost); white-space: nowrap; }
+
+/* video frames (hero + feature rows) */
+.hero-frame video { width: 100%; height: auto; display: block; }
+.shot-frame video { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; }
+
+/* lightbox (click a gallery image to enlarge) */
+.zoomable { cursor: zoom-in; }
+.lightbox { position: fixed; inset: 0; z-index: 200; background: rgba(4,7,10,.9); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; padding: 34px; animation: lbin .18s ease; }
+@keyframes lbin { from { opacity: 0; } }
+.lightbox img { max-width: 94vw; max-height: 84vh; border: 1px solid rgba(255,255,255,.16); box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+.lightbox .lb-cap { font-family: var(--mono); font-size: 12px; color: #cfd3d7; letter-spacing: .04em; margin-top: 14px; text-align: center; }
+.lightbox .lb-close { position: absolute; top: 16px; right: 18px; width: 38px; height: 38px; border: 1px solid rgba(255,255,255,.3);
+  background: none; color: #fff; cursor: pointer; font-size: 16px; }
+.lightbox .lb-close:hover { border-color: var(--accent); color: var(--accent); }

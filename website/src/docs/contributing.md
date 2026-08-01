@@ -14,7 +14,7 @@ Open an issue on [GitHub]({{ site.repo }}) with:
 
 ## Propose a feature
 
-Open an issue describing the use case. The [Roadmap]({{ '/roadmap/' | url }}) is shaped by real needs, so context helps.
+Open an issue describing the use case. Direction is shaped by real needs, so context helps.
 
 ## Contribute code
 

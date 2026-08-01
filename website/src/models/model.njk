@@ -15,7 +15,6 @@ eleventyComputed:
 toc:
   - { id: overview, text: Overview }
   - { id: io, text: Inputs & Outputs }
-  - { id: performance, text: Performance }
   - { id: tradeoffs, text: Advantages & Limits }
   - { id: examples, text: Example outputs }
   - { id: configuration, text: Configuration }
@@ -48,11 +47,6 @@ toc:
     <div><div class="mono-label">Inputs</div><ul style="margin-top:8px">{% for i in model.inputs %}<li>{{ i }}</li>{% endfor %}</ul></div>
     <div><div class="mono-label">Outputs</div><ul style="margin-top:8px">{% for o in model.outputs %}<li>{{ o }}</li>{% endfor %}</ul></div>
   </div>
-</section>
-
-<section id="performance">
-  <h2>Performance</h2>
-  <p>{{ model.performance }}</p>
 </section>
 
 <section id="tradeoffs">

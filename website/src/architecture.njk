@@ -1,25 +1,26 @@
 ---
 layout: layouts/page.njk
 title: Architecture
-eyebrow: System design
-intro: "A layered system, and the data flow that turns a frame into an event."
+eyebrow: How it works
+intro: "The whole system on one page: layers, data flow, the models we use and why, the pipeline, the stack and the API."
 toc:
   - { id: layers, text: System layers }
   - { id: data-flow, text: Data flow }
-  - { id: threading, text: Threading model }
+  - { id: models, text: Models & why }
+  - { id: pipeline, text: Pipeline }
+  - { id: stack, text: Stack }
+  - { id: api, text: API }
 ---
 <section id="layers">
   <h2>System layers</h2>
-  <p class="muted">Nine components, each with a single responsibility. Diagrams are placeholders you can replace with rendered figures.</p>
-  <div class="grid cols-2" style="margin-top:18px">
+  <div class="grid cols-2" style="margin-top:16px">
     {% for c in architecture.components %}{% if c.id != 'data-flow' %}
     <div class="card" id="{{ c.id }}">
       <div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px">
         <h3 style="margin:0">{{ c.name }}</h3>
         <div class="tags">{% for t in c.tags %}<span class="badge">{{ t }}</span>{% endfor %}</div>
       </div>
-      <p style="margin:8px 0 0;font-size:13px">{{ c.role }}</p>
-      <p class="muted" style="margin:8px 0 0;font-size:12.5px">{{ c.details }}</p>
+      <p class="muted" style="margin:8px 0 0;font-size:13px">{{ c.role }}</p>
     </div>
     {% endif %}{% endfor %}
   </div>
@@ -27,23 +28,58 @@ toc:
 
 <section id="data-flow">
   <h2>Data flow</h2>
-  <p class="muted">{{ (architecture.components | find('id','data-flow')).details }}</p>
+  <p class="muted">{{ (architecture.components | find('id','data-flow')).role }}</p>
   <div class="codeblock">
-    <div class="code-head">Frame to event · text diagram</div>
+    <div class="code-head">Frame to event</div>
     <pre>{% for line in architecture.flow %}{{ line }}
 {% endfor %}</pre>
   </div>
-  <div class="callout"><div class="c-title">Placeholder</div><p>Swap this ASCII diagram for a rendered architecture figure (SVG/PNG) when available. The layout reserves full width for it.</p></div>
 </section>
 
-<section id="threading">
-  <h2>Threading model</h2>
-  <p>Capture and analysis are decoupled so the camera never blocks on inference:</p>
-  <ul>
-    <li><strong>StreamReader</strong> (thread) reads frames from the source.</li>
-    <li><strong>FrameBuffer</strong> holds a bounded, drop-oldest queue so slow analysis cannot stall capture.</li>
-    <li><strong>AnalysisWorker</strong> (thread) runs the model pipeline and emits an <code>AnalysisResult</code>.</li>
-    <li>Result and bus callbacks fire on the worker thread, then hop to the asyncio loop for fan-out.</li>
-  </ul>
-  <p class="muted">This keeps the live feed smooth under load and lets heavy stages run at their own cadence.</p>
+<section id="models">
+  <h2>Models &amp; why</h2>
+  <p class="muted">A focused catalogue. Each row links to its full spec sheet.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="width:170px">Model</th><th style="width:150px">Role</th><th>Why we use it</th></tr></thead>
+      <tbody>
+        {% for m in models %}
+        <tr>
+          <td><a href="{{ '/models/' | url }}{{ m.slug }}/"><strong>{{ m.name }}</strong></a></td>
+          <td class="muted">{{ m.role }}</td>
+          <td class="muted">{{ m.purpose }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="pipeline">
+  <h2>Pipeline</h2>
+  <p class="muted">Every frame flows through thirteen stages.</p>
+  <div class="ribbon" style="margin:10px 0 16px">{% for s in pipeline.stages %}<span class="node">{{ s.name }}</span>{% if not loop.last %}<span class="arr">→</span>{% endif %}{% endfor %}</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="width:56px">#</th><th style="width:170px">Stage</th><th>Does</th></tr></thead>
+      <tbody>{% for s in pipeline.stages %}<tr><td class="muted">{{ s.no }}</td><td><strong>{{ s.name }}</strong></td><td class="muted">{{ s.purpose }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  <p style="margin-top:12px"><a class="more" href="{{ '/pipeline/' | url }}">Full pipeline, stage by stage →</a></p>
+</section>
+
+<section id="stack">
+  <h2>Stack</h2>
+  <div class="grid cols-2" style="margin-top:14px">
+    {% for s in technology.sections %}
+    <div class="card"><h3 style="margin-top:0;font-size:.98rem"><a href="{{ ('/technology/#' + s.id) | url }}">{{ s.title }}</a></h3><p class="muted" style="margin:6px 0 0;font-size:13px">{{ s.intro }}</p></div>
+    {% endfor %}
+  </div>
+</section>
+
+<section id="api">
+  <h2>API</h2>
+  <p class="muted">A local REST API plus a WebSocket stream. Base URL <code>{{ api.base }}</code>.</p>
+  <div class="tags" style="margin:8px 0 14px">{% for g in api.groups %}<span class="badge">{{ g.title }}</span>{% endfor %}</div>
+  <p><a class="more" href="{{ '/api/' | url }}">Full API reference →</a></p>
 </section>
