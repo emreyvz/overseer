@@ -1,0 +1,35 @@
+---
+layout: layouts/page.njk
+title: Technology
+eyebrow: Under the hood
+intro: "The stack behind Overseer, organised into seven areas: from computer vision and machine learning to geometry, spatial computing, rendering, data processing and performance."
+toc:
+  - { id: computer-vision, text: Computer Vision }
+  - { id: machine-learning, text: Machine Learning }
+  - { id: geometry-processing, text: Geometry Processing }
+  - { id: spatial-computing, text: Spatial Computing }
+  - { id: rendering, text: Rendering }
+  - { id: data-processing, text: Data Processing }
+  - { id: performance, text: Performance }
+---
+{% for s in technology.sections %}
+<section id="{{ s.id }}">
+  <h2>{{ s.title }}</h2>
+  <p class="muted">{{ s.intro }}</p>
+  <div class="table-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th style="width:210px">Component</th><th style="width:190px">Role</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for it in s.items %}
+        <tr><td><strong>{{ it.name }}</strong></td><td class="muted">{{ it.role }}</td><td class="muted">{{ it.note }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}
+
+<div class="callout">
+  <div class="c-title">Deep dive</div>
+  <p>Each model is specced individually (inputs, outputs, latency, hardware, benchmarks) on the <a href="{{ '/models/' | url }}">Models</a> page, and the end-to-end flow is on the <a href="{{ '/pipeline/' | url }}">Pipeline</a> and <a href="{{ '/architecture/' | url }}">Architecture</a> pages.</p>
+</div>

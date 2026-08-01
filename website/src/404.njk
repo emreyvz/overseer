@@ -1,0 +1,18 @@
+---
+layout: layouts/landing.njk
+title: Not Found
+description: "The page you were looking for could not be found."
+permalink: /404.html
+sitemap: false
+---
+<div class="landing">
+  <section class="hero" style="border-bottom:0;text-align:center">
+    <p class="eyebrow" style="justify-self:center">Error 404</p>
+    <h1 style="max-width:none;margin:14px auto 12px">Signal lost.</h1>
+    <p class="lede" style="max-width:52ch;margin:0 auto">The page you were looking for is not on this feed. It may have moved, or never existed.</p>
+    <div class="cta" style="justify-content:center">
+      <a class="btn btn-primary" href="{{ '/' | url }}">Back to home</a>
+      <a class="btn btn-cyan" href="{{ '/docs/' | url }}">Documentation</a>
+    </div>
+  </section>
+</div>

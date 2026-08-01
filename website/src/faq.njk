@@ -1,0 +1,22 @@
+---
+layout: layouts/page.njk
+title: FAQ
+eyebrow: Answers
+intro: "Common questions about what Overseer is, how it runs, privacy, capabilities and contributing."
+toc:
+  - { id: general, text: General }
+  - { id: privacy-deployment, text: "Privacy & Deployment" }
+  - { id: capabilities, text: Capabilities }
+  - { id: contributing, text: Contributing }
+---
+{% for group in faq.groups %}
+<section id="{{ group.title | slug }}">
+  <h2>{{ group.title }}</h2>
+  {% for item in group.items %}
+  <details class="accordion">
+    <summary><strong>{{ item.q }}</strong></summary>
+    <div class="body"><p>{{ item.a }}</p></div>
+  </details>
+  {% endfor %}
+</section>
+{% endfor %}

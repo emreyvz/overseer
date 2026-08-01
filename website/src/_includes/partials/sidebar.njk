@@ -1,0 +1,19 @@
+<nav class="sidebar" aria-label="Site sections" id="sidebar">
+  {% for group in nav.groups %}
+  <div class="group">
+    <div class="group-title">{{ group.title }}</div>
+    {% for item in group.items %}
+      {%- set exact = page.url == item.url -%}
+      {%- set within = item.url != '/' and (page.url | startsWith(item.url)) -%}
+      <a href="{{ item.url | url }}"{% if exact %} aria-current="page"{% endif %}>{{ item.label }}</a>
+      {% if item.key == 'docs' and within %}
+        <div class="sub">
+          {% for d in collections.docs %}
+          <a href="{{ d.url | url }}"{% if page.url == d.url %} aria-current="page"{% endif %}>{{ d.data.navTitle or d.data.title }}</a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+</nav>

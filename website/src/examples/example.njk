@@ -1,0 +1,30 @@
+---
+layout: layouts/page.njk
+pagination:
+  data: examples
+  size: 1
+  alias: ex
+permalink: "/examples/{{ ex.slug }}/"
+eyebrow: Example
+crumbs:
+  - { label: Examples, url: /examples/ }
+eleventyComputed:
+  title: "{{ ex.title }}"
+  intro: "{{ ex.summary }}"
+  description: "{{ ex.title }}: {{ ex.summary }}"
+---
+<div class="tags" style="margin-bottom:14px">{% for t in ex.tags %}<span class="badge cyan">{{ t }}</span>{% endfor %}</div>
+
+<h2>Steps</h2>
+<ol>{% for s in ex.steps %}<li>{{ s }}</li>{% endfor %}</ol>
+
+<h2>Command</h2>
+<div class="codeblock">
+  <div class="code-head">shell</div>
+  <pre>{{ ex.code }}</pre>
+</div>
+
+<h2>Result</h2>
+<div class="callout"><div class="c-title">Output</div><p>{{ ex.result }}</p></div>
+
+<p style="margin-top:20px"><a href="{{ '/examples/' | url }}">← All examples</a> · <a href="{{ '/api/' | url }}">API reference</a></p>
