@@ -57,7 +57,10 @@ _OPERATOR_ACTIONS = (
     "describe_scene {camera?} — describe what a camera currently sees.\n"
     "create_case {name} — open a new investigation case.\n"
     "create_alert_rule {text} — create a STANDING alert rule from a natural-language instruction "
-    "(e.g. 'alarm on a weapon at the store'); NEVER an immediate one-off alarm.\n"
+    "(e.g. 'alarm on a vehicle at night'); NEVER an immediate one-off alarm.\n"
+    "set_module {key, on} — enable/disable a detector; key is one of weapon, person, vehicle, "
+    "animal, motion. 'alarm if you see a weapon' -> set_module{key:'weapon',on:true} (it then "
+    "auto-alerts on sight).\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 
