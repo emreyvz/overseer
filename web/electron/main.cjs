@@ -2,9 +2,10 @@
 // Spawns the FastAPI bridge (uv run python -m server) which serves web/dist + API,
 // then loads it same-origin. Falls back to the local build if the server is absent.
 const { app, BrowserWindow, globalShortcut, ipcMain } = require('electron')
-const { spawn } = require('node:child_process')
+const { spawn, spawnSync } = require('node:child_process')
 const http = require('node:http')
 const path = require('node:path')
+const fs = require('node:fs')
 
 const REPO_ROOT = path.join(__dirname, '..', '..')
 const SERVER_URL = process.env.OVERSEER_SERVER_URL || 'http://127.0.0.1:8787'
@@ -14,11 +15,43 @@ let win = null
 let server = null
 let spawnedByUs = false
 
+// Packaged app: the Python backend source + a uv binary ship as resources. On first run we copy
+// the source to a writable per-user dir, `uv sync` there (downloads the right torch for this
+// machine) and fetch models, then run the server from that dir.
+function packagedBackend() {
+  const res = process.resourcesPath
+  return {
+    uv: path.join(res, 'bin', process.platform === 'win32' ? 'uv.exe' : 'uv'),
+    src: path.join(res, 'backend'),
+    run: path.join(app.getPath('userData'), 'app'),
+  }
+}
+
+function firstRunSetup(b) {
+  const done = path.join(b.run, '.setup-ok')
+  if (fs.existsSync(done)) return
+  try {
+    fs.mkdirSync(b.run, { recursive: true })
+    fs.cpSync(b.src, b.run, { recursive: true })          // copy Python source to a writable dir
+    const env = { ...process.env, UV_PROJECT_ENVIRONMENT: path.join(b.run, '.venv') }
+    spawnSync(b.uv, ['sync'], { cwd: b.run, stdio: 'inherit', env })
+    spawnSync(b.uv, ['run', 'python', '-m', 'match.tools.export_models'], { cwd: b.run, stdio: 'inherit', env })
+    fs.writeFileSync(done, new Date().toISOString())
+  } catch (e) {
+    console.error('first-run setup failed:', e.message)
+  }
+}
+
 function startServer() {
   if (!SPAWN) return
-  server = spawn('uv', ['run', 'python', '-m', 'server'], {
-    cwd: REPO_ROOT, shell: true, stdio: 'inherit',
-  })
+  if (app.isPackaged) {
+    const b = packagedBackend()
+    firstRunSetup(b)                                        // blocking on first launch only
+    const env = { ...process.env, UV_PROJECT_ENVIRONMENT: path.join(b.run, '.venv') }
+    server = spawn(b.uv, ['run', 'python', '-m', 'server'], { cwd: b.run, stdio: 'inherit', env })
+  } else {
+    server = spawn('uv', ['run', 'python', '-m', 'server'], { cwd: REPO_ROOT, shell: true, stdio: 'inherit' })
+  }
   spawnedByUs = true
   server.on('error', (e) => console.error('server spawn failed:', e.message))
 }
