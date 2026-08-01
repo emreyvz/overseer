@@ -61,8 +61,18 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"   # no code signing in CI (unsigned builds)
+          # Code signing is OPTIONAL. Add these repo secrets to produce signed builds; without
+          # them the builds are unsigned (users see a Gatekeeper / SmartScreen warning).
+          #   Windows + macOS certificate (base64 .pfx/.p12) and its password:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          #   macOS notarization (Apple Developer account):
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # No cert supplied -> skip macOS signing so unsigned builds still succeed.
+          if [ -z "$CSC_LINK" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             npx electron-builder --publish always -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
           else
