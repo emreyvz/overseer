@@ -125,6 +125,12 @@ export const api = {
   // AI Operator: plan a natural-language command into a chain of system actions.
   aiOperate: (command: string, context: unknown) =>
     post<{ steps?: { action: string; args?: Record<string, unknown>; as?: string }[]; say?: string; ask?: string; border?: 'nav' | 'alert'; disabled?: boolean }>(`/api/ai/operate`, { command, context }),
+  // Offline speech-to-text: POST recorded audio bytes, get back the transcript.
+  stt: async (audio: Blob, lang?: string): Promise<{ text: string | null; disabled?: boolean }> => {
+    const r = await fetch(`${API_BASE}/api/stt${lang ? `?lang=${lang}` : ''}`, { method: 'POST', body: audio })
+    if (!r.ok) throw new Error(`stt ${r.status}`)
+    return r.json()
+  },
   shutdown: () => post<{ ok: boolean }>(`/api/shutdown`, {}),
 }
 

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -298,6 +298,19 @@ async def api_ai_query(payload: dict[str, str]) -> Any:
         return {"filter": None, "disabled": True}
     flt = await asyncio.to_thread(backend.ai.query, payload.get("text", ""))
     return {"filter": flt}
+
+
+@app.post("/api/stt")
+async def api_stt(request: Request) -> Any:
+    """Offline speech-to-text for the Operator's voice input: the browser records the mic and POSTs
+    the audio bytes here; faster-whisper transcribes on-device. lang query param 'en'/'tr' or auto."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    from server import stt
+    lang = request.query_params.get("lang") or None
+    audio = await request.body()
+    text = await asyncio.to_thread(stt.transcribe, audio, lang)
+    return {"text": text, "disabled": text is None and not stt.available()}
 
 
 @app.post("/api/ai/operate")
