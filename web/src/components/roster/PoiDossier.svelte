@@ -593,7 +593,7 @@
   @keyframes traceIn { from { opacity: 0; transform: translateX(20px); } }
 
   /* big live wall: sighting clip + last-camera live feed */
-  .livewall { flex: 0 0 34%; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hairline);
+  .livewall { flex: 0 0 46%; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hairline);
     border-bottom: 1px solid var(--hairline); min-height: 0; }
   .wcell { display: flex; flex-direction: column; min-height: 0; background: #05080b;
     animation: rise 520ms both cubic-bezier(0.16, 1, 0.3, 1); }

@@ -57,8 +57,9 @@ class FaceDetector:
                 if w is None:
                     self._failed = True
                     return False
-                # score/nms thresholds tuned for stored crops (favour recall on one clear face)
-                self._det = cv2.FaceDetectorYN.create(str(w), "", (320, 320), 0.6, 0.3, 5000)
+                # very low score threshold on purpose: stored crops are often small / blurry, so we
+                # would rather lock onto anything face-like than leave the portrait on the body.
+                self._det = cv2.FaceDetectorYN.create(str(w), "", (320, 320), 0.25, 0.3, 5000)
                 return True
             except Exception:  # noqa: BLE001
                 log.exception("face detector load failed - portrait face-focus disabled")
