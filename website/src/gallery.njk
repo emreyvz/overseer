@@ -19,7 +19,7 @@ toc:
   <div class="gallery-grid" style="margin-top:14px">
     {% for it in cat.items %}
     <figure class="shot">
-      <div class="ph"><span class="lab">{{ it.label }}</span></div>
+      {% if it.img %}<img loading="lazy" src="{{ it.img | url }}" alt="{{ it.caption }}">{% else %}<div class="ph"><span class="lab">{{ it.label }}</span></div>{% endif %}
       <figcaption class="cap"><div class="t">{{ it.label }}</div><div class="d">{{ it.caption }}</div></figcaption>
     </figure>
     {% endfor %}
