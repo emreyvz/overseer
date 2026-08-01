@@ -122,10 +122,13 @@ export const api = {
   aiAdvise: (alert: { type: string; summary: string; cam: string }) => post<{ action: string | null; disabled?: boolean }>(`/api/ai/advise`, { alert }),
   aiSearchEvents: (text: string, events: { ts: string; type: string; cam: string; label?: string }[]) =>
     post<{ result: { answer?: string; matches?: number[] } | null; disabled?: boolean }>(`/api/ai/searchevents`, { text, events }),
+  // AI Operator: plan a natural-language command into a chain of system actions.
+  aiOperate: (command: string, context: unknown) =>
+    post<{ steps?: { action: string; args?: Record<string, unknown> }[]; say?: string; ask?: string; border?: 'nav' | 'alert'; disabled?: boolean }>(`/api/ai/operate`, { command, context }),
   shutdown: () => post<{ ok: boolean }>(`/api/shutdown`, {}),
 }
 
-export type AiFeatureKey = 'chat' | 'search' | 'summarize' | 'explain' | 'vision' | 'rules' | 'correlate' | 'advise' | 'semantic'
+export type AiFeatureKey = 'chat' | 'search' | 'summarize' | 'explain' | 'vision' | 'rules' | 'correlate' | 'advise' | 'semantic' | 'operate'
 export interface AiStatus {
   enabled: boolean
   provider?: string

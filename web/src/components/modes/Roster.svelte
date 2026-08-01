@@ -3,7 +3,9 @@
   // session, with a photo each (and plates for vehicles). Click one for a profile: larger
   // photo (optionally background-removed), plate, attributes, seen-times and editable notes.
   import { onDestroy, onMount } from 'svelte'
+  import { get } from 'svelte/store'
   import { api } from '../../lib/api'
+  import { rosterInit } from '../../lib/stores'
   import { annotations } from '../../lib/annotations'
   import { trUpper } from '../../lib/lexicon'
   import { sfx } from '../../lib/audio'
@@ -25,6 +27,9 @@
     } catch { /* keep the last good list */ }
   }
   onMount(() => {
+    // Consume a one-shot preset from the AI Operator (e.g. "show red-flagged" -> BOLO filter).
+    const init = get(rosterInit)
+    if (init) { if (init.bolo) bolo = true; if (init.query) query = init.query; rosterInit.set(null) }
     refresh(); loadPlates(); timer = setInterval(refresh, 3000)
     clock = setInterval(() => (now = Date.now()), 1000)   // drives LIVE + relative times in the dossier
   })

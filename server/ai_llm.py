@@ -41,7 +41,24 @@ DEFAULT_FEATURES: dict[str, bool] = {
     "correlate": True,   # multi-alert correlation & triage (idea 5)
     "advise": True,      # recommended action / SOP per alert (idea 7)
     "semantic": True,    # semantic search over the event timeline (idea 10)
+    "operate": True,     # AI Operator: natural-language command → chain of system actions
 }
+
+# The whole controllable surface the AI Operator can drive. Mirrors the frontend action
+# registry (web/src/lib/operator.ts ACTIONS); keep the two in sync.
+_OPERATOR_ACTIONS = (
+    "open_screen {name} — name is one of: roster, forensic, watchlist, suggestions, spatial, "
+    "storage, topology, archive, case, zones, rules, alerts, assistant, command, map, montage, pov.\n"
+    "switch_camera {name} — make the named camera the active live feed.\n"
+    "side_by_side {cameras?} — multi-camera live wall; cameras is an optional list of names.\n"
+    "forensic_search {query, time?} — appearance search; query like 'grey car', time one of 1h/24h/7d.\n"
+    "find_watched {} — show red-flagged / BOLO subjects in the roster.\n"
+    "describe_scene {camera?} — describe what a camera currently sees.\n"
+    "create_case {name} — open a new investigation case.\n"
+    "create_alert_rule {text} — create a STANDING alert rule from a natural-language instruction "
+    "(e.g. 'alarm on a weapon at the store'); NEVER an immediate one-off alarm.\n"
+    "say {text} — just speak a reply, for questions that need no action."
+)
 
 
 class LLMClient:
@@ -244,6 +261,45 @@ class LLMClient:
         sev = str(rule.get("severity") or "warning").lower()
         rule["severity"] = sev if sev in ("info", "warning", "critical") else "warning"
         return rule
+
+    def plan_command(self, command: str, context: dict | None = None) -> dict | None:
+        """AI Operator: turn a natural-language command into an ordered plan of system actions.
+        Returns {steps:[{action,args}], say, ask, border}. `context` carries live grounding
+        (camera names, active camera, current screen) so references like 'the store camera'
+        resolve. Returns None when the model can't produce a plan (caller degrades gracefully)."""
+        ctx = context or {}
+        cams = ", ".join(str(c) for c in (ctx.get("cameras") or [])) or "none"
+        active = ctx.get("active_camera") or "none"
+        screen = ctx.get("mode") or "?"
+        prompt = (
+            "You are the AI Operator of a video-surveillance system. Turn the operator's request "
+            "into a JSON plan of concrete actions the UI executes in order.\n\n"
+            "Available actions:\n" + _OPERATOR_ACTIONS + "\n\n"
+            'Reply with ONLY this JSON: {"steps":[{"action":"...","args":{...}}], '
+            '"say":"one short spoken confirmation", "border":"nav"|"alert"}.\n'
+            'Use {"ask":"short question","steps":[]} ONLY when the request is too ambiguous to act '
+            "on (e.g. which camera). Set border to \"alert\" only when the plan creates an alarm or "
+            "critical rule, else \"nav\". Chain as many steps as the request needs. Resolve names "
+            "against the live context; never invent a camera name.\n"
+            f"Live context: cameras=[{cams}]; active_camera={active}; current_screen={screen}.\n"
+            "Request: " + command)
+        plan = self._json(self.chat(
+            prompt, system="You output only strict JSON action plans for a surveillance UI.", max_tokens=600))
+        if not isinstance(plan, dict):
+            return None
+        steps: list[dict] = []
+        raw = plan.get("steps")
+        if isinstance(raw, list):
+            for s in raw:
+                if isinstance(s, dict) and s.get("action"):
+                    args = s.get("args")
+                    steps.append({"action": str(s["action"]),
+                                  "args": args if isinstance(args, dict) else {}})
+        border = plan.get("border")
+        ask = str(plan.get("ask") or "").strip() or None
+        say = str(plan.get("say") or "").strip() or None
+        return {"steps": steps, "say": say, "ask": ask,
+                "border": border if border in ("nav", "alert") else "nav"}
 
     def correlate(self, alerts: list[dict]) -> dict | None:
         """Reason over recent alerts: are several one unfolding incident? (idea 5)."""

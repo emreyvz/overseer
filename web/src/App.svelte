@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
-    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, hydrateAlerts, hydrateModules, type Mode,
+    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, hydrateAlerts, hydrateModules, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
@@ -22,6 +22,7 @@
   import PostFx from './components/PostFx.svelte'
   import CommandBar from './components/hud/CommandBar.svelte'
   import Topology from './components/modes/Topology.svelte'
+  import Montage from './components/modes/Montage.svelte'
   import Forensic from './components/modes/Forensic.svelte'
   import Archive from './components/modes/Archive.svelte'
   import Roster from './components/modes/Roster.svelte'
@@ -33,6 +34,8 @@
   import EnrollModal from './components/pov/EnrollModal.svelte'
   import Watchlist from './components/Watchlist.svelte'
   import AiConsole from './components/AiConsole.svelte'
+  import OperatorBorder from './components/OperatorBorder.svelte'
+  import AlertsBoard from './components/AlertsBoard.svelte'
   import SmartSuggestions from './components/suggestions/SmartSuggestions.svelte'
   // SpatialView pulls in three.js (~450 kB) — lazy-load it so the main bundle stays lean and
   // the 3D engine only loads when the operator actually opens the spatial view.
@@ -120,6 +123,8 @@
     }
     if ($stage !== 'live') return
     if (k === 'escape') {
+      if ($alertsScreen) { alertsScreen.set(false); return }
+      if ($suggestionsOpen) { suggestionsOpen.set(false); return }
       if ($aiOpen) { aiOpen.set(false); return }
       if ($enrollOpen) { enrollOpen.set(null); return }
       if ($watchlistOpen) { watchlistOpen.set(false); return }
@@ -176,6 +181,7 @@
 {:else}
   <Shell />
   {#if $mode === 'topology'}<Topology />{/if}
+  {#if $mode === 'montage'}<Montage />{/if}
   {#if $mode === 'forensic'}<Forensic />{/if}
   {#if $mode === 'archive'}<Archive />{/if}
   {#if $mode === 'roster'}<Roster />{/if}
@@ -190,7 +196,9 @@
 {/if}
 
 {#if $aiOpen}<AiConsole />{/if}
+{#if $alertsScreen}<AlertsBoard onclose={() => alertsScreen.set(false)} />{/if}
 {#if $suggestionsOpen}<SmartSuggestions onclose={() => suggestionsOpen.set(false)} />{/if}
+<OperatorBorder />
 {#if $spatialOpen}
   {#await SpatialView() then M}
     <M.default cam={$spatialOpen} onclose={() => spatialOpen.set(null)} />
