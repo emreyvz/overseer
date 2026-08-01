@@ -14,6 +14,7 @@ Steps:
   veri    VeRi vehicle ReID     (auto-download; or convert your own) -> models/veri_sbs_R50-ibn.torchscript
   carbrand ViT car-make classifier (needs transformers) -> models/vehicle_make.torchscript
   easyocr trigger EasyOCR model download (ANPR)     -> ~/.EasyOCR cache
+  face    OpenCV YuNet face detector (portrait focus) -> models/face_detection_yunet.onnx
 
 Dedicated person/vehicle ReID (OSNet / a VeRi-trained model) give the best identity
 accuracy. If their TorchScript files are present the engine prefers them; otherwise it
@@ -204,8 +205,19 @@ def _export_easyocr() -> str:
         return f"easyocr: SKIPPED - `uv pip install easyocr` ({type(exc).__name__})"
 
 
+def _export_face() -> str:
+    """OpenCV YuNet face detector (~0.3 MB) for the roster portrait face-focus."""
+    dst = MODELS / "face_detection_yunet.onnx"
+    if dst.exists():
+        return f"face: already present ({dst})"
+    url = ("https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/"
+           "face_detection_yunet_2023mar.onnx")
+    return f"face: downloaded -> {dst}" if _download(url, dst) else "face: SKIPPED - download failed"
+
+
 _STEPS = {"seg": _export_seg, "dinov2": _export_dinov2, "osnet": _export_osnet,
-          "veri": _export_veri, "carbrand": _export_carbrand, "easyocr": _export_easyocr}
+          "veri": _export_veri, "carbrand": _export_carbrand, "easyocr": _export_easyocr,
+          "face": _export_face}
 
 
 def main() -> None:
