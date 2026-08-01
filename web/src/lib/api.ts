@@ -124,7 +124,7 @@ export const api = {
     post<{ result: { answer?: string; matches?: number[] } | null; disabled?: boolean }>(`/api/ai/searchevents`, { text, events }),
   // AI Operator: plan a natural-language command into a chain of system actions.
   aiOperate: (command: string, context: unknown) =>
-    post<{ steps?: { action: string; args?: Record<string, unknown> }[]; say?: string; ask?: string; border?: 'nav' | 'alert'; disabled?: boolean }>(`/api/ai/operate`, { command, context }),
+    post<{ steps?: { action: string; args?: Record<string, unknown>; as?: string }[]; say?: string; ask?: string; border?: 'nav' | 'alert'; disabled?: boolean }>(`/api/ai/operate`, { command, context }),
   shutdown: () => post<{ ok: boolean }>(`/api/shutdown`, {}),
 }
 

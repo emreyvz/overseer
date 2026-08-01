@@ -13,6 +13,7 @@ import {
 import { sendCommand } from './ws'
 import { SIM } from './sim'
 import { api } from './api'
+import { annotate } from './annotations'
 import { sfx } from './audio'
 
 // ---- operator state (read by the border overlay + the console transcript) ------------------
@@ -28,8 +29,15 @@ function olog(text: string, kind: LogKind = 'step') {
 }
 
 // ---- plan shape (shared with the server planner) -------------------------------------------
-export type Step = { action: string; args?: Record<string, unknown> }
+// A step may name its result with `as`, and later steps may reference it in args as "$name"
+// (data passing) — e.g. find a car `as:"car"`, then watch {subject:"$car"}. This is what lets the
+// Operator run a real chain: "go to the street cam, if there's a car add it to the watchlist,
+// name it, enhance its photo, tell me when it was last seen".
+export type Step = { action: string; args?: Record<string, unknown>; as?: string }
 export type Plan = { steps?: Step[]; say?: string; ask?: string; border?: BorderKind; disabled?: boolean }
+// An action returns either a human summary string, or {say, value} where `value` is the data a
+// later step consumes via `as` + "$ref".
+type ActionResult = string | { say?: string; value?: unknown } | void
 
 // ---- helpers -------------------------------------------------------------------------------
 function findCam(q: string) {
@@ -48,8 +56,16 @@ const MODES: Mode[] = ['pov', 'montage', 'topology', 'forensic', 'archive', 'cas
 // ---- the action registry: the whole system's controllable surface -------------------------
 // Each action drives real stores / API. Adding a capability here makes it available to both the
 // deterministic router and the LLM planner. Returns a short human summary for the transcript.
-type Action = (args: Record<string, unknown>) => Promise<string> | string
+type Action = (args: Record<string, unknown>) => Promise<ActionResult> | ActionResult
 const S = (v: unknown, d = '') => (v == null ? d : String(v))
+// resolve "$name" args against the running chain's result bag (data passing between steps)
+function resolveArgs(args: Record<string, unknown> | undefined, bag: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(args ?? {})) {
+    out[k] = typeof v === 'string' && v.startsWith('$') ? bag[v.slice(1)] : v
+  }
+  return out
+}
 
 export const ACTIONS: Record<string, Action> = {
   open_screen: ({ name }) => {
@@ -158,6 +174,52 @@ export const ACTIONS: Record<string, Action> = {
     return `${list.length} ${sev ? sev + ' ' : ''}alert${list.length === 1 ? '' : 's'} active`
   },
 
+  // ---- subjects: find one, then act on it (data-passing chain) -----------------------------
+  // Find the most recent roster subject matching cls (+ optional camera / colour). Returns the
+  // subject as `value` so later steps can consume it via `as` + "$ref".
+  find_subject: async ({ cls, camera, color }) => {
+    const rows = await api.roster().catch(() => [] as any[])
+    const want = S(cls).toLowerCase()
+    const cam = S(camera).toLowerCase()
+    const col = S(color).toLowerCase()
+    let cand = rows.filter((r) => !want || want === 'any' || r.cls === want)
+    if (cam) cand = cand.filter((r) => (r.cam ?? '').toLowerCase().includes(cam) || (r.first_cam ?? '').toLowerCase().includes(cam))
+    if (col) cand = cand.filter((r) => (r.attrs?.upper_color ?? '').toLowerCase() === col || (r.attrs?.subtype ?? '').toLowerCase().includes(col))
+    cand.sort((a, b) => (b.last_ts ?? 0) - (a.last_ts ?? 0))
+    const hit = cand[0]
+    if (!hit) return `no ${want || 'subject'}${cam ? ' on ' + camera : ''} found`
+    const label = `${hit.cls}${hit.plate ? ' ' + hit.plate : ''}`
+    return { say: `found a ${label}`, value: { id: hit.id, cls: hit.cls, plate: hit.plate, subject_uid: hit.subject_uid ?? null, last_ts: hit.last_ts, name: '' } }
+  },
+  // Add a found subject to the watchlist and optionally name it.
+  watch_subject: async ({ subject, name }) => {
+    const s = subject as { id?: string; name?: string } | undefined
+    if (!s?.id) return 'no subject to add to the watchlist'
+    await api.watchRoster(s.id, true).catch(() => {})
+    const nm = S(name)
+    if (nm) { annotate(s.id, { alias: nm }); s.name = nm }
+    return `added ${nm || 'the subject'} to the watchlist`
+  },
+  // Super-resolution "clarify" of a subject's photo (uses the persistent subject if available).
+  super_fuse: async ({ subject }) => {
+    const s = subject as { id?: string; subject_uid?: number | null; name?: string } | undefined
+    if (!s?.id) return 'no subject to enhance'
+    const who = s.name || 'the subject'
+    if (s.subject_uid != null) {
+      const r = await api.subjectReconstruct(s.subject_uid).catch(() => null)
+      if (r) return `enhanced ${who}'s photo (super-fuse)`
+    }
+    const r = await api.supercut(s.id).catch(() => null)
+    return r?.url ? `built an enhanced supercut for ${who}` : `could not enhance ${who}'s photo`
+  },
+  // When was this subject last seen.
+  last_seen: ({ subject }) => {
+    const s = subject as { last_ts?: number; name?: string } | undefined
+    if (!s?.last_ts) return 'no sighting on record for that subject'
+    const when = new Date(s.last_ts).toLocaleString()
+    return `${s.name || 'the subject'} was last seen ${when}`
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -264,7 +326,7 @@ export function planNavigates(plan: Plan): boolean {
 // ---- executor ------------------------------------------------------------------------------
 // Actions whose return value is an ANSWER to the operator (spoken + shown as a reply), not just a
 // step log. The last such answer in a chain becomes the plan's spoken reply.
-const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene', 'say'])
+const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene', 'last_seen', 'say'])
 
 export async function runPlan(plan: Plan): Promise<void> {
   if (plan.ask) { olog(plan.ask, 'ask'); return }
@@ -273,12 +335,16 @@ export async function runPlan(plan: Plan): Promise<void> {
   operatorBusy.set(true)
   operatorActive.set(plan.border ?? 'nav')
   let lastAnswer = ''
+  const bag: Record<string, unknown> = {}   // results of prior steps, for "$ref" data passing
   try {
     for (const step of steps) {
       const fn = ACTIONS[step.action]
       if (!fn) { olog(`unknown action: ${step.action}`, 'error'); continue }
       try {
-        const summary = await fn(step.args ?? {})
+        const r = await fn(resolveArgs(step.args, bag))
+        const summary = typeof r === 'string' ? r : (r?.say ?? '')
+        const value = typeof r === 'string' || !r ? undefined : r.value
+        if (step.as && value !== undefined) bag[step.as] = value
         const isAnswer = ANSWER_ACTIONS.has(step.action)
         if (summary) { olog(summary, isAnswer ? 'say' : 'step'); if (isAnswer) lastAnswer = summary }
       } catch (e) {
