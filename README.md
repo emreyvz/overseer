@@ -41,7 +41,7 @@ Lock onto any detection for a live target card with its class, attributes and pr
 
 ### Vehicle or Person Profile
 
-![Vehicle or person profile](demo/profile_tracking_when_where.png)
+![Vehicle or person profile](demo/vehicle_or_person_profile.png)
 
 Open any person or vehicle into a full profile. Where and when they were seen across every camera, on a live map. Flag them, find them across every feed, or replay their whole journey. A relationship map links each subject to the people and vehicles they keep showing up with. One click reconstructs a sharper, super-resolved photo of the subject from its many sightings, so a blurry face or plate becomes clearer.
 
