@@ -32,7 +32,7 @@
 <link rel="stylesheet" href="{{ '/assets/css/main.css' | url }}">
 
 <!-- set theme before paint to avoid a flash -->
-<script>(function(){try{var t=localStorage.getItem('ovs-theme');if(!t){t=window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<script>(function(){try{var t=localStorage.getItem('ovs-theme')||'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"WebSite","name":"{{ site.name }}","url":"{{ site.url }}{{ '/' | url }}","description":"{{ site.description }}"}
