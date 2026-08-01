@@ -149,8 +149,11 @@ export const spatialOpen = writable<string | null>(null)     // 3D spatial scene
 export const dossierOpen = writable(false)  // stationary editor panel for the selected tracklet
 export const alertsScreen = writable(false)                  // cross-camera alerts board (all cameras)
 export const operatorOpen = writable(false)                  // central AI Operator console (voice + text)
-// One-shot roster preset consumed on mount (e.g. AI Operator "show red-flagged" -> BOLO filter).
-export const rosterInit = writable<{ bolo?: boolean; query?: string } | null>(null)
+// Roster filter the AI Operator can drive (applied on mount AND live while the roster is open):
+// class, free-text query, BOLO-only, and attribute filters (colour / vehicle subtype / height).
+export const rosterInit = writable<
+  { cls?: string; bolo?: boolean; query?: string; color?: string; subtype?: string; height?: string; sort?: string } | null
+>(null)
 
 // Switching cameras clears the previous camera's transient panels (selection,
 // dossier, enroll) — they don't belong to the new feed.

@@ -17,9 +17,9 @@
   // Simple, guided search: pick WHAT you're looking for, then just colour (+ height
   // for people). Icons carry the primary choice so it isn't a wall of chips.
   const KINDS = [
-    { k: 'person', icon: '👤', label: 'PERSON' },
-    { k: 'vehicle', icon: '🚗', label: 'VEHICLE' },
-    { k: 'animal', icon: '🐾', label: 'ANIMAL' },
+    { k: 'person', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>', label: 'PERSON' },
+    { k: 'vehicle', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l1.6-4A2.2 2.2 0 0 1 7.7 7.6h8.6A2.2 2.2 0 0 1 18.4 9L20 13"/><path d="M2.8 13.5A1 1 0 0 1 3.8 13h16.4a1 1 0 0 1 1 .5V17a.8.8 0 0 1-.8.8h-1.9"/><path d="M6.5 17.8H3.6a.8.8 0 0 1-.8-.8v-3.5"/><circle cx="7.3" cy="17.5" r="1.7"/><circle cx="16.7" cy="17.5" r="1.7"/></svg>', label: 'VEHICLE' },
+    { k: 'animal', icon: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><ellipse cx="7.5" cy="9.6" rx="1.5" ry="2.1"/><ellipse cx="12" cy="8" rx="1.6" ry="2.3"/><ellipse cx="16.5" cy="9.6" rx="1.5" ry="2.1"/><path d="M12 12.4c-2.7 0-4.8 1.9-4.8 3.9 0 1.5 1.3 2.2 2.7 1.7 .8-.3 1.4-.5 2.1-.5s1.3.2 2.1.5c1.4.5 2.7-.2 2.7-1.7 0-2-2.1-3.9-4.8-3.9z"/></svg>', label: 'ANIMAL' },
   ]
   const COLORS = ['BLACK', 'WHITE', 'GRAY', 'RED', 'BLUE', 'GREEN', 'YELLOW', 'BROWN']
   const HEIGHTS = ['SHORT', 'MEDIUM', 'TALL']
@@ -175,7 +175,7 @@
   <div class="kinds">
     {#each KINDS as o}
       <button class="kind" class:on={kind === o.k} onclick={() => (kind = sel(kind, o.k) as any)}>
-        <span class="ki">{o.icon}</span><span class="kl caps">{o.label}</span>
+        <span class="ki">{@html o.icon}</span><span class="kl caps">{o.label}</span>
       </button>
     {/each}
   </div>
@@ -275,12 +275,13 @@
   .ask { font-size: var(--fs-label); color: var(--ink-dim); letter-spacing: var(--tracking); margin: 4px 0 10px; }
   .kinds { display: flex; gap: 12px; margin-bottom: 18px; }
   .kind { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 26px; border: 1px solid var(--hairline); background: #07090b; cursor: crosshair; }
-  .kind .ki { font-size: 30px; filter: grayscale(0.15); }
+  .kind .ki { display: inline-flex; align-items: center; justify-content: center; color: var(--ink-dim); }
+  .kind .ki :global(svg) { width: 30px; height: 30px; }
   .kind .kl { font-size: var(--fs-label); letter-spacing: var(--tracking); color: var(--ink-dim); }
   .kind:hover { border-color: var(--ink-dim); }
-  .kind:hover .kl { color: var(--ink); }
+  .kind:hover .kl, .kind:hover .ki { color: var(--ink); }
   .kind.on { border-color: var(--scarlet); background: rgba(225,6,0,0.08); box-shadow: 0 0 18px rgba(225,6,0,0.2); }
-  .kind.on .kl { color: var(--scarlet); }
+  .kind.on .kl, .kind.on .ki { color: var(--scarlet); }
 
   .dotc { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border: 1px solid var(--hairline); vertical-align: middle; }
   .sw-black .dotc { background: #111; } .sw-white .dotc { background: #eee; } .sw-gray .dotc { background: #888; }
