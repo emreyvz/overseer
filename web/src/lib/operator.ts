@@ -8,7 +8,7 @@ import { get, writable } from 'svelte/store'
 import {
   mode, activeCam, cameras, stage, forensicSeed, zoneEditor, alertRules, watchlistOpen, aiOpen,
   suggestionsOpen, spatialOpen, storageScreen, commandOpen, investigateCase, alertsScreen,
-  rosterInit, modules, toggleModule, flashBanner, triggerGlitch, type Mode,
+  rosterInit, modules, toggleModule, detections, alerts, flashBanner, triggerGlitch, type Mode,
 } from './stores'
 import { sendCommand } from './ws'
 import { SIM } from './sim'
@@ -136,6 +136,28 @@ export const ACTIONS: Record<string, Action> = {
     return 'could not create the rule'
   },
 
+  // ---- queries: answer questions from live data (the app's core purpose) -------------------
+  count: ({ cls }) => {
+    const want = S(cls, 'person').toLowerCase()
+    const live = get(detections).filter((d) => !d.coasting)
+    const n = want === 'any'
+      ? live.length
+      : live.filter((d) => d.cls === want).length
+    const camName = get(cameras).find((c) => c.id === get(activeCam))?.name ?? 'the current camera'
+    const noun = want === 'vehicle' ? (n === 1 ? 'vehicle' : 'vehicles')
+      : want === 'person' ? (n === 1 ? 'person' : 'people') : (n === 1 ? 'object' : 'objects')
+    return `${n} ${noun} on ${camName} right now`
+  },
+  count_people: () => ACTIONS.count({ cls: 'person' }),
+  count_vehicles: () => ACTIONS.count({ cls: 'vehicle' }),
+
+  // how many un-acked alerts, optionally by severity
+  count_alerts: ({ severity }) => {
+    const sev = S(severity).toLowerCase()
+    const list = get(alerts).filter((a) => !a.ack && (!sev || a.severity === sev))
+    return `${list.length} ${sev ? sev + ' ' : ''}alert${list.length === 1 ? '' : 's'} active`
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -214,6 +236,17 @@ export function routeCommand(raw: string): Plan | null {
     }
   }
 
+  // query: "how many people/cars (on camera X)?" / "kaç insan/araba var (X kamerasında)?"
+  if (/(kaç|how many|how much)/i.test(low) && /(insan|kişi|kisi|adam|people|person|pedestrian|araç|araba|arac|\bcars?\b|vehicles?|alarm|alert)/i.test(low)) {
+    const cls = /(araç|araba|arac|\bcars?\b|vehicles?)/i.test(low) ? 'vehicle' : /(alarm|alert)/i.test(low) ? 'alert' : 'person'
+    const steps: Step[] = []
+    const cm = low.match(/([\wçğıöşü-]+)\s*kameras[ıi]nda/i) || low.match(/\bon (?:the )?(.+?)(?:\s+camera)?\s*\??$/i)
+    const camName = (cm?.[1] || cm?.[2] || '').trim()
+    if (camName && findCam(camName)) steps.push({ action: 'switch_camera', args: { name: camName } })
+    steps.push(cls === 'alert' ? { action: 'count_alerts', args: {} } : { action: 'count', args: { cls } })
+    return { steps, border: 'nav' }
+  }
+
   // "search/find <q>" / "<q> ara/bul"
   const sm = low.match(/(?:forensic\s*)?(?:search|find|ara|bul|aratt?[ıi]r)\b[:\s]+(.{2,})/i) ||
              low.match(/^(.{2,}?)\s+(?:ara|bul)\.?$/i)
@@ -222,25 +255,38 @@ export function routeCommand(raw: string): Plan | null {
   return null
 }
 
+// Does a plan change what's on screen (navigation), or is it just an answer/query? The console
+// keeps answers in the full panel and only docks to the companion for navigation.
+export function planNavigates(plan: Plan): boolean {
+  return (plan.steps ?? []).some((s) => !ANSWER_ACTIONS.has(s.action))
+}
+
 // ---- executor ------------------------------------------------------------------------------
+// Actions whose return value is an ANSWER to the operator (spoken + shown as a reply), not just a
+// step log. The last such answer in a chain becomes the plan's spoken reply.
+const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene', 'say'])
+
 export async function runPlan(plan: Plan): Promise<void> {
   if (plan.ask) { olog(plan.ask, 'ask'); return }
   const steps = plan.steps ?? []
   if (!steps.length && plan.say) { olog(plan.say, 'say'); return }
   operatorBusy.set(true)
   operatorActive.set(plan.border ?? 'nav')
+  let lastAnswer = ''
   try {
     for (const step of steps) {
       const fn = ACTIONS[step.action]
       if (!fn) { olog(`unknown action: ${step.action}`, 'error'); continue }
       try {
         const summary = await fn(step.args ?? {})
-        if (summary) olog(summary, step.action === 'say' ? 'say' : 'step')
+        const isAnswer = ANSWER_ACTIONS.has(step.action)
+        if (summary) { olog(summary, isAnswer ? 'say' : 'step'); if (isAnswer) lastAnswer = summary }
       } catch (e) {
         olog(`${step.action} failed: ${e instanceof Error ? e.message : String(e)}`, 'error')
       }
     }
     if (plan.say) olog(plan.say, 'say')
+    else if (lastAnswer) plan.say = lastAnswer   // so the caller speaks the answer
   } finally {
     // let the border linger a beat so a fast chain still registers visually
     setTimeout(() => operatorActive.set(null), 900)
