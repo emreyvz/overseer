@@ -34,7 +34,13 @@
   let kind = $derived(entry.cls === 'vehicle' ? 'VEHICLE PROFILE' : 'PERSON PROFILE')
   const camByName = (name?: string | null) => $cameras.find((c) => c.name === name)
   const photo = $derived(entry.snapshot ? `${API}${entry.snapshot}?t=${entry.last_ts}` : '')
-  const heroSrc = $derived(cutout ? `${API}/api/roster/${entry.id}/cutout?t=${entry.last_ts}` : photo)
+  // Portrait focuses on the FACE (backend YuNet crop); falls back to the full photo when no
+  // face is detected. faceFailed resets naturally per subject ({#key selected.id} remounts).
+  let faceFailed = $state(false)
+  const faceSrc = $derived(entry.snapshot ? `${API}/api/roster/${entry.id}/face?t=${entry.last_ts}` : '')
+  const heroSrc = $derived(
+    cutout ? `${API}/api/roster/${entry.id}/cutout?t=${entry.last_ts}` : ((faceSrc && !faceFailed) ? faceSrc : photo))
+  function onHeroError() { if (!cutout && !faceFailed) faceFailed = true }
   const clipUrl = $derived(entry.clip ? `${API}${entry.clip}` : '')
   const lastCamId = $derived(camByName(entry.cam)?.id)
 
@@ -225,7 +231,7 @@
     <section class="hero">
       <div class="portrait" class:livef={live}>
         {#if recon?.image}<img class="clarified" src={`data:image/jpeg;base64,${recon.image}`} alt="clarified" />
-        {:else if entry.snapshot}<img src={heroSrc} alt="" />
+        {:else if entry.snapshot}<img src={heroSrc} alt="" onerror={onHeroError} />
         {:else}<div class="noimg caps">NO IMAGE ON FILE</div>{/if}
         <span class="ret tl"></span><span class="ret tr"></span><span class="ret bl"></span><span class="ret br"></span>
         <span class="reticle"></span>
