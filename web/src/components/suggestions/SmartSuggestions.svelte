@@ -12,6 +12,7 @@
   import { sendCommand } from '../../lib/ws'
   import { SIM } from '../../lib/sim'
   import { sfx } from '../../lib/audio'
+  import { addZone, addRule } from '../../lib/zones'
   import LiveThumb from '../LiveThumb.svelte'
 
   // behaviours defined BY a zone: for these we also offer "draw the zone", opening the POV zone
@@ -31,12 +32,36 @@
   // impact score: severity dominates, recency/frequency breaks ties
   const score = (s: Suggestion): number => (SEV_W[s.rule?.severity ?? 'info'] ?? 1) * 1000 + (s.count ?? 0)
   const alertQ = $derived(items.filter((s) => s.kind === 'alert').sort((a, b) => score(b) - score(a)))
+  const zoneQ = $derived(items.filter((s) => s.kind === 'zone').sort((a, b) => (b.count ?? 0) - (a.count ?? 0)))
   const camQ = $derived(items.filter((s) => s.kind === 'camera'))
-  const flat = $derived([...alertQ, ...camQ])
+  const flat = $derived([...alertQ, ...zoneQ, ...camQ])
   const selected = $derived(flat.find((s) => s.title === selKey) ?? flat[0] ?? null)
 
-  // coverage: of every alert-coverage gap we found, how many are now closed
-  const totalAlerts = $derived(items.filter((s) => s.kind === 'alert').length + done.length)
+  // editable proposed zone (for kind==='zone'): normalized polygon the operator can drag
+  let zonePts = $state<[number, number][]>([])
+  let zoneKey = $state('')
+  let heroEl = $state<HTMLElement>()
+  let dragIdx = $state(-1)
+  $effect(() => {
+    const k = selected?.kind === 'zone' ? selected.title : ''
+    if (k !== zoneKey) { zoneKey = k; zonePts = (selected?.zone ?? []).map((p) => [p[0], p[1]] as [number, number]) }
+  })
+  function startDrag(e: PointerEvent, i: number) {
+    e.preventDefault(); e.stopPropagation(); dragIdx = i
+    window.addEventListener('pointermove', onDrag); window.addEventListener('pointerup', endDrag)
+  }
+  function onDrag(e: PointerEvent) {
+    if (dragIdx < 0 || !heroEl) return
+    const r = heroEl.getBoundingClientRect()
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+    const y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+    zonePts = zonePts.map((p, j) => (j === dragIdx ? [x, y] : p))
+  }
+  function endDrag() { dragIdx = -1; window.removeEventListener('pointermove', onDrag); window.removeEventListener('pointerup', endDrag) }
+  function resetZone() { if (selected?.zone) { zonePts = selected.zone.map((p) => [p[0], p[1]] as [number, number]); sfx('click', { volume: 0.2 }) } }
+
+  // coverage: of every alert / zone coverage gap we found, how many are now closed
+  const totalAlerts = $derived(items.filter((s) => s.kind === 'alert' || s.kind === 'zone').length + done.length)
   const coverage = $derived(totalAlerts ? Math.round((100 * done.length) / totalAlerts) : 100)
   const C = 2 * Math.PI * 26                          // ring circumference (r = 26)
 
@@ -44,7 +69,9 @@
   const tags = (name: string): string[] => dna[name]?.dna ?? []
   const rep = (name: string): number | null => (dna[name] ? dna[name].reputation : null)
   const impact = (s: Suggestion): string =>
-    s.kind !== 'alert' ? 'ADVISORY' : s.rule?.severity === 'critical' ? 'HIGH' : (s.count ?? 0) >= 8 ? 'HIGH' : 'MEDIUM'
+    s.kind === 'camera' ? 'ADVISORY'
+      : s.kind === 'zone' ? ((s.count ?? 0) >= 120 ? 'HIGH' : 'MEDIUM')
+      : s.rule?.severity === 'critical' ? 'HIGH' : (s.count ?? 0) >= 8 ? 'HIGH' : 'MEDIUM'
 
   async function load() {
     loading = true
@@ -77,6 +104,27 @@
     busy = null
   }
 
+  // Accept a proposed ZONE: create the (edited) watch area + a working loitering rule on its
+  // camera, so it fires immediately, and also register the backend alert rule for persistence.
+  async function acceptZone(s: Suggestion | null) {
+    if (!s || busy || s.kind !== 'zone' || zonePts.length < 3) return
+    busy = s.title; sfx('sonar')
+    try {
+      const z = addZone({ name: `${s.cam} WATCH`, kind: 'area', cam: s.cam, points: zonePts.map((p) => [p[0], p[1]] as [number, number]) })
+      addRule({ name: `Loitering · ${s.cam}`, event: 'loiter', zoneId: z.id, threshold: 5, severity: (s.rule?.severity as 'info' | 'warning' | 'critical') ?? 'warning' })
+      if (s.rule) await api.addAlertRule(s.rule).catch(() => { /* backend rule optional */ })
+      done = [...done, s.title]
+      triggerGlitch(120)
+      const i = flat.findIndex((x) => x.title === s.title)
+      const nextOpen = flat.slice(i + 1).find((x) => !done.includes(x.title)) ?? flat.slice(0, i).find((x) => !done.includes(x.title))
+      setTimeout(() => {
+        items = items.filter((x) => x.title !== s.title)
+        selKey = nextOpen?.title ?? flat.find((x) => x.title !== s.title)?.title ?? null
+      }, 750)
+    } catch { /* offline: leave the card */ }
+    busy = null
+  }
+
   const isZone = (s: Suggestion | null): boolean => !!s?.rule && ZONE_BEHAVIORS.has(s.rule.event_type)
   // observe the suggestion's camera live and open the zone editor there
   function drawZone(s: Suggestion | null) {
@@ -100,7 +148,7 @@
     if (e.key === 'Escape') { e.stopPropagation(); onclose(); return }
     if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); step(1) }
     else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); step(-1) }
-    else if (e.key === 'Enter') { e.preventDefault(); accept(selected) }
+    else if (e.key === 'Enter') { e.preventDefault(); if (selected?.kind === 'zone') acceptZone(selected); else accept(selected) }
     else if (e.key === 'z' && isZone(selected)) { e.preventDefault(); drawZone(selected) }
   }
   onMount(() => { sfx('sonar'); load(); window.addEventListener('keydown', onkey, true) })
@@ -151,6 +199,20 @@
             </button>
           {/each}
         {/if}
+        {#if zoneQ.length}
+          <div class="qgrp caps"><span class="qd zone"></span>ZONE COVERAGE<span class="qgn">{zoneQ.length}</span></div>
+          {#each zoneQ as s (s.title)}
+            <button class="qrow" class:on={selected?.title === s.title} class:added={done.includes(s.title)} onclick={() => select(s)}>
+              <span class="pdot zone"></span>
+              <span class="qmid">
+                <span class="qttl">{s.title}</span>
+                <span class="qcam caps">◉ {s.cam}</span>
+              </span>
+              {#if done.includes(s.title)}<span class="qok">✓</span>
+              {:else}<span class="qn caps">◱ ZONE</span>{/if}
+            </button>
+          {/each}
+        {/if}
         {#if camQ.length}
           <div class="qgrp caps"><span class="qd cam"></span>CAMERA IMPROVEMENTS<span class="qgn">{camQ.length}</span></div>
           {#each camQ as s (s.title)}
@@ -169,18 +231,28 @@
       <main class="stage">
         {#if selected}
           {#key selected.title}
-          <div class="hero">
+          <div class="hero" bind:this={heroEl}>
             {#if camId(selected.cam)}<LiveThumb id={camId(selected.cam)!} fps={6} />{:else}<div class="nolive caps">NO FEED</div>{/if}
+            {#if selected.kind === 'zone' && zonePts.length >= 3}
+              <svg class="zedit" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <polygon class="zpoly" points={zonePts.map((p) => `${p[0] * 100},${p[1] * 100}`).join(' ')} />
+              </svg>
+              {#each zonePts as p, i}
+                <button class="zvtx" class:drag={dragIdx === i} style="left:{p[0] * 100}%; top:{p[1] * 100}%"
+                        onpointerdown={(e) => startDrag(e, i)} aria-label="zone corner"></button>
+              {/each}
+              <span class="ztag caps">◱ PROPOSED ZONE · DRAG TO ADJUST</span>
+            {/if}
             <span class="camtag caps">◉ {selected.cam}</span>
             <span class="impact caps imp-{impact(selected).toLowerCase()}">{impact(selected)} IMPACT</span>
-            {#if selected.count}<span class="seen caps">{selected.count}× SEEN</span>{/if}
+            {#if selected.count && selected.kind !== 'zone'}<span class="seen caps">{selected.count}× SEEN</span>{/if}
             {#if selected.kind === 'alert'}
               <span class="sev caps {selected.rule?.severity}">{selected.rule?.severity === 'critical' ? '● CRITICAL' : '● WARNING'}</span>
             {/if}
           </div>
 
           <div class="detail">
-            <div class="kind caps">{selected.kind === 'alert' ? 'ALERT COVERAGE GAP' : 'CAMERA ADVISORY'}</div>
+            <div class="kind caps">{selected.kind === 'alert' ? 'ALERT COVERAGE GAP' : selected.kind === 'zone' ? 'ZONE COVERAGE GAP' : 'CAMERA ADVISORY'}</div>
             <h2 class="stitle">{selected.title}</h2>
             <p class="swhy">{selected.why}</p>
 
@@ -212,6 +284,18 @@
                     <button class="zone caps" onclick={() => drawZone(selected)} title="Draw the watch zone on this camera">◱ DRAW ZONE</button>
                   {/if}
                 {/if}
+              {:else if selected.kind === 'zone'}
+                {#if done.includes(selected.title)}
+                  <span class="ok caps">✓ ZONE + ALERT CREATED · WATCHING NOW</span>
+                {:else}
+                  <button class="go caps" disabled={busy === selected.title} onclick={() => acceptZone(selected)}>
+                    {busy === selected.title ? 'CREATING_' : '+ CREATE ZONE + ALERT'}
+                  </button>
+                  <button class="zone caps" onclick={resetZone} title="Restore the suggested shape">↺ RESET SHAPE</button>
+                  {#if camId(selected.cam)}
+                    <button class="zone caps" onclick={() => drawZone(selected)} title="Open the full editor on this camera">◱ FULL EDITOR</button>
+                  {/if}
+                {/if}
               {:else}
                 <span class="advnote caps">HEALTH ADVISORY · NO RULE TO ADD</span>
                 {#if camId(selected.cam)}
@@ -219,7 +303,7 @@
                 {/if}
               {/if}
             </div>
-            <div class="hint caps">↑↓ NAVIGATE · ⏎ CREATE · {isZone(selected) ? 'Z DRAW ZONE · ' : ''}ESC CLOSE</div>
+            <div class="hint caps">↑↓ NAVIGATE · ⏎ {selected.kind === 'zone' ? 'CREATE ZONE' : 'CREATE'} · {selected.kind === 'zone' ? 'DRAG CORNERS · ' : isZone(selected) ? 'Z DRAW ZONE · ' : ''}ESC CLOSE</div>
           </div>
           {/key}
         {:else}
@@ -256,7 +340,7 @@
   .queue { border-right: 1px solid var(--hairline); overflow-y: auto; padding: 12px 10px 40px; background: rgba(4,7,10,0.4); }
   .qgrp { display: flex; align-items: center; gap: 7px; font-size: 8px; color: var(--ink-dim); letter-spacing: 0.16em; margin: 14px 6px 7px; }
   .qgrp:first-child { margin-top: 4px; }
-  .qd { width: 6px; height: 6px; border-radius: 50%; } .qd.alert { background: var(--scarlet); box-shadow: 0 0 6px var(--scarlet); } .qd.cam { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+  .qd { width: 6px; height: 6px; border-radius: 50%; } .qd.alert { background: var(--scarlet); box-shadow: 0 0 6px var(--scarlet); } .qd.cam { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); } .qd.zone { background: #2fbf8f; box-shadow: 0 0 6px #2fbf8f; }
   .qgn { margin-left: auto; color: var(--ink-ghost); }
   .qrow { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 9px 10px; margin-bottom: 3px; background: none;
     border: 1px solid transparent; border-left: 2px solid transparent; cursor: pointer; transition: background 140ms, border-color 140ms; }
@@ -267,6 +351,7 @@
   .pdot.sev-critical { background: var(--scarlet); box-shadow: 0 0 6px var(--scarlet); }
   .pdot.sev-warning { background: #e8a13a; box-shadow: 0 0 6px #e8a13a; }
   .pdot.sev-info, .pdot.cam { background: var(--cyan); }
+  .pdot.zone { background: #2fbf8f; box-shadow: 0 0 6px #2fbf8f; }
   .qmid { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
   .qttl { font-size: 11px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .qrow.on .qttl { color: var(--ink); } .qrow:not(.on) .qttl { color: var(--ink-dim); }
@@ -307,6 +392,15 @@
   .ok { color: var(--cyan); font-size: 11px; letter-spacing: 0.16em; padding: 11px 0; }
   .advnote { color: var(--ink-ghost); font-size: 10px; letter-spacing: 0.14em; padding: 11px 0; }
   .hint { margin-top: 12px; font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.14em; }
+
+  /* editable proposed zone over the hero */
+  .zedit { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .zpoly { fill: rgba(47,191,143,0.16); stroke: #2fbf8f; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+  .zvtx { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%;
+    background: #2fbf8f; border: 2px solid #04070a; box-shadow: 0 0 8px rgba(47,191,143,0.7);
+    padding: 0; cursor: grab; touch-action: none; }
+  .zvtx:hover, .zvtx.drag { background: #eafff6; cursor: grabbing; transform: scale(1.2); }
+  .ztag { position: absolute; bottom: 10px; left: 12px; font-size: 8px; color: #2fbf8f; background: rgba(4,7,10,0.72); padding: 3px 8px; letter-spacing: 0.12em; text-shadow: 0 0 5px #000; }
 
   @media (max-width: 720px) {
     .body { grid-template-columns: 1fr; grid-template-rows: 40% 1fr; }

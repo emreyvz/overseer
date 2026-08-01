@@ -1040,6 +1040,16 @@ class Backend:
                 continue
         out = suggestions.alert_suggestions(
             counts_by_source, names, existing, min_events=min_n, retention_days=days)
+        # Proactive zone detection: propose where a watch zone belongs from the activity hotspot.
+        zone_by_source: dict[int, dict] = {}
+        for sid in names:
+            try:
+                z = self.cam_profiles.suggested_zone(sid)
+                if z:
+                    zone_by_source[sid] = z
+            except Exception:  # noqa: BLE001
+                continue
+        out.extend(suggestions.zone_suggestions(zone_by_source, names, existing))
         out.extend(suggestions.camera_suggestions(self.cam_profiles.all(names)))
         return out
 
@@ -1310,6 +1320,7 @@ class Backend:
         idx = 0
         weapon_box = None
         prof_dets: list = []   # (cls, conf) for the camera DNA / reputation profile
+        prof_points: list = []  # normalized foot-points -> density grid for auto zone suggestions
         for group in r.detections.values():
             for d in group:
                 x1, y1, x2, y2 = d.bbox
@@ -1317,6 +1328,8 @@ class Backend:
                 weapon = d.category == "weapon"
                 if cls in ("person", "vehicle", "animal"):
                     prof_dets.append((cls, float(d.confidence)))
+                    if cls in ("person", "vehicle") and w > 0 and h > 0:
+                        prof_points.append(((x1 + x2) / 2.0 / w, y2 / h))
                 if weapon:
                     weapon_box = (x1, y1, x2, y2)
                 # Only surface people / vehicles / animals (and weapons) in the live
@@ -1382,7 +1395,8 @@ class Backend:
         if self._source_id is not None:   # accumulate this camera's DNA / reputation
             self.cam_profiles.observe_frame(
                 self._source_id, brightness=float(getattr(r.metrics, "brightness", 0.0)),
-                motion=float(r.motion_percent), fps=float(r.fps), dets=prof_dets)
+                motion=float(r.motion_percent), fps=float(r.fps), dets=prof_dets,
+                points=prof_points)
         self._emit({"t": "detections", "d": dets})
 
         # weapon alert with a cropped image of the weapon itself (throttled)
