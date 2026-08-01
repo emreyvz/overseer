@@ -3,7 +3,6 @@
   // session, with a photo each (and plates for vehicles). Click one for a profile: larger
   // photo (optionally background-removed), plate, attributes, seen-times and editable notes.
   import { onDestroy, onMount } from 'svelte'
-  import { get } from 'svelte/store'
   import { api } from '../../lib/api'
   import { rosterInit } from '../../lib/stores'
   import { annotations } from '../../lib/annotations'
@@ -27,9 +26,6 @@
     } catch { /* keep the last good list */ }
   }
   onMount(() => {
-    // Consume a one-shot preset from the AI Operator (e.g. "show red-flagged" -> BOLO filter).
-    const init = get(rosterInit)
-    if (init) { if (init.bolo) bolo = true; if (init.query) query = init.query; rosterInit.set(null) }
     refresh(); loadPlates(); timer = setInterval(refresh, 3000)
     clock = setInterval(() => (now = Date.now()), 1000)   // drives LIVE + relative times in the dossier
   })
@@ -38,21 +34,49 @@
   let query = $state('')
   let sort = $state<'recent' | 'seen'>('recent')
   let bolo = $state(false)
+  // detailed attribute filters (also drivable by the AI Operator)
+  let color = $state('')
+  let subtype = $state('')
+  let height = $state('')
+  const COLORS = ['black', 'white', 'gray', 'red', 'blue', 'green', 'yellow', 'brown', 'orange', 'purple']
+  const SUBTYPES = ['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'van']
+  const HEIGHTS = ['short', 'medium', 'tall']
+  const tog = (cur: string, v: string) => (cur === v ? '' : v)
+  const attrActive = $derived(!!(color || subtype || height))
+  function clearAttrs() { color = ''; subtype = ''; height = '' }
+
   let shown = $derived.by(() => {
     const q = query.trim().toLowerCase()
     const anns = $annotations
     return entries
       .filter((e) => filter === 'all' || e.cls === filter)
       .filter((e) => !bolo || e.watched)
+      .filter((e) => !color || (e.attrs?.upper_color ?? '').toLowerCase() === color)
+      .filter((e) => !subtype || (e.attrs?.subtype ?? '').toLowerCase().includes(subtype))
+      .filter((e) => !height || (e.attrs?.height ?? '').toLowerCase() === height)
       .filter((e) => {
         if (!q) return true
         const a = anns[e.id] ?? {}
-        const hay = [e.id, a.alias, e.plate, e.attrs?.make, e.attrs?.subtype, e.attrs?.upper_color, e.cam, e.first_cam]
+        const hay = [e.id, a.alias, e.plate, e.attrs?.make, e.attrs?.subtype, e.attrs?.upper_color, e.attrs?.height, e.cam, e.first_cam]
           .filter(Boolean).join(' ').toLowerCase()
         return hay.includes(q)
       })
       .slice()
       .sort((a, b) => (sort === 'seen' ? b.obs - a.obs : b.last_ts - a.last_ts))
+  })
+
+  // The AI Operator can drive the roster filters live (not just on mount).
+  $effect(() => {
+    const init = $rosterInit
+    if (!init) return
+    if (init.cls) filter = init.cls as typeof filter
+    if (init.bolo != null) bolo = !!init.bolo
+    if (init.query != null) query = init.query
+    if (init.color != null) color = init.color.toLowerCase()
+    if (init.subtype != null) subtype = init.subtype.toLowerCase()
+    if (init.height != null) height = init.height.toLowerCase()
+    if (init.sort) sort = init.sort as typeof sort
+    rosterInit.set(null)
   })
   let nPeople = $derived(entries.filter((e) => e.cls === 'person').length)
   let nVehicles = $derived(entries.filter((e) => e.cls === 'vehicle').length)
@@ -84,7 +108,7 @@
     [e.attrs?.make, e.attrs?.subtype, e.attrs?.upper_color, e.cls === 'person' ? e.attrs?.height : undefined]
       .filter(Boolean).map((s) => trUpper(String(s))).join(' · ')
   function open(e: RosterEntry) { sfx('ping', { volume: 0.25 }); selected = e }
-  const FILTERS: [typeof filter, string][] = [['all', 'ALL'], ['person', '👤 PEOPLE'], ['vehicle', '🚗 VEHICLES']]
+  const FILTERS: [typeof filter, string][] = [['all', 'ALL'], ['person', 'PEOPLE'], ['vehicle', 'VEHICLES']]
 </script>
 
 <section class="roster">
@@ -106,6 +130,20 @@
       <button class="schip" class:on={sort === 'seen'} onclick={() => (sort = 'seen')}>MOST SEEN</button>
     </div>
     <button class="chip caps platebtn" class:on={platePanel || platesWatched.length > 0} onclick={() => (platePanel = !platePanel)}>▤ PLATE BOLO{#if platesWatched.length} {platesWatched.length}{/if}</button>
+  </div>
+  <!-- detailed attribute filters (colour · vehicle type · height) -->
+  <div class="attrbar caps">
+    <span class="al">COLOUR</span>
+    {#each COLORS as c}<button class="ac sw-{c}" class:on={color === c} onclick={() => (color = tog(color, c))}><span class="dotc"></span>{c}</button>{/each}
+    {#if filter !== 'person'}
+      <span class="al">TYPE</span>
+      {#each SUBTYPES as s}<button class="ac" class:on={subtype === s} onclick={() => (subtype = tog(subtype, s))}>{s}</button>{/each}
+    {/if}
+    {#if filter !== 'vehicle'}
+      <span class="al">HEIGHT</span>
+      {#each HEIGHTS as h}<button class="ac" class:on={height === h} onclick={() => (height = tog(height, h))}>{h}</button>{/each}
+    {/if}
+    {#if attrActive}<button class="ac clr-attrs" onclick={clearAttrs}>× CLEAR</button>{/if}
   </div>
 
   {#if platePanel}
@@ -187,6 +225,20 @@
   .sort { display: flex; gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); }
   .schip { padding: 5px 12px; background: #0a0d10; color: var(--ink-dim); border: 0; font-size: 9px; letter-spacing: var(--tracking); cursor: pointer; }
   .schip.on { background: #14161a; color: var(--ink); }
+
+  /* detailed attribute filter bar */
+  .attrbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px; }
+  .attrbar .al { font-size: 8px; letter-spacing: 0.16em; color: var(--ink-ghost); margin-left: 8px; }
+  .attrbar .al:first-child { margin-left: 0; }
+  .ac { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--hairline);
+    background: none; color: var(--ink-dim); font: inherit; font-size: 9px; letter-spacing: 0.1em; cursor: pointer; }
+  .ac:hover { color: var(--ink); border-color: var(--ink-dim); }
+  .ac.on { color: var(--ink); border-color: var(--cyan); background: rgba(56,208,227,0.08); }
+  .ac .dotc { width: 9px; height: 9px; border: 1px solid rgba(255,255,255,0.3); border-radius: 2px; background: currentColor; }
+  .ac.clr-attrs { color: var(--scarlet); border-color: rgba(225,6,0,0.4); }
+  .sw-black .dotc { color: #111; } .sw-white .dotc { color: #eee; } .sw-gray .dotc { color: #888; }
+  .sw-red .dotc { color: #e11; } .sw-blue .dotc { color: #2a6cf0; } .sw-green .dotc { color: #1fae55; }
+  .sw-yellow .dotc { color: #e8c020; } .sw-brown .dotc { color: #7a4a25; } .sw-orange .dotc { color: #e8801f; } .sw-purple .dotc { color: #8b4fd0; }
   .platebtn { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 40%, transparent); }
   .platebtn.on { border-color: var(--cyan); color: var(--cyan); background: rgba(56,208,227,0.08); }
   .platewatch { border: 1px solid var(--hairline); background: #0a0d10; padding: 12px 14px; margin: 0 0 16px;

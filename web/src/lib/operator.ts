@@ -121,6 +121,31 @@ export const ACTIONS: Record<string, Action> = {
     return 'roster: red-flagged subjects'
   },
 
+  // Drive the roster's detailed filters: class, colour, vehicle type, height, BOLO-only, text.
+  filter_roster: ({ cls, color, subtype, height, watched, query }) => {
+    stage.set('live'); mode.set('roster')
+    rosterInit.set({
+      cls: cls != null ? S(cls).toLowerCase() : undefined,
+      color: color != null ? S(color).toLowerCase() : undefined,
+      subtype: subtype != null ? S(subtype).toLowerCase() : undefined,
+      height: height != null ? S(height).toLowerCase() : undefined,
+      bolo: watched != null ? watched !== false : undefined,
+      query: query != null ? S(query) : undefined,
+    })
+    const bits = [cls, color, subtype, height, watched ? 'watched' : ''].map((x) => S(x)).filter(Boolean)
+    return `roster filtered${bits.length ? ': ' + bits.join(' ') : ''}`
+  },
+
+  // Detailed forensic appearance search across the record (colour, type, make, height, time…).
+  search_forensic: ({ kind, color, height, subtype, make, query, time }) => {
+    const terms = [kind, color, height, subtype, make, query].map((x) => S(x)).filter(Boolean)
+    const seed = terms.join(' ').trim()
+    if (!seed && !time) return 'nothing to search'
+    forensicSeed.set(time ? `${seed} @${S(time)}` : seed)
+    stage.set('live'); mode.set('forensic')
+    return `forensic search: ${seed || S(time)}`
+  },
+
   describe_scene: async ({ camera }) => {
     const id = findCam(S(camera))?.id ?? get(activeCam)
     if (!id) return 'no active camera to describe'

@@ -46,7 +46,7 @@
         <button class="del" onclick={() => delRec(r.id)} aria-label="delete" title="delete">✕</button>
       </div>
     {/each}
-    {#if recs.length === 0}<div class="mt">NO RECORDINGS · ENABLE RECORDING ( `record` )</div>{/if}
+    {#if recs.length === 0}<div class="mt">NO RECORDINGS YET · ALERT CLIPS AND SNAPSHOTS APPEAR HERE</div>{/if}
   </div>
 
   <div class="cleanup">
