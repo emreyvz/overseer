@@ -17,7 +17,7 @@ module.exports = {
   lang: "en",
   locale: "en_US",
   ogImage: "/assets/img/og.svg",
-  themeColor: "#ffffff",
+  themeColor: "#0e1114",
   release: {
     version: "0.9.0",
     codename: "Spatial Foresight",

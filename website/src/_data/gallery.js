@@ -1,49 +1,36 @@
-// Gallery categories. Each item is a labelled placeholder tile (swap `img` in later).
+// Gallery categories. Real captures from the app; click any tile to enlarge (lightbox).
 module.exports = {
   categories: [
-    { id: "detection", title: "Detection Results",
+    { id: "console", title: "Console & Detection",
       items: [
-        { label: "Operator console", caption: "Detection overlays with stable track ids on a live feed", img: "/assets/img/shots/detect.webp" },
-        { label: "Night recall", caption: "Low-light enhance recovering faint pedestrians" },
-        { label: "Tiled pass", caption: "Small distant objects recovered via tiling" },
+        { label: "Operator console", caption: "Detection overlays with stable track ids", img: "/assets/img/shots/detect.webp" },
+        { label: "Target tracking", caption: "A locked target followed across the frame", img: "/assets/img/shots/g-track.webp" },
+        { label: "Camera detail", caption: "Per-camera view and image processing", img: "/assets/img/shots/g-camera.webp" },
       ] },
-    { id: "depth", title: "Depth Maps",
+    { id: "depth-3d", title: "Depth & 3D",
       items: [
-        { label: "Disparity field", caption: "Depth Anything V2, near = bright" },
-        { label: "Fused depth", caption: "Median-fused across frames, low noise" },
-        { label: "Ground plane", caption: "Structure-aware depth behind occluders" },
+        { label: "Scene reconstruction", caption: "A frame lifted into a 3D point cloud", img: "/assets/img/shots/spatial.webp" },
+        { label: "Reconstruction sweep", caption: "Depth estimated and lifted, live", img: "/assets/img/shots/recon-poster.webp" },
       ] },
-    { id: "segmentation", title: "Segmentation",
+    { id: "spatial", title: "Spatial & Analytics",
       items: [
-        { label: "Foreground mask", caption: "Movers lifted off the static plate" },
-        { label: "Instance masks", caption: "Per-object silhouettes" },
+        { label: "Tactical god-view", caption: "Top-down radar with depth-locked contacts", img: "/assets/img/shots/dock.webp" },
+        { label: "Density heatmap", caption: "Crowd density over a live feed", img: "/assets/img/shots/density.webp" },
+        { label: "Threat report", caption: "Correlated anomaly and threat detection", img: "/assets/img/shots/g-threat.webp" },
       ] },
-    { id: "meshes", title: "3D Meshes",
+    { id: "identity", title: "Identity",
       items: [
-        { label: "Scene reconstruction", caption: "A frame lifted into 3D from monocular depth", img: "/assets/img/shots/spatial.webp" },
-        { label: "Background layer", caption: "Reconstructed wall / floor behind objects" },
+        { label: "Subject profile", caption: "Who, when and where a subject was seen", img: "/assets/img/shots/profile.webp" },
+        { label: "Watchlist", caption: "Flagged subjects and re-sighting hits", img: "/assets/img/shots/g-watchlist.webp" },
       ] },
-    { id: "point-clouds", title: "Point Clouds",
+    { id: "operations", title: "Operations",
       items: [
-        { label: "Reconstructed scene", caption: "Depth back-projected into a navigable cloud", img: "/assets/img/shots/spatial.webp" },
-        { label: "Fly-through", caption: "Navigable three.js viewport" },
-      ] },
-    { id: "spatial", title: "Spatial Maps",
-      items: [
-        { label: "Tactical god-view", caption: "Top-down radar with depth-locked contacts + ghosts", img: "/assets/img/shots/dock.webp" },
-        { label: "Density heatmap", caption: "Crowd density over the live feed", img: "/assets/img/shots/density.webp" },
-        { label: "Predictive ghosts", caption: "Near-future positions and path convergence" },
-      ] },
-    { id: "videos", title: "Videos",
-      items: [
-        { label: "Live overlay", caption: "Detections + ghosts on a live feed" },
-        { label: "Journey supercut", caption: "A subject across cameras, stitched" },
-      ] },
-    { id: "screenshots", title: "Screenshots",
-      items: [
-        { label: "POV console", caption: "Operator view with modules rail, overlays and alerts", img: "/assets/img/shots/dock.webp" },
         { label: "Command center", caption: "Every source on a live map", img: "/assets/img/shots/map.webp" },
-        { label: "Density analytics", caption: "Heatmap + per-camera metrics", img: "/assets/img/shots/density.webp" },
+        { label: "Camera management", caption: "Add, discover and organise sources", img: "/assets/img/shots/g-cams.webp" },
+        { label: "Alert creation", caption: "Build zones and alert rules", img: "/assets/img/shots/g-alert.webp" },
+        { label: "Forensic search", caption: "Find a subject across the record", img: "/assets/img/shots/g-forensic.webp" },
+        { label: "AI assistant", caption: "Natural-language queries over events", img: "/assets/img/shots/g-assistant.webp" },
+        { label: "Landing", caption: "The operator entry screen", img: "/assets/img/shots/g-boot.webp" },
       ] },
   ],
 };

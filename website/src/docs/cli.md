@@ -7,7 +7,9 @@ intro: "The commands you will actually use, on the backend and the frontend."
 ## Backend
 
 ```bash
-python main.py            # start the FastAPI bridge (http://127.0.0.1:8787)
+./run.sh                  # quick start (macOS / Linux)
+run.bat                   # quick start (Windows)
+python main.py            # or start the FastAPI bridge directly (http://127.0.0.1:8787)
 ```
 
 The backend serves REST, the WebSocket stream and MJPEG feeds. It loads models on first use and persists to a local SQLite database.

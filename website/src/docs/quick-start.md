@@ -4,13 +4,25 @@ order: 3
 intro: "Run the backend, open the console, connect a source, and see live detections in a couple of minutes."
 ---
 
-## Start the backend
+## Fastest: one command
+
+From the repository root:
+
+```bash
+# macOS / Linux
+./run.sh
+
+# Windows
+run.bat
+```
+
+This launches the backend (FastAPI bridge) at `http://127.0.0.1:8787`, which serves the REST API, the WebSocket stream and the MJPEG feeds. Open that URL, or start the desktop shell with `cd web && npm run desktop`.
+
+## Or start it manually
 
 ```bash
 python main.py
 ```
-
-The FastAPI bridge comes up at `http://127.0.0.1:8787`. It serves the REST API, the WebSocket stream and the MJPEG feeds.
 
 ## Open the console
 
