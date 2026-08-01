@@ -148,6 +148,7 @@ export const suggestionsOpen = writable(false)               // smart suggestion
 export const spatialOpen = writable<string | null>(null)     // 3D spatial scene for a camera (source id)
 export const dossierOpen = writable(false)  // stationary editor panel for the selected tracklet
 export const alertsScreen = writable(false)                  // cross-camera alerts board (all cameras)
+export const operatorOpen = writable(false)                  // central AI Operator console (voice + text)
 // One-shot roster preset consumed on mount (e.g. AI Operator "show red-flagged" -> BOLO filter).
 export const rosterInit = writable<{ bolo?: boolean; query?: string } | null>(null)
 
