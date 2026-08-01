@@ -313,6 +313,19 @@ async def api_stt(request: Request) -> Any:
     return {"text": text, "disabled": text is None and not stt.available()}
 
 
+@app.get("/api/tts")
+async def api_tts(text: str = "", lang: str = "") -> Any:
+    """Offline text-to-speech for the Operator's spoken replies: returns WAV audio the browser plays.
+    A reliable alternative to the browser voice (which often has no voices in Electron)."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    from server import tts
+    data = await asyncio.to_thread(tts.synth, text[:400], lang or None)
+    if not data:
+        return JSONResponse({"disabled": True})   # frontend falls back to the browser voice
+    return Response(content=data, media_type="audio/wav")
+
+
 @app.post("/api/ai/operate")
 async def api_ai_operate(payload: dict[str, Any]) -> Any:
     """AI Operator: plan a natural-language command into a chain of UI actions. The frontend

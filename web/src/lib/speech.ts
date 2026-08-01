@@ -57,7 +57,40 @@ export function startSTT(lang: Lang, h: STTHandlers): boolean {
 export function stopSTT() { if (rec) { try { rec.stop() } catch { /* already stopped */ } rec = null } }
 export const isListening = () => !!rec
 
+const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:8787'
+let _backendTts: boolean | null = null   // null=unknown, true=works, false=use browser
+let _audio: HTMLAudioElement | null = null
+
+// Speak a reply. Prefer backend TTS (offline OS voice — reliable even when the browser has no
+// voices, common in Electron); fall back to the browser voice. Caches which one works.
 export function speak(text: string, lang: Lang) {
+  if (!text) return
+  if (_backendTts === false) { browserSpeak(text, lang); return }
+  backendSpeak(text, lang).then((ok) => {
+    _backendTts = ok
+    if (!ok) browserSpeak(text, lang)
+  })
+}
+
+async function backendSpeak(text: string, lang: Lang): Promise<boolean> {
+  try {
+    const url = `${API_BASE}/api/tts?text=${encodeURIComponent(text.slice(0, 400))}&lang=${lang}`
+    stopSpeaking()
+    const audio = new Audio(url)
+    _audio = audio
+    const prefs = loadPrefs()
+    if (prefs.outId && 'setSinkId' in audio) { try { await (audio as unknown as { setSinkId(id: string): Promise<void> }).setSinkId(prefs.outId) } catch { /* not supported */ } }
+    return await new Promise<boolean>((resolve) => {
+      let done = false
+      const finish = (v: boolean) => { if (!done) { done = true; resolve(v) } }
+      audio.oncanplaythrough = () => audio.play().then(() => finish(true)).catch(() => finish(false))
+      audio.onerror = () => finish(false)           // e.g. backend returned {disabled} JSON, not audio
+      setTimeout(() => finish(false), 5000)
+    })
+  } catch { return false }
+}
+
+function browserSpeak(text: string, lang: Lang) {
   if (!ttsSupported() || !text) return
   const utter = () => {
     const u = new SpeechSynthesisUtterance(text)
@@ -77,7 +110,10 @@ export function speak(text: string, lang: Lang) {
   speechSynthesis.getVoices()
   setTimeout(() => { if (speechSynthesis.getVoices().length) { try { speechSynthesis.removeEventListener('voiceschanged', on) } catch { /* noop */ } utter() } }, 300)
 }
-export function stopSpeaking() { if (ttsSupported()) { try { speechSynthesis.cancel() } catch { /* noop */ } } }
+export function stopSpeaking() {
+  if (ttsSupported()) { try { speechSynthesis.cancel() } catch { /* noop */ } }
+  if (_audio) { try { _audio.pause() } catch { /* noop */ } _audio = null }
+}
 
 // ---- microphone capture for offline STT: record the mic, then POST the audio to the backend
 // (faster-whisper). This replaces the browser's Web Speech API, which fails in Electron and is
