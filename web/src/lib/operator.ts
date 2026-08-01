@@ -6,15 +6,16 @@
 // see the AI is driving, and every step is written to a transparent transcript.
 import { get, writable } from 'svelte/store'
 import {
-  mode, activeCam, cameras, stage, forensicSeed, zoneEditor, alertRules, watchlistOpen, aiOpen,
-  suggestionsOpen, spatialOpen, storageScreen, commandOpen, investigateCase, alertsScreen,
-  rosterInit, modules, toggleModule, detections, alerts, flashBanner, triggerGlitch, type Mode,
+  mode, activeCam, cameras, stage, forensicSeed, zoneEditor, alertRules, watchlistOpen, operatorOpen,
+  suggestionsOpen, spatialOpen, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
+  rosterInit, modules, toggleModule, detections, alerts, timeline, povZoom, muted, frame,
+  flashBanner, triggerGlitch, type Mode,
 } from './stores'
 import { sendCommand } from './ws'
 import { SIM } from './sim'
 import { api } from './api'
 import { annotate } from './annotations'
-import { sfx } from './audio'
+import { sfx, toggleMute } from './audio'
 
 // ---- operator state (read by the border overlay + the console transcript) ------------------
 export type BorderKind = 'nav' | 'alert'
@@ -79,8 +80,9 @@ export const ACTIONS: Record<string, Action> = {
       storage: () => storageScreen.set(true),
       zones: () => { stage.set('live'); mode.set('pov'); zoneEditor.set(true) },
       rules: () => { stage.set('live'); alertRules.set(true) },
-      assistant: () => aiOpen.set(true),
+      assistant: () => operatorOpen.set(true),
       command: () => commandOpen.set(true),
+      enroll: () => { stage.set('live'); mode.set('pov'); objectRegister.set(true) },
       spatial: () => { const c = get(activeCam); if (c) { stage.set('live'); mode.set('pov'); spatialOpen.set(c) } },
     }
     if (opener[n]) { opener[n](); return `opened ${n}` }
@@ -220,6 +222,75 @@ export const ACTIONS: Record<string, Action> = {
     return `${s.name || 'the subject'} was last seen ${when}`
   },
 
+  // ---- view control -------------------------------------------------------------------------
+  zoom: ({ level, x, y }) => {
+    const z = Math.max(1, Math.min(5, Number(level) || 2))
+    povZoom.set({ zoom: z, x: Number(x) || 0, y: Number(y) || 0 })
+    return z <= 1 ? 'reset zoom' : `zoomed ${z}×`
+  },
+  reset_view: () => { povZoom.set({ zoom: 1, x: 0, y: 0 }); return 'view reset' },
+  next_camera: ({ dir }) => {
+    const list = get(cameras); if (!list.length) return 'no cameras'
+    const i = Math.max(0, list.findIndex((c) => c.id === get(activeCam)))
+    const cam = list[(i + (Number(dir) || 1) + list.length) % list.length]
+    stage.set('live'); mode.set('pov'); activeCam.set(cam.id)
+    if (!SIM) sendCommand(`connect:${cam.name}`)
+    return `switched to ${cam.name}`
+  },
+  go_home: () => { stage.set('select'); return 'back to the map' },
+  fullscreen: ({ on }) => {
+    const want = on !== false
+    try { if (want && !document.fullscreenElement) document.documentElement.requestFullscreen?.(); else if (!want) document.exitFullscreen?.() } catch { /* noop */ }
+    return want ? 'fullscreen on' : 'fullscreen off'
+  },
+  mute: ({ on }) => {
+    const want = on !== false
+    if (get(muted) !== want) toggleMute()
+    return want ? 'muted' : 'unmuted'
+  },
+
+  // ---- alerts / analysis --------------------------------------------------------------------
+  acknowledge_alerts: () => {
+    let n = 0
+    alerts.update((l) => l.map((a) => { if (!a.ack) n++; return { ...a, ack: true } }))
+    return `acknowledged ${n} alert${n === 1 ? '' : 's'}`
+  },
+  summarize: async () => {
+    const ev = [
+      ...get(alerts).slice(0, 20).map((a) => ({ type: a.type, cam: a.cam, label: a.summary })),
+      ...get(timeline).slice(0, 20).map((e) => ({ type: e.type, cam: e.cam, label: e.label })),
+    ]
+    if (!ev.length) return 'nothing to summarise yet'
+    const r = await api.aiSummarize(ev).catch(() => null)
+    return r?.summary || (r?.disabled ? 'summaries need the AI configured' : 'could not summarise')
+  },
+  correlate_alerts: async () => {
+    const al = get(alerts).slice(0, 20).map((a) => ({ ts: new Date(a.ts).toLocaleTimeString(), severity: a.severity, type: a.type, cam: a.cam, summary: a.summary }))
+    if (!al.length) return 'no alerts to correlate'
+    const r = await api.aiCorrelate(al).catch(() => null)
+    if (r?.disabled) return 'correlation needs the AI configured'
+    if (r?.result?.incident) return `${r.result.title || 'incident'}: ${r.result.assessment || ''}${r.result.action ? ` — ${r.result.action}` : ''}`
+    return r?.result?.assessment || 'the alerts look independent'
+  },
+
+  // ---- status queries -----------------------------------------------------------------------
+  camera_status: ({ camera }) => {
+    const camName = findCam(S(camera))?.name ?? get(cameras).find((c) => c.id === get(activeCam))?.name ?? 'the camera'
+    const f = get(frame)
+    const live = get(detections).filter((d) => !d.coasting)
+    const ppl = live.filter((d) => d.cls === 'person').length
+    const veh = live.filter((d) => d.cls === 'vehicle').length
+    return `${camName}: ${f.fps.toFixed(0)} fps, brightness ${Math.round(f.brightness)}, ${ppl} people, ${veh} vehicles right now`
+  },
+  camera_dna: async ({ camera }) => {
+    const camName = findCam(S(camera))?.name ?? get(cameras).find((c) => c.id === get(activeCam))?.name
+    const r = await api.cameraDna().catch(() => null)
+    const c = r?.cameras?.find((x) => x.name === camName)
+    if (!c) return `no profile yet for ${camName ?? 'that camera'}`
+    const tags = (c.dna ?? []).join(', ') || 'still learning'
+    return `${camName}: ${tags} (reputation ${Math.round((c.reputation ?? 0) * 100)}%)`
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -309,6 +380,18 @@ export function routeCommand(raw: string): Plan | null {
     return { steps, border: 'nav' }
   }
 
+  // quick view / system verbs
+  if (/(zoom out|uzaklaş|reset (zoom|view)|görünümü sıfırla)/i.test(low)) return { steps: [{ action: 'reset_view', args: {} }], border: 'nav' }
+  if (/(zoom|yakınlaş|büyüt)/i.test(low)) { const m = low.match(/(\d)/); return { steps: [{ action: 'zoom', args: { level: m ? Number(m[1]) : 2.5 } }], border: 'nav' } }
+  if (/(next|sonraki)\s*(camera|kamera)|sonraki kameraya/i.test(low)) return { steps: [{ action: 'next_camera', args: { dir: 1 } }], border: 'nav' }
+  if (/(previous|önceki|prev)\s*(camera|kamera)|önceki kameraya/i.test(low)) return { steps: [{ action: 'next_camera', args: { dir: -1 } }], border: 'nav' }
+  if (/(unmute|sesi aç)/i.test(low)) return { steps: [{ action: 'mute', args: { on: false } }], border: 'nav' }
+  if (/(\bmute\b|sustur|sesi kapat)/i.test(low)) return { steps: [{ action: 'mute', args: { on: true } }], border: 'nav' }
+  if (/(haritaya (dön|geç)|ana ekran|go home|to the map|back to (the )?map)/i.test(low)) return { steps: [{ action: 'go_home', args: {} }], border: 'nav' }
+  if (/(özetle|brief(ing)?|summary|summarize|neler oldu|ne oldu|what happened|shift report)/i.test(low)) return { steps: [{ action: 'summarize', args: {} }], border: 'nav' }
+  if (/(acknowledge|onayla|okundu işaretle|clear (the )?alerts|alarmları onayla)/i.test(low)) return { steps: [{ action: 'acknowledge_alerts', args: {} }], border: 'nav' }
+  if (/(camera (status|health)|kamera durumu|nasıl (görünüyor|durumda))/i.test(low)) return { steps: [{ action: 'camera_status', args: {} }], border: 'nav' }
+
   // "search/find <q>" / "<q> ara/bul"
   const sm = low.match(/(?:forensic\s*)?(?:search|find|ara|bul|aratt?[ıi]r)\b[:\s]+(.{2,})/i) ||
              low.match(/^(.{2,}?)\s+(?:ara|bul)\.?$/i)
@@ -326,7 +409,8 @@ export function planNavigates(plan: Plan): boolean {
 // ---- executor ------------------------------------------------------------------------------
 // Actions whose return value is an ANSWER to the operator (spoken + shown as a reply), not just a
 // step log. The last such answer in a chain becomes the plan's spoken reply.
-const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene', 'last_seen', 'say'])
+const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene',
+  'last_seen', 'camera_status', 'camera_dna', 'summarize', 'correlate_alerts', 'say'])
 
 export async function runPlan(plan: Plan): Promise<void> {
   if (plan.ask) { olog(plan.ask, 'ask'); return }
@@ -361,11 +445,23 @@ export async function runPlan(plan: Plan): Promise<void> {
 }
 
 // ---- top-level entry: route locally, else ask the server planner ---------------------------
+// A request with a sequence marker ("then", "and then", "sonra", "ardından", ";") or several
+// clauses is multi-step: the single-shot deterministic router would grab only the first part and
+// stop, so we send the WHOLE thing to the LLM planner, which builds the full chain.
+function isCompound(cmd: string): boolean {
+  const low = cmd.toLowerCase()
+  if (/(;|\bsonra\b|\bsonrasında\b|\bardından\b|daha sonra|then\b|after that|and then|ve sonra|bir de)/.test(low)) return true
+  // several imperative verbs -> likely a chain
+  const verbs = (low.match(/\b(geç|git|aç|bul|ara|ekle|yap|getir|göster|oluştur|netleştir|izle|say|switch|go|open|find|search|add|make|get|show|create|enhance|watch|count)\b/g) || []).length
+  return verbs >= 2
+}
+
 export async function operate(command: string): Promise<Plan> {
   const cmd = command.trim()
   if (!cmd) return { say: '' }
   olog(cmd, 'you')
-  const local = routeCommand(cmd)
+  // Simple single commands take the instant local path; compound ones go straight to the planner.
+  const local = isCompound(cmd) ? null : routeCommand(cmd)
   if (local) { await runPlan(local); return local }
   // LLM fallback: give the planner live context so it can resolve references.
   const context = {
