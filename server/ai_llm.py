@@ -27,8 +27,9 @@ _CFG_PATHS = [
 # sync with events.types.EventType; make_rule validates the model's choice against this.
 _RULE_EVENTS = [
     "MOTION", "PERSON", "VEHICLE", "ANIMAL", "RESTRICTED", "LOITERING", "LINE_CROSS",
-    "RUNNING", "STOPPED", "WRONG_DIRECTION", "TAILGATING", "QUEUE", "FALLING",
+    "RUNNING", "STOPPED", "U_TURN", "WRONG_DIRECTION", "TAILGATING", "QUEUE", "FALLING",
     "CROWDING", "FIGHTING", "ABANDONED_OBJECT", "REMOVED_OBJECT",
+    "DEFOCUS", "OBSTRUCTION", "CAMERA_MOVED", "ANOMALY",
 ]
 
 DEFAULT_FEATURES: dict[str, bool] = {
