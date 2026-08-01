@@ -121,6 +121,13 @@ _OPERATOR_ACTIONS = (
     "timeline {on?} — show/hide the event timeline.\n"
     "list_plates {} — answer which licence plates are on the BOLO list.\n"
     "unwatch_plate {plate} — remove a plate from the BOLO list.\n"
+    "list_zones {} — answer the zones currently drawn.\n"
+    "quietest_camera {} — answer which camera has the least activity.\n"
+    "night_cameras {} — answer which cameras are night-dominant.\n"
+    "flagged_cameras {} — answer which cameras have low detection quality.\n"
+    "where_seen {subject} — answer the camera trail a subject was seen on.\n"
+    "locate {subject} — find where a subject is now and switch to that camera.\n"
+    "repeat_last {} — repeat the last answer.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 
