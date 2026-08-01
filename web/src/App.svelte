@@ -9,7 +9,7 @@
   import { sfx, startAmbience, toggleMute } from './lib/audio'
   import { startZoneEngine } from './lib/zones'
   import { startAnomalyEngine } from './lib/anomaly'
-  import { refreshAiStatus } from './lib/ai'
+  import { refreshAiStatus, aiStatus } from './lib/ai'
   import { LEX } from './lib/lexicon'
   import type { Camera } from './lib/types'
 
@@ -141,7 +141,6 @@
     }
     if (k === 'f11') { e.preventDefault(); toggleFullscreen(); return }
     if (k === 'x' && e.ctrlKey) { toggleMute(); return }
-    if (k === 's' && !e.ctrlKey) { sfx('shutter'); flashBanner('SNAPSHOT CAPTURED', false, 1000); sendCommand('snapshot'); return }
     if (k === 'c') { sfx('whoosh'); triggerGlitch(180); pickerView.set('grid'); stage.set('select'); return }
     if (k === 'z') { zoneEditor.set(true); return }
     if (k === 'o') { objectRegister.set(true); return }
@@ -198,7 +197,7 @@
 {/if}
 
 {#if $operatorOpen}<OperatorConsole />{/if}
-{#if !$operatorOpen && ($stage === 'live' || $stage === 'select')}<OperatorLauncher />{/if}
+{#if !$operatorOpen && $aiStatus.enabled && ($stage === 'live' || $stage === 'select')}<OperatorLauncher />{/if}
 {#if $alertsScreen}<AlertsBoard onclose={() => alertsScreen.set(false)} />{/if}
 {#if $suggestionsOpen}<SmartSuggestions onclose={() => suggestionsOpen.set(false)} />{/if}
 <OperatorBorder />

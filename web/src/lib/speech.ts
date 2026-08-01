@@ -57,19 +57,25 @@ export function startSTT(lang: Lang, h: STTHandlers): boolean {
 export function stopSTT() { if (rec) { try { rec.stop() } catch { /* already stopped */ } rec = null } }
 export const isListening = () => !!rec
 
-let voices: SpeechSynthesisVoice[] = []
-function ensureVoices() { if (ttsSupported() && !voices.length) voices = speechSynthesis.getVoices() }
-if (ttsSupported()) { try { speechSynthesis.onvoiceschanged = () => { voices = speechSynthesis.getVoices() } } catch { /* noop */ } }
-
 export function speak(text: string, lang: Lang) {
   if (!ttsSupported() || !text) return
-  ensureVoices()
-  const u = new SpeechSynthesisUtterance(text)
-  u.lang = BCP(lang)
-  const v = voices.find((x) => x.lang?.toLowerCase().startsWith(lang === 'tr' ? 'tr' : 'en'))
-  if (v) u.voice = v
-  u.rate = 1.03
-  try { speechSynthesis.cancel(); speechSynthesis.speak(u) } catch { /* noop */ }
+  const utter = () => {
+    const u = new SpeechSynthesisUtterance(text)
+    u.lang = BCP(lang)
+    const vs = speechSynthesis.getVoices()
+    const v = vs.find((x) => x.lang?.toLowerCase().startsWith(lang === 'tr' ? 'tr' : 'en')) ||
+              vs.find((x) => x.default) || vs[0]
+    if (v) u.voice = v
+    u.rate = 1.03; u.volume = 1; u.pitch = 1
+    try { speechSynthesis.cancel(); speechSynthesis.resume(); speechSynthesis.speak(u) } catch { /* noop */ }
+  }
+  // Voices load asynchronously in Chromium/Electron; the first speak() can fire before they exist,
+  // which silently does nothing — so wait for them if needed.
+  if (speechSynthesis.getVoices().length) { utter(); return }
+  const on = () => { speechSynthesis.removeEventListener('voiceschanged', on); utter() }
+  try { speechSynthesis.addEventListener('voiceschanged', on) } catch { /* noop */ }
+  speechSynthesis.getVoices()
+  setTimeout(() => { if (speechSynthesis.getVoices().length) { try { speechSynthesis.removeEventListener('voiceschanged', on) } catch { /* noop */ } utter() } }, 300)
 }
 export function stopSpeaking() { if (ttsSupported()) { try { speechSynthesis.cancel() } catch { /* noop */ } } }
 

@@ -78,7 +78,7 @@
   $effect(() => { void log.length; scroll() })
 
   onMount(async () => { field?.focus(); await refreshAiStatus(); loadCfg() })
-  onDestroy(() => { stopSTT(); stopSpeaking(); clearTimeout(statusTimer) })
+  onDestroy(() => { stopRecording(); stopSpeaking(); clearTimeout(statusTimer) })
 
   function flash(s: typeof status, ms = 1600) {
     status = s
@@ -139,7 +139,7 @@
   function pickOut(e: Event) { const id = (e.target as HTMLSelectElement).value; prefs.outId = id; savePrefs({ outId: id }) }
 
   function expand() { view = 'full'; panel = 'none'; sfx('click', { volume: 0.2 }); tick().then(() => field?.focus()) }
-  function close() { stopSTT(); stopSpeaking(); operatorOpen.set(false) }
+  function close() { stopRecording(); stopSpeaking(); operatorOpen.set(false) }
 
   const STATUS_LABEL: Record<typeof status, string> = {
     idle: 'READY', listening: 'LISTENING', thinking: 'THINKING', acting: 'ACTING', ok: 'DONE', error: 'ERROR',
