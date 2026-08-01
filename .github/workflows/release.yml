@@ -1,0 +1,83 @@
+name: Build & publish desktop apps
+
+# Builds the Overseer desktop app (Electron) for Windows, macOS and Linux and publishes the
+# installers to the GitHub Release for a pushed v* tag. The installer is thin: on first launch
+# the app sets up the Python backend (uv sync) and downloads the AI models, matched to the
+# machine (GPU if present). See web/electron/main.cjs (packaged path).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install uv (bundled into the app)
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assemble backend + uv into resources
+        shell: bash
+        run: |
+          set -e
+          mkdir -p web/resources/backend web/resources/bin
+          # ship the whole tracked source (git archive excludes git-ignored models/data/.venv)
+          git archive --format=tar HEAD | tar -x -C web/resources/backend
+          rm -rf web/resources/backend/website web/resources/backend/demo \
+                 web/resources/backend/.github web/resources/backend/web/src \
+                 web/resources/backend/web/node_modules web/resources/backend/web/dist
+          # ship the freshly built UI so the backend can serve it same-origin
+          mkdir -p web/resources/backend/web
+          cp -r web/dist web/resources/backend/web/dist
+          # bundle the uv binary for the first-run environment setup
+          uvbin="$(command -v uv || true)"
+          if [ -n "$uvbin" ]; then cp "$uvbin" web/resources/bin/ 2>/dev/null || cp "${uvbin}.exe" web/resources/bin/ 2>/dev/null || true; fi
+          ls -la web/resources/bin || true
+
+      - name: Package & publish (electron-builder)
+        working-directory: web
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"   # no code signing in CI (unsigned builds)
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            npx electron-builder --publish always -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
+          else
+            npx electron-builder --publish never
+          fi
+
+      - name: Upload build artifacts (workflow_dispatch runs)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: overseer-${{ matrix.os }}
+          path: |
+            web/release/*.exe
+            web/release/*.dmg
+            web/release/*.zip
+            web/release/*.AppImage
+            web/release/*.deb
+          if-no-files-found: ignore
