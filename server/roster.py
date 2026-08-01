@@ -426,7 +426,7 @@ class RosterHarvester(threading.Thread):
                  watch_hit_fn: Callable[[dict], None] | None = None,
                  plate_hit_fn: Callable[[str, Any], None] | None = None,
                  relate_fn: Callable[[list, Any, float], None] | None = None,
-                 profile_fn: Callable[[object, float, list], None] | None = None,
+                 profile_fn: Callable[[object, float, list, list], None] | None = None,
                  watch_cooldown: float = 45.0,
                  interval: float = 4.0) -> None:
         super().__init__(daemon=True, name="RosterHarvester")
@@ -464,9 +464,15 @@ class RosterHarvester(threading.Thread):
         if self._profile_fn is not None:
             try:
                 brightness = float(frame.mean())
-                prof_dets = [(self._cat2cls.get(getattr(d, "category", "object"), "object"),
-                              float(getattr(d, "confidence", 0.0))) for d in dets_raw]
-                self._profile_fn(getattr(source, "id", None), brightness, prof_dets)
+                prof_dets = []
+                prof_points = []   # normalized foot-points -> density grid for auto zone suggestions
+                for d in dets_raw:
+                    cls = self._cat2cls.get(getattr(d, "category", "object"), "object")
+                    prof_dets.append((cls, float(getattr(d, "confidence", 0.0))))
+                    if cls in ("person", "vehicle") and fw > 0 and fh > 0:
+                        x1, y1, x2, y2 = getattr(d, "bbox", (0, 0, 0, 0))
+                        prof_points.append(((x1 + x2) / 2.0 / fw, y2 / fh))
+                self._profile_fn(getattr(source, "id", None), brightness, prof_dets, prof_points)
             except Exception:  # noqa: BLE001
                 pass
         for d in dets_raw:
