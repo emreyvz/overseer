@@ -1,0 +1,15 @@
+---
+layout: layouts/page.njk
+title: Examples
+eyebrow: Workflows
+intro: "End-to-end walkthroughs for the most common tasks, from analysing a single image to lifting a video into a 3D scene. Select an example for the full steps."
+---
+<div class="grid cols-2">
+  {% for ex in examples %}
+  <a class="card link bracket" href="{{ '/examples/' | url }}{{ ex.slug }}/">
+    <h3 style="margin-top:0">{{ ex.title }}</h3>
+    <p class="muted" style="font-size:13px">{{ ex.summary }}</p>
+    <div class="tags" style="margin-top:10px">{% for t in ex.tags %}<span class="badge cyan">{{ t }}</span>{% endfor %}</div>
+  </a>
+  {% endfor %}
+</div>

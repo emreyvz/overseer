@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="monospace">
+  <rect width="1200" height="630" fill="#05070a"/>
+  <g stroke="#e8ecf0" stroke-opacity="0.08">
+    <path d="M0 90H1200M0 180H1200M0 270H1200M0 360H1200M0 450H1200M0 540H1200"/>
+    <path d="M90 0V630M180 0V630M270 0V630M1020 0V630M1110 0V630"/>
+  </g>
+  <g transform="translate(80,232)">
+    <path d="M0 40S18 0 60 0s60 40 60 40-18 40-60 40S0 40 0 40Z" fill="none" stroke="#38d0e3" stroke-width="4"/>
+    <circle cx="60" cy="40" r="18" fill="none" stroke="#e10600" stroke-width="6"/>
+    <circle cx="60" cy="40" r="6" fill="#e10600"/>
+  </g>
+  <text x="220" y="270" fill="#e6e8ea" font-size="76" font-weight="700" letter-spacing="6">OVERSEER</text>
+  <text x="82" y="360" fill="#8b9298" font-size="30" letter-spacing="1">AI computer vision &amp; spatial intelligence platform</text>
+  <text x="82" y="410" fill="#565d64" font-size="22" letter-spacing="4">DETECTION · DEPTH · 3D RECONSTRUCTION · RE-ID · ANALYTICS</text>
+  <rect x="82" y="470" width="230" height="46" fill="none" stroke="#e10600" stroke-width="2"/>
+  <text x="197" y="500" fill="#e10600" font-size="20" letter-spacing="3" text-anchor="middle">DOCUMENTATION</text>
+</svg>

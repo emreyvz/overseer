@@ -1,0 +1,30 @@
+---
+layout: layouts/page.njk
+title: Gallery
+eyebrow: Showcase
+intro: "Representative outputs across every stage of the platform. Tiles are labelled placeholders; drop in real captures as the project grows."
+toc:
+  - { id: detection, text: Detection Results }
+  - { id: depth, text: Depth Maps }
+  - { id: segmentation, text: Segmentation }
+  - { id: meshes, text: 3D Meshes }
+  - { id: point-clouds, text: Point Clouds }
+  - { id: spatial, text: Spatial Maps }
+  - { id: videos, text: Videos }
+  - { id: screenshots, text: Screenshots }
+---
+{% for cat in gallery.categories %}
+<section id="{{ cat.id }}">
+  <h2>{{ cat.title }}</h2>
+  <div class="gallery-grid" style="margin-top:14px">
+    {% for it in cat.items %}
+    <figure class="shot">
+      <div class="ph"><span class="lab">{{ it.label }}</span></div>
+      <figcaption class="cap"><div class="t">{{ it.label }}</div><div class="d">{{ it.caption }}</div></figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+
+<div class="callout"><div class="c-title">Contribute a capture</div><p>Replace any placeholder with a real image by dropping it into <code>src/assets/img/</code> and pointing the tile at it in <code>src/_data/gallery.js</code>.</p></div>

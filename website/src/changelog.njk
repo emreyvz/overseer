@@ -1,0 +1,25 @@
+---
+layout: layouts/page.njk
+title: Changelog
+eyebrow: Releases
+intro: "Version history for Overseer, newest first. Expand a release for its notes. Follows a Keep a Changelog style."
+---
+{% for r in changelog.releases %}
+<details class="accordion"{% if loop.first %} open{% endif %}>
+  <summary>
+    <span><strong>v{{ r.version }}</strong> <span class="muted" style="font-weight:400">“{{ r.codename }}”</span>
+    {% if r.tag == 'latest' %}<span class="badge green">latest</span>{% endif %}
+    <span class="muted" style="font-weight:400;font-size:12px"> · {{ r.date | readableDate }}</span></span>
+  </summary>
+  <div class="body">
+    <ul style="list-style:none;padding:0;margin:0">
+      {% for c in r.changes %}
+      {%- set cc = 'green' if c.type == 'added' else ('cyan' if c.type == 'changed' else ('amber' if c.type == 'fixed' else 'scarlet')) -%}
+      <li style="display:flex;gap:10px;align-items:baseline;padding:4px 0"><span class="badge {{ cc }}" style="flex:0 0 auto">{{ c.type }}</span><span>{{ c.text }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+</details>
+{% endfor %}
+
+<p class="muted" style="margin-top:20px">Full commit history lives on <a href="{{ site.repo }}" target="_blank" rel="noopener">GitHub</a>.</p>

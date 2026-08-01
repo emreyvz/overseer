@@ -1,0 +1,33 @@
+---
+layout: layouts/base.njk
+---
+<main id="main" class="shell{% if toc %} with-toc{% endif %}">
+  {% include "partials/sidebar.njk" %}
+  <div class="main">
+    <article class="content">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="{{ '/' | url }}">Home</a>
+        {% for c in crumbs %}<span class="sep">/</span><a href="{{ c.url | url }}">{{ c.label }}</a>{% endfor %}
+        <span class="sep">/</span>{{ title }}
+      </nav>
+      <div class="page-head">
+        <p class="eyebrow">{{ eyebrow or 'Documentation' }}</p>
+        <h1>{{ title }}</h1>
+        {% if intro %}<p class="lede">{{ intro }}</p>{% endif %}
+      </div>
+      {{ content | safe }}
+      {% if pager %}
+      <div class="pager">
+        {% if pager.prev %}<a href="{{ pager.prev.url | url }}"><span class="dir">← Previous</span><br>{{ pager.prev.label }}</a>{% else %}<span></span>{% endif %}
+        {% if pager.next %}<a class="next" href="{{ pager.next.url | url }}"><span class="dir">Next →</span><br>{{ pager.next.label }}</a>{% endif %}
+      </div>
+      {% endif %}
+    </article>
+  </div>
+  {% if toc %}
+  <aside class="toc" aria-label="On this page">
+    <div class="toc-title">On this page</div>
+    {% for t in toc %}<a href="#{{ t.id }}">{{ t.text }}</a>{% endfor %}
+  </aside>
+  {% endif %}
+</main>

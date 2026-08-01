@@ -1,0 +1,82 @@
+---
+layout: layouts/page.njk
+title: API Reference
+eyebrow: Reference
+intro: "Overseer exposes a local REST API plus a WebSocket stream. This reference covers authentication, endpoints, error codes and worked request / response examples."
+toc:
+  - { id: authentication, text: Authentication }
+  - { id: endpoints, text: Endpoints }
+  - { id: errors, text: Errors }
+  - { id: examples, text: Examples }
+---
+<section id="authentication">
+  <h2>Authentication</h2>
+  <p>{{ api.auth }}</p>
+  <div class="callout"><div class="c-title">Base URL</div><p><code>{{ api.base }}</code></p></div>
+</section>
+
+<section id="endpoints">
+  <h2>Endpoints</h2>
+  {% for g in api.groups %}
+  <h3 id="{{ g.title | slug }}">{{ g.title }}</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="width:74px">Method</th><th style="width:44%">Path</th><th>Description</th></tr></thead>
+      <tbody>
+        {% for e in g.endpoints %}
+        {%- set mc = 'cyan' if e.method == 'GET' else ('amber' if e.method == 'POST' else ('green' if e.method == 'WS' else 'scarlet')) -%}
+        <tr>
+          <td><span class="badge {{ mc }}">{{ e.method }}</span></td>
+          <td><code>{{ e.path }}</code>{% if e.body %}<div class="muted" style="font-size:11px;margin-top:4px">body: <code>{{ e.body }}</code></div>{% endif %}</td>
+          <td class="muted">{{ e.desc }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+</section>
+
+<section id="errors">
+  <h2>Errors</h2>
+  <p class="muted">Endpoints return standard HTTP status codes; the body carries an <code>{ "error": "..." }</code> message on failure.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="width:80px">Code</th><th style="width:180px">Name</th><th>When</th></tr></thead>
+      <tbody>{% for e in api.errors %}<tr><td><code>{{ e.code }}</code></td><td>{{ e.name }}</td><td class="muted">{{ e.when }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+
+<section id="examples">
+  <h2>Examples</h2>
+  <h3>Request · update detection filters</h3>
+  <div class="codeblock">
+    <div class="code-head">shell</div>
+    <pre>curl -X POST {{ api.base }}/api/detection/filters \
+  -H "content-type: application/json" \
+  -d '{"vehicle": false, "motion": false}'</pre>
+  </div>
+  <h3>Response</h3>
+  <div class="codeblock">
+    <div class="code-head">json</div>
+    <pre>{
+  "person": true,
+  "vehicle": false,
+  "animal": true,
+  "weapon": true,
+  "motion": false,
+  "track": true
+}</pre>
+  </div>
+  <h3>WebSocket · drive the live stream</h3>
+  <div class="codeblock">
+    <div class="code-head">javascript</div>
+    <pre>const ws = new WebSocket("ws://127.0.0.1:8787/ws");
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);   // { t: "detections" | "metrics" | "alert" | ... , d: ... }
+  if (msg.t === "detections") render(msg.d);
+};
+ws.onopen = () => ws.send(JSON.stringify({ t: "command", d: "connect:North Gate" }));</pre>
+  </div>
+</section>

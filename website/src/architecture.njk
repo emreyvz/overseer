@@ -1,0 +1,49 @@
+---
+layout: layouts/page.njk
+title: Architecture
+eyebrow: System design
+intro: "How Overseer is put together: a layered system from the operator frontend down to the inference engine and local storage, and the data flow that turns a frame into an event."
+toc:
+  - { id: layers, text: System layers }
+  - { id: data-flow, text: Data flow }
+  - { id: threading, text: Threading model }
+---
+<section id="layers">
+  <h2>System layers</h2>
+  <p class="muted">Nine components, each with a single responsibility. Diagrams are placeholders you can replace with rendered figures.</p>
+  <div class="grid cols-2" style="margin-top:18px">
+    {% for c in architecture.components %}{% if c.id != 'data-flow' %}
+    <div class="card" id="{{ c.id }}">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px">
+        <h3 style="margin:0">{{ c.name }}</h3>
+        <div class="tags">{% for t in c.tags %}<span class="badge">{{ t }}</span>{% endfor %}</div>
+      </div>
+      <p style="margin:8px 0 0;font-size:13px">{{ c.role }}</p>
+      <p class="muted" style="margin:8px 0 0;font-size:12.5px">{{ c.details }}</p>
+    </div>
+    {% endif %}{% endfor %}
+  </div>
+</section>
+
+<section id="data-flow">
+  <h2>Data flow</h2>
+  <p class="muted">{{ (architecture.components | find('id','data-flow')).details }}</p>
+  <div class="codeblock">
+    <div class="code-head">Frame to event · text diagram</div>
+    <pre>{% for line in architecture.flow %}{{ line }}
+{% endfor %}</pre>
+  </div>
+  <div class="callout"><div class="c-title">Placeholder</div><p>Swap this ASCII diagram for a rendered architecture figure (SVG/PNG) when available. The layout reserves full width for it.</p></div>
+</section>
+
+<section id="threading">
+  <h2>Threading model</h2>
+  <p>Capture and analysis are decoupled so the camera never blocks on inference:</p>
+  <ul>
+    <li><strong>StreamReader</strong> (thread) reads frames from the source.</li>
+    <li><strong>FrameBuffer</strong> holds a bounded, drop-oldest queue so slow analysis cannot stall capture.</li>
+    <li><strong>AnalysisWorker</strong> (thread) runs the model pipeline and emits an <code>AnalysisResult</code>.</li>
+    <li>Result and bus callbacks fire on the worker thread, then hop to the asyncio loop for fan-out.</li>
+  </ul>
+  <p class="muted">This keeps the live feed smooth under load and lets heavy stages run at their own cadence.</p>
+</section>

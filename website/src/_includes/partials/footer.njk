@@ -1,0 +1,22 @@
+<footer class="site-footer">
+  <div class="cols">
+    <div class="footer-brand">
+      <a class="brand" href="{{ '/' | url }}" aria-label="Overseer home">
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z"/></svg>
+        OVERSEER
+      </a>
+      <p>{{ site.tagline }}. Self-hosted, private by design, GPU-accelerated, and able to run fully offline.</p>
+      <p class="mono-label" style="margin-top:14px">Latest release · v{{ site.release.version }} “{{ site.release.codename }}” · {{ site.release.date | readableDate }}</p>
+    </div>
+    {% for group in nav.groups %}
+    <nav aria-label="{{ group.title }}">
+      <h4>{{ group.title }}</h4>
+      {% for item in group.items %}<a href="{{ item.url | url }}">{{ item.label }}</a>{% endfor %}
+    </nav>
+    {% endfor %}
+  </div>
+  <div class="bottom">
+    <span>© <span>{% year %}</span> {{ site.name }} · MIT License · Documentation built with Eleventy</span>
+    <span><a href="{{ site.repo }}" target="_blank" rel="noopener">{{ site.repoShort }}</a> · <a href="{{ '/changelog/' | url }}">Changelog</a> · <a href="{{ '/roadmap/' | url }}">Roadmap</a></span>
+  </div>
+</footer>

@@ -1,0 +1,15 @@
+{
+  "name": "overseer-docs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Official landing page and technical documentation hub for Overseer.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "eleventy --serve",
+    "build": "eleventy",
+    "clean": "node -e \"require('fs').rmSync('_site',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "^3.0.0"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "layout": "layouts/page.njk",
+  "tags": "docs",
+  "eyebrow": "Documentation",
+  "crumbs": [{ "label": "Documentation", "url": "/docs/" }]
+}

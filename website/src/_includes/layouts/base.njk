@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="{{ site.lang }}" data-theme="dark">
+<head>
+  {% include "partials/head.njk" %}
+</head>
+<body class="{{ bodyClass }}">
+  <a class="skip" href="#main">Skip to content</a>
+  {% include "partials/header.njk" %}
+  <div class="scrim" data-close-nav aria-hidden="true"></div>
+  {{ content | safe }}
+  {% include "partials/footer.njk" %}
+  <script src="{{ '/assets/js/app.js' | url }}" defer></script>
+</body>
+</html>

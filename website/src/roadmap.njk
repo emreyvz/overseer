@@ -1,0 +1,23 @@
+---
+layout: layouts/page.njk
+title: Roadmap
+eyebrow: What's next
+intro: "Where Overseer is heading. Shipped milestones, work in progress, and planned directions. Dates are targets, not promises."
+---
+<p class="row" style="gap:16px;font-size:12px;color:var(--ink-dim)">
+  <span><span class="dot shipped"></span>Shipped</span>
+  <span><span class="dot progress"></span>In progress</span>
+  <span><span class="dot planned"></span>Planned</span>
+</p>
+
+<div class="timeline">
+  {% for m in roadmap.milestones %}
+  <div class="item {{ 'done' if m.state == 'done' else ('now' if m.state == 'now' else '') }}">
+    <div class="when">{{ m.when }}</div>
+    <h3>{{ m.title }}</h3>
+    <ul>{% for p in m.points %}<li>{{ p }}</li>{% endfor %}</ul>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="callout" style="margin-top:8px"><div class="c-title">Have a request?</div><p>Roadmap items are shaped by real use. Open an issue on <a href="{{ site.repo }}" target="_blank" rel="noopener">GitHub</a> to propose or upvote a direction.</p></div>

@@ -1,0 +1,108 @@
+---
+layout: layouts/landing.njk
+description: "Overseer is an AI computer vision and spatial intelligence platform: real-time detection, tracking, monocular depth, 3D reconstruction, cross-camera re-identification and event analytics, self-hosted and offline-capable."
+---
+<div class="landing">
+
+  <section class="hero">
+    <p class="eyebrow">AI Computer Vision · Spatial Intelligence</p>
+    <h1>Turn any camera into structured spatial intelligence.</h1>
+    <p class="lede">{{ site.description }}</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="{{ '/docs/quick-start/' | url }}">Get started</a>
+      <a class="btn btn-cyan" href="{{ '/pipeline/' | url }}">How it works</a>
+      <a class="btn" href="{{ site.repo }}" target="_blank" rel="noopener">View on GitHub →</a>
+    </div>
+    <p class="meta">Latest release <strong>v{{ site.release.version }}</strong> “{{ site.release.codename }}” · {{ site.release.date | readableDate }} · <a href="{{ '/changelog/' | url }}">changelog</a> · MIT licensed</p>
+  </section>
+
+  <div class="statbar" role="list">
+    {% for s in site.stats %}
+    <div class="stat" role="listitem"><div class="v">{{ s.value }}</div><div class="l">{{ s.label }}</div></div>
+    {% endfor %}
+  </div>
+
+  <section class="section">
+    <div class="head">
+      <p class="section-label">What it does</p>
+      <h2>Perception, geometry and identity in one pipeline</h2>
+      <p class="lede">From a single frame to a navigable 3D scene and long-term identity, running on your own hardware.</p>
+    </div>
+    <div class="grid cols-3">
+      {% set picks = [
+        { t: "Real-time detection & tracking", d: "YOLO11 + ByteTrack detect and follow people, vehicles, animals and hazards on every frame.", u: "/features/" },
+        { t: "Monocular depth & 3D", d: "Depth Anything V2 lifts a flat frame into a coloured, navigable point cloud and mesh.", u: "/models/depth-anything-v2/" },
+        { t: "Cross-camera identity", d: "Appearance + gait re-identify subjects across cameras and days into long-term dossiers.", u: "/models/reid-gait/" },
+        { t: "Spatial foresight", d: "Predict near-future positions and place contacts on a depth-locked tactical radar.", u: "/technology/#spatial-computing" },
+        { t: "Event analytics", d: "Zones, rules and correlated threat scoring raise the alerts that matter.", u: "/features/" },
+        { t: "Offline & private", d: "All inference on-device, models vendored locally, no cloud round-trips.", u: "/features/" }
+      ] %}
+      {% for p in picks %}
+      <a class="card link bracket" href="{{ p.u | url }}">
+        <h3>{{ p.t }}</h3>
+        <p class="muted" style="font-size:13px">{{ p.d }}</p>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="head">
+      <p class="section-label">Processing pipeline</p>
+      <h2>Thirteen stages, frame to 3D</h2>
+      <p class="lede">Every analysed frame flows through the same stages, <a href="{{ '/pipeline/' | url }}">documented end to end</a>.</p>
+    </div>
+    <div class="ribbon">
+      {% for s in pipeline.stages %}<span class="node">{{ s.name }}</span>{% if not loop.last %}<span class="arr">→</span>{% endif %}{% endfor %}
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="head">
+      <p class="section-label">Under the hood</p>
+      <h2>Main technologies</h2>
+      <p class="lede">A focused stack of proven models and geometry, see the <a href="{{ '/technology/' | url }}">full breakdown</a>.</p>
+    </div>
+    <div class="grid auto">
+      {% for m in models %}
+      <a class="card link" href="{{ '/models/' | url }}{{ m.slug }}/">
+        <div class="modelcard">
+          <div class="top"><span class="name">{{ m.name }}</span><span class="badge {{ 'green' if m.status == 'shipped' else 'amber' }}">{{ m.status }}</span></div>
+          <span class="role">{{ m.role }}</span>
+          <p>{{ m.purpose }}</p>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="head">
+      <p class="section-label">Get going</p>
+      <h2>Documentation & references</h2>
+    </div>
+    <div class="grid cols-4">
+      {% set links = [
+        { t: "Quick Start", d: "Install and run in minutes.", u: "/docs/quick-start/" },
+        { t: "Models", d: "Every AI model, specced.", u: "/models/" },
+        { t: "API Reference", d: "REST + WebSocket contract.", u: "/api/" },
+        { t: "Examples", d: "Common end-to-end workflows.", u: "/examples/" }
+      ] %}
+      {% for l in links %}
+      <a class="card link bracket" href="{{ l.u | url }}"><h3>{{ l.t }} →</h3><p class="muted" style="font-size:13px">{{ l.d }}</p></a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="section" style="border-bottom:0">
+    <div class="row" style="justify-content:space-between">
+      <div>
+        <p class="section-label">Open source</p>
+        <h2 style="margin-top:6px">Built in the open, MIT licensed</h2>
+        <p class="lede">Star the repo, read the code, file an issue, or extend the docs.</p>
+      </div>
+      <a class="btn btn-primary" href="{{ site.repo }}" target="_blank" rel="noopener">{{ site.repoShort }} →</a>
+    </div>
+  </section>
+
+</div>

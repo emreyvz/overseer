@@ -1,0 +1,30 @@
+---
+layout: layouts/page.njk
+title: Processing Pipeline
+eyebrow: How it works
+intro: "Every analysed frame flows through thirteen stages, from raw input to a navigable 3D scene and live output. Expand any stage for its inputs, outputs and internals."
+---
+<div class="ribbon" style="margin-bottom:22px">
+  {% for s in pipeline.stages %}<span class="node">{{ s.no }} {{ s.name }}</span>{% if not loop.last %}<span class="arr">→</span>{% endif %}{% endfor %}
+</div>
+
+{% for st in pipeline.stages %}
+<details class="accordion"{% if loop.index <= 2 %} open{% endif %} id="stage-{{ st.name | slug }}">
+  <summary>
+    <span><span class="stage-no">{{ st.no }}</span> <strong>{{ st.name }}</strong> <span class="muted" style="font-weight:400">· {{ st.purpose }}</span></span>
+  </summary>
+  <div class="body">
+    <p>{{ st.details }}</p>
+    <div class="grid cols-3" style="margin-top:12px">
+      <div><div class="mono-label">Inputs</div><ul style="margin-top:6px">{% for i in st.inputs %}<li>{{ i }}</li>{% endfor %}</ul></div>
+      <div><div class="mono-label">Outputs</div><ul style="margin-top:6px">{% for o in st.outputs %}<li>{{ o }}</li>{% endfor %}</ul></div>
+      <div><div class="mono-label">Tech</div><div class="tags" style="margin-top:8px">{% for t in st.tech %}<span class="badge cyan">{{ t }}</span>{% endfor %}</div></div>
+    </div>
+  </div>
+</details>
+{% endfor %}
+
+<div class="callout" style="margin-top:24px">
+  <div class="c-title">Note</div>
+  <p>Heavy stages (depth, segmentation, pose, reconstruction) are interval-scheduled and cached rather than run on every frame, so the live path stays real-time. See <a href="{{ '/technology/#performance' | url }}">performance optimizations</a>.</p>
+</div>
