@@ -8,7 +8,7 @@
   import { onMount, onDestroy, tick } from 'svelte'
   import { get } from 'svelte/store'
   import { operatorOpen, flashBanner } from '../lib/stores'
-  import { operate, operatorLog, operatorBusy, type LogEntry } from '../lib/operator'
+  import { operate, planNavigates, operatorLog, operatorBusy, type LogEntry } from '../lib/operator'
   import { aiStatus, refreshAiStatus, AI_FEATURES } from '../lib/ai'
   import { api } from '../lib/api'
   import {
@@ -92,12 +92,12 @@
     input = ''; interim = ''; panel = 'none'
     status = 'thinking'
     const plan = await operate(cmd)
-    if (plan?.steps?.length) {
+    if (plan && planNavigates(plan)) {
       status = 'acting'
       // step aside into the companion dock so the operator can watch the screen it drove
       setTimeout(() => { view = 'companion'; flash('ok', 1400) }, 350)
     } else {
-      flash(plan?.ask ? 'ok' : plan?.disabled ? 'error' : 'ok')
+      flash(plan?.disabled ? 'error' : 'ok')   // answers/questions keep the full panel
     }
     if (plan?.say) speakIf(plan.say)
     else if (plan?.ask) speakIf(plan.ask)
