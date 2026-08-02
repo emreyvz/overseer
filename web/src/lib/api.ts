@@ -116,6 +116,7 @@ export const api = {
   aiSummarize: (events: { type: string; cam: string; label?: string }[]) => post<{ summary: string | null; disabled?: boolean }>(`/api/ai/summarize`, { events }),
   aiExplain: (alert: { type: string; summary: string; cam: string }) => post<{ explanation: string | null; disabled?: boolean }>(`/api/ai/explain`, { alert }),
   aiDescribe: (id: string) => post<{ description: string | null; disabled?: boolean }>(`/api/ai/describe/${id}`, {}),
+  enhance: (id: string, box: [number, number, number, number]) => post<{ image: string | null }>(`/api/enhance/${id}`, { box }),
   aiRule: (text: string, apply = false, rule?: AiRule) => post<{ rule: AiRule | null; created?: number | null; disabled?: boolean }>(`/api/ai/rule`, { text, apply, rule }),
   aiCorrelate: (alerts: { ts: string; severity: string; type: string; cam: string; summary: string }[]) =>
     post<{ result: { incident?: boolean; title?: string; assessment?: string; action?: string; cams?: string[] } | null; disabled?: boolean }>(`/api/ai/correlate`, { alerts }),

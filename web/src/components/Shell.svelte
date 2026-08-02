@@ -5,6 +5,7 @@
   import OOIOverlay from './pov/OOIOverlay.svelte'
   import NarrateOverlay from './pov/NarrateOverlay.svelte'
   import FollowController from './pov/FollowController.svelte'
+  import EnhanceTool from './pov/EnhanceTool.svelte'
   import Dossier from './pov/Dossier.svelte'
   import CornerBrackets from './hud/CornerBrackets.svelte'
   import TrackletIds from './hud/TrackletIds.svelte'
@@ -38,6 +39,7 @@
   <OOIOverlay />
   <NarrateOverlay />
   <FollowController />
+  <EnhanceTool />
   <CornerBrackets />
   <TrackletIds />
   <MicroHud />

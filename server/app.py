@@ -313,6 +313,23 @@ async def api_stt(request: Request) -> Any:
     return {"text": text, "disabled": text is None and not stt.available()}
 
 
+@app.post("/api/enhance/{source_id}")
+async def api_enhance(source_id: str, payload: dict[str, Any]) -> Any:
+    """Live 'enhance': clarify a boxed region of a camera's current frame into a photographic
+    close-up. box is [x, y, w, h] normalized. Returns {image: data-url | null}."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    box = payload.get("box")
+    if not isinstance(box, list) or len(box) != 4:
+        return {"image": None}
+    frame = backend._source_frame_by_id(source_id)
+    if frame is None:
+        return {"image": None}
+    from server import enhance
+    img = await asyncio.to_thread(enhance.enhance_region, frame, box, backend._sr)
+    return {"image": img}
+
+
 @app.get("/api/tts")
 async def api_tts(text: str = "", lang: str = "") -> Any:
     """Offline text-to-speech for the Operator's spoken replies: returns WAV audio the browser plays.
