@@ -5,7 +5,7 @@
   import { api } from '../lib/api'
   import { sfx } from '../lib/audio'
 
-  let data = $state<{ recordings: number; sizeGB: number; oldest: number; recent: { kind: string; start: number; end: number; sizeMB: number; mode: string }[] }>({ recordings: 0, sizeGB: 0, oldest: 0, recent: [] })
+  let data = $state<{ recordings: number; sizeGB: number; oldest: number; snapshots?: number; snapshotsMB?: number; clips?: number; clipsMB?: number; recent: { kind: string; start: number; end: number; sizeMB: number; mode: string }[] }>({ recordings: 0, sizeGB: 0, oldest: 0, recent: [] })
   let recs = $state<{ id: number; kind: string; mode: string; start: number; end: number; sizeMB: number; url: string | null }[]>([])
   let play = $state<string | null>(null)
   let offline = $state(false)
@@ -33,8 +33,8 @@
   <div class="stats">
     <div class="stat"><span class="v">{data.sizeGB.toFixed(2)}</span><span class="l">GB USED</span></div>
     <div class="stat"><span class="v">{data.recordings}</span><span class="l">RECORDINGS</span></div>
-    <div class="stat"><span class="v">{Math.round($system.storageGB)}</span><span class="l">GB (LIVE)</span></div>
-    <div class="stat"><span class="v">{$system.recActive ? 'ON' : 'OFF'}</span><span class="l">RECORDING</span></div>
+    <div class="stat"><span class="v">{data.clips ?? 0}</span><span class="l">ALERT CLIPS</span></div>
+    <div class="stat"><span class="v">{data.snapshots ?? 0}</span><span class="l">SNAPSHOTS</span></div>
   </div>
   <div class="ph">RECORDINGS · REPLAY · OLDEST {d(data.oldest)}</div>
   <div class="list">
