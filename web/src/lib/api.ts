@@ -117,6 +117,7 @@ export const api = {
   aiExplain: (alert: { type: string; summary: string; cam: string }) => post<{ explanation: string | null; disabled?: boolean }>(`/api/ai/explain`, { alert }),
   aiDescribe: (id: string) => post<{ description: string | null; disabled?: boolean }>(`/api/ai/describe/${id}`, {}),
   enhance: (id: string, box: [number, number, number, number]) => post<{ image: string | null }>(`/api/enhance/${id}`, { box }),
+  aiVqa: (id: string, question: string) => post<{ answer: string | null; disabled?: boolean }>(`/api/ai/vqa/${id}`, { question }),
   aiRule: (text: string, apply = false, rule?: AiRule) => post<{ rule: AiRule | null; created?: number | null; disabled?: boolean }>(`/api/ai/rule`, { text, apply, rule }),
   aiCorrelate: (alerts: { ts: string; severity: string; type: string; cam: string; summary: string }[]) =>
     post<{ result: { incident?: boolean; title?: string; assessment?: string; action?: string; cams?: string[] } | null; disabled?: boolean }>(`/api/ai/correlate`, { alerts }),
