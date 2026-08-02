@@ -535,6 +535,21 @@ export const ACTIONS: Record<string, Action> = {
     const list = await api.cases().catch(() => [])
     return list.length ? `${list.length} case${list.length === 1 ? '' : 's'}: ${list.slice(0, 6).map((c) => c.name).join(', ')}` : 'no cases yet'
   },
+  summarize_case: async ({ id }) => {
+    const cid = id != null && !isNaN(Number(id)) ? Number(id) : get(investigateCase)
+    if (cid == null) return 'open a case first, or tell me which one'
+    const d = await api.caseDetail(Number(cid)).catch(() => null)
+    if (!d) return 'could not load that case'
+    if (d.aiSummary) return d.aiSummary
+    const ev = (d.events ?? []).slice(0, 30).map((e) => ({ type: (e as { type?: string }).type ?? '?', cam: (e as { cam?: string }).cam ?? '', label: (e as { label?: string }).label }))
+    const r = ev.length ? await api.aiSummarize(ev).catch(() => null) : null
+    return r?.summary || `${d.name}: ${d.events?.length ?? 0} events, ${d.subjects?.length ?? 0} subjects`
+  },
+  alerts_with_clips: () => {
+    const withClip = get(alerts).filter((a) => a.clip)
+    stage.set('live'); alertsScreen.set(true)
+    return withClip.length ? `${withClip.length} alert${withClip.length === 1 ? '' : 's'} have a replay clip` : 'no alerts have a clip yet'
+  },
   track_object: () => { stage.set('live'); mode.set('pov'); objectRegister.set(true); return 'draw a box around the object to track' },
   find_pet: () => { stage.set('live'); mode.set('pov'); petRegistry.set(true); return 'pet finder opened' },
   open_spatial: ({ camera }) => {
@@ -786,7 +801,7 @@ const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'coun
   'list_cameras', 'offline_cameras', 'busiest_camera', 'latest_alert', 'explain_alert', 'advise_alert',
   'search_events', 'count_subjects', 'list_watched', 'stats', 'help', 'relationships', 'alerts_here',
   'list_cases', 'list_plates', 'list_zones', 'quietest_camera', 'night_cameras', 'flagged_cameras',
-  'where_seen', 'repeat_last', 'say'])
+  'where_seen', 'repeat_last', 'summarize_case', 'alerts_with_clips', 'say'])
 
 export async function runPlan(plan: Plan): Promise<void> {
   if (plan.ask) { olog(plan.ask, 'ask'); return }

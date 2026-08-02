@@ -119,6 +119,8 @@ _OPERATOR_ACTIONS = (
     "reconnect {} — reconnect the active camera feed.\n"
     "open_case {id?, name?} — open an investigation case (by id or name), or the case workspace.\n"
     "list_cases {} — answer the open investigation cases.\n"
+    "summarize_case {id?} — summarize a case (the open one if no id given).\n"
+    "alerts_with_clips {} — open the alerts board and answer how many alerts have a replay clip.\n"
     "track_object {} — open the draw-a-box tool to track an arbitrary object.\n"
     "find_pet {} — open the pet finder.\n"
     "open_spatial {camera?} — open the 3D spatial scene for a camera.\n"
