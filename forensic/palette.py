@@ -39,12 +39,15 @@ def dominant_color_name_conf(crop_bgr: np.ndarray) -> tuple[str, float]:
     h = hsv[..., 0].reshape(-1)
     s = hsv[..., 1].reshape(-1)
     v = hsv[..., 2].reshape(-1)
-    achromatic = s < 40
+    # A wider achromatic band (s<55) + a lower majority threshold, plus an overall-desaturation
+    # guard, so greys (which often carry a faint tint or a little coloured background bleed) are
+    # named grey/black/white instead of falling through to a saturated hue like "blue".
+    achromatic = s < 55
     ach_frac = float(achromatic.mean())
-    if ach_frac > 0.6:
+    if ach_frac > 0.5 or float(s.mean()) < 45:
         mv = float(v[achromatic].mean()) if achromatic.any() else float(v.mean())
-        name = "black" if mv < 60 else ("gray" if mv < 170 else "white")
-        return (name, ach_frac)
+        name = "black" if mv < 60 else ("gray" if mv < 175 else "white")
+        return (name, max(ach_frac, 0.5))
     chroma = ~achromatic
     n_chroma = int(chroma.sum())
     if n_chroma == 0:

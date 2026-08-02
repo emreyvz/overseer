@@ -183,11 +183,14 @@ class Backend:
         # Vehicle make/brand classifier for roster profiles (CPU, off the GPU hot path).
         # Quiet unless its weights are present under models/ (uv run -m match.tools.export_models
         # --only carbrand). Confidence-gated so it never asserts a confident-but-wrong brand.
+        # Thresholds raised: the make classifier can be confidently WRONG on smaller/blurrier crops
+        # (e.g. Renault read as Daewoo), so only surface a brand when the crop is large and the guess
+        # is strong and clearly ahead of the runner-up. Better to show no make than a wrong one.
         self.make = MakeClassifier(
             Path("models") / str(self.config.get("vehicle.make.model", "vehicle_make.torchscript")),
-            min_conf=float(self.config.get("vehicle.make.min_conf", 0.35)),
-            min_margin=float(self.config.get("vehicle.make.min_margin", 0.10)),
-            min_area=int(self.config.get("vehicle.make.min_area", 4096)))
+            min_conf=float(self.config.get("vehicle.make.min_conf", 0.55)),
+            min_margin=float(self.config.get("vehicle.make.min_margin", 0.20)),
+            min_area=int(self.config.get("vehicle.make.min_area", 9000)))
         # Background brand reader for the live tracking card (classification is CPU-bound, so
         # it runs off-thread and the card reads the cached brand — never stalls the analysis).
         from .live_make import LiveMakeReader
@@ -1278,9 +1281,10 @@ class Backend:
         if x2 <= x1 or y2 <= y1:
             return None
         bh, bw = y2 - y1, x2 - x1
-        ratio = bh / max(1, frame_h)
-        height = "short" if ratio < 0.33 else ("medium" if ratio < 0.66 else "tall")
-        attrs: dict[str, Any] = {"height": height}
+        attrs: dict[str, Any] = {}
+        if cls == "person":  # height only makes sense for people (vehicles use body-type instead)
+            ratio = bh / max(1, frame_h)
+            attrs["height"] = "short" if ratio < 0.33 else ("medium" if ratio < 0.66 else "tall")
         if bh >= 24 and bw >= 12:  # skip tiny/far crops where colour is unreliable
             crop = img[y1:y2, x1:x2]
             if cls == "person":  # upper body carries the discriminative clothing colour
