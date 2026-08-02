@@ -64,7 +64,7 @@ class IntentEstimator:
             tr.points.popleft()
         if len(tr.points) < self._min_points:
             return None
-        x0, y0, t0 = tr.points[0]
+        x0, y0, t0, _ = tr.points[0]
         span = now - t0
         if span < self._min_span:
             return None
@@ -105,7 +105,7 @@ class IntentEstimator:
                 scores.append(("sitting", max(s, 0.4), f"seated, still for {int(span)}s"))
             else:
                 label = "loitering" if span >= self._loiter else "waiting"
-                scores.append((label, s, f"standing still for {int(span)}s"))
+                scores.append((label, s, f"mostly stationary for {int(span)}s"))
         if spread >= loiter_r * 0.8:                         # genuinely moving around
             if horizontal and speed_px < 0.16 * frame_diag:  # horizontal + slow drift => swimming
                 scores.append(("swimming", round(min(0.85, 0.4 + path_ratio * 0.5), 2),

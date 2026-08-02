@@ -52,13 +52,8 @@ class ClassicalAttributes:
         bh = max(1, y2 - y1)
         bw = max(1, x2 - x1)
         h_frame = max(1, frame_hw[0])
-        # Perspective-normalized stature: divide the box-height fraction by the foot position so a
-        # close (large) and a far (small) person of the same height read alike, instead of the raw
-        # fraction that labelled nearly everyone "short".
-        fy = min(1.0, y2 / h_frame)
-        stature = (bh / h_frame) / max(0.30, fy)
-        cm = int(round(max(150.0, min(200.0, 120.0 + stature * 130.0))))
-        height_band = "short" if cm < 168 else ("tall" if cm > 182 else "medium")
+        ratio = bh / h_frame
+        height_band = "short" if ratio < 0.33 else ("medium" if ratio < 0.66 else "tall")
         aspect = bw / bh
         build = "slim" if aspect < 0.35 else ("broad" if aspect > 0.5 else "medium")
         return AttributeSet(

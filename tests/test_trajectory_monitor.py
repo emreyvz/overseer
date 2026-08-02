@@ -23,10 +23,11 @@ def _person(track_id: int, cx: int, cy: int) -> Detection:
 def test_running(tmp_path: Path) -> None:
     mon = TrajectoryMonitor(_config(tmp_path))
     mon.process([_person(7, 0, 100)], now=0.0)
-    ev = mon.process([_person(7, 200, 100)], now=1.0)  # 200 px / 1 s = 200 >= 100
+    mon.process([_person(7, 150, 100)], now=1.0)       # build the window: median needs >= 3 frames
+    ev = mon.process([_person(7, 300, 100)], now=2.0)  # sustained ~150 px/s >= 100 => RUNNING
     assert [e.event_type.name for e in ev] == ["RUNNING"]
     # once, until speed drops
-    assert mon.process([_person(7, 400, 100)], now=2.0) == []
+    assert mon.process([_person(7, 450, 100)], now=3.0) == []
 
 
 def test_not_running_slow(tmp_path: Path) -> None:
@@ -83,8 +84,9 @@ def test_reset_and_expire(tmp_path: Path) -> None:
     mon = TrajectoryMonitor(_config(tmp_path))
     mon.process([_person(7, 0, 100)], now=0.0)
     mon.reset()
-    # after reset, a fresh fast move re-detects running (no stale suppression)
+    # after reset, a fresh sustained fast move re-detects running (no stale suppression)
     mon.process([_person(7, 0, 100)], now=10.0)
-    ev = mon.process([_person(7, 300, 100)], now=11.0)
+    mon.process([_person(7, 150, 100)], now=11.0)
+    ev = mon.process([_person(7, 300, 100)], now=12.0)
     assert [e.event_type.name for e in ev] == ["RUNNING"]
     assert isinstance(ev[0], TrajectoryEvent)
