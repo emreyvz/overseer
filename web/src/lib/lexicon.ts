@@ -64,6 +64,7 @@ export const MODULES = [
   { key: 'heatmap', label: 'HEATMAP', group: 'VISUAL' },
   { key: 'tactical', label: 'TACTICAL', group: 'VISUAL' },
   { key: 'ghosts', label: 'FORESIGHT', group: 'VISUAL' },
+  { key: 'social', label: 'SOCIAL X-RAY', group: 'VISUAL' },
 ] as const
 
 export const clock = (d = new Date()): string =>

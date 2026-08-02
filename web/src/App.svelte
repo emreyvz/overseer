@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
-    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, enhanceResult, hydrateAlerts, hydrateModules, type Mode,
+    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, enhanceResult, hydrateAlerts, hydrateModules, toggleModule, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
@@ -154,6 +154,7 @@
     if (k === 'n' && $mode === 'pov') { narrateOn.update((v) => !v); sfx('click'); return }
     if (k === 'e' && $mode === 'pov') { enhanceMode.update((v) => !v); sfx('click'); return }
     if (k === 'f' && $mode === 'pov') { if ($selectedDetection) { followOn.update((v) => !v); sfx('click') } else { flashBanner('SELECT A TARGET TO FOLLOW', true, 1400) } return }
+    if (k === 's' && $mode === 'pov') { toggleModule('social'); sfx('click'); return }   // S -> Social X-ray
     if (/^[1-9]$/.test(k)) { switchCam(Number(k)); return }
     if (k in MODE_KEYS) { toMode(MODE_KEYS[k]); return }
   }

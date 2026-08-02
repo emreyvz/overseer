@@ -28,6 +28,7 @@ export interface Detection {
   speed?: number        // vehicles: rough km/h estimate (uncalibrated → comparable, not exact)
   make?: string         // vehicles: estimated brand from the ViT classifier (confidence-gated)
   intent?: { intent: string; confidence: number; why: string; alt?: string }  // people: estimated behaviour (probabilistic)
+  facing?: number       // people: estimated facing/attention heading in image space (deg; 0 = right, 90 = toward the camera). From pose; feeds Social X-ray
   coasting?: boolean    // last-known box held briefly through a momentary detection drop (predicted, not fresh)
   occluded?: boolean    // occlusion x-ray: held+extrapolated while the subject is behind cover
 }

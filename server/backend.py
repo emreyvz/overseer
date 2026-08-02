@@ -222,6 +222,7 @@ class Backend:
         self.ooi = OOIManager()   # object-of-interest visual tracker
         self.pose_kp = PoseKP()   # keypoint pose behaviours (hand-raise) + gait skeletons (feature 5)
         self._pose_ctr = 0
+        self._facing: dict[str, tuple[float, float]] = {}   # det_id -> (heading_deg, ts), from the pose pass
         self.gait_tracker = None
         if bool(self.config.get("gait.enabled", True)) and self.subject_store is not None:
             try:
@@ -1365,6 +1366,7 @@ class Backend:
         weapon_box = None
         prof_dets: list = []   # (cls, conf) for the camera DNA / reputation profile
         prof_points: list = []  # normalized foot-points -> density grid for auto zone suggestions
+        pose_targets: list = []  # (det_id, px bbox) for people, so the pose pass can attach facing
         for group in r.detections.values():
             for d in group:
                 x1, y1, x2, y2 = d.bbox
@@ -1400,6 +1402,11 @@ class Backend:
                                             frame_diag=float((w * w + h * h) ** 0.5))
                     if it:
                         det["intent"] = it
+                if cls == "person":
+                    pose_targets.append((det["id"], (x1, y1, x2, y2)))
+                    fc = self._facing.get(det["id"])   # facing is computed off the low-rate pose pass
+                    if fc is not None and now - fc[1] < 2.0:   # so it is cached and read on later frames
+                        det["facing"] = fc[0]
                 # vehicles: surface the fine COCO subtype (car / truck / bus / motorcycle),
                 # a rough km/h estimate, and — once ANPR agrees across frames — the voted plate
                 if cls == "vehicle":
@@ -1481,6 +1488,31 @@ class Backend:
         run_gait = self.gait_tracker is not None and self._pose_ctr % 5 == 0
         if self._pose_ctr % 10 == 0 or run_gait:
             poses = self.pose_kp.detect_pose(img)
+            # facing / attention heading per person -> cached by det id, read on later frames (the
+            # detections for THIS frame are already emitted). Match each skeleton to the person box
+            # it overlaps most. Feeds the Social X-ray overlay.
+            if poses and pose_targets:
+                for pose in poses:
+                    deg = self.pose_kp.facing(pose)
+                    if deg is None:
+                        continue
+                    px1, py1, px2, py2 = pose["bbox"]
+                    best_id, best_iou = None, 0.0
+                    for did, (bx1, by1, bx2, by2) in pose_targets:
+                        ix1, iy1 = max(px1, bx1), max(py1, by1)
+                        ix2, iy2 = min(px2, bx2), min(py2, by2)
+                        iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+                        inter = iw * ih
+                        if inter <= 0:
+                            continue
+                        union = (px2 - px1) * (py2 - py1) + (bx2 - bx1) * (by2 - by1) - inter
+                        iou = inter / union if union > 0 else 0.0
+                        if iou > best_iou:
+                            best_iou, best_id = iou, did
+                    if best_id is not None and best_iou >= 0.3:
+                        self._facing[best_id] = (deg, now)
+                for did in [k for k, (_, ts) in self._facing.items() if now - ts > 5.0]:
+                    self._facing.pop(did, None)
             if self._pose_ctr % 10 == 0:
                 for pose in poses:
                     beh = self.pose_kp.hand_raise(pose, w, h)

@@ -4,13 +4,14 @@ bbox-heuristic pose monitor in the main pipeline."""
 from __future__ import annotations
 
 import logging
+import math
 
 import numpy as np
 
 log = logging.getLogger("overseer.pose")
 
 # COCO-17 keypoint indices
-_NOSE, _L_SH, _R_SH, _L_WR, _R_WR = 0, 5, 6, 9, 10
+_NOSE, _L_EYE, _R_EYE, _L_SH, _R_SH, _L_WR, _R_WR = 0, 1, 2, 5, 6, 9, 10
 _KP_CONF = 0.55  # keypoint confidence floor — reject phantom skeletons
 
 
@@ -70,6 +71,37 @@ class PoseKP:
         x1, y1, x2, y2 = pose["bbox"]
         return {"behavior": "HAND RAISE",
                 "bbox": [x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h]}
+
+    @staticmethod
+    def facing(pose: dict) -> float | None:
+        """Estimate which way a person is oriented, as a heading in IMAGE space (degrees, 0 = +x to
+        the right, growing clockwise because image y points down). Derived from the shoulder line
+        (facing is perpendicular to it), the nose lean along that perpendicular (left/right head turn)
+        and whether the eyes are visible (facing toward the camera vs away). Coarse and best-effort:
+        returns None when the shoulders are not confidently seen. Feeds the Social X-ray overlay, and
+        works for a standing (non-moving) person where motion heading gives nothing."""
+        k, c = pose["kpts"], pose["conf"]
+
+        def ok(idx: int, thr: float = _KP_CONF) -> bool:
+            return c[idx] >= thr and (k[idx][0] > 0 or k[idx][1] > 0)
+
+        if not (ok(_L_SH) and ok(_R_SH)):
+            return None
+        lx, rx = float(k[_L_SH][0]), float(k[_R_SH][0])
+        mx = (lx + rx) / 2.0                             # shoulder midpoint x
+        sh_w = abs(lx - rx)                              # shoulder width in image x
+        frontal = ok(_L_EYE, 0.4) or ok(_R_EYE, 0.4)    # eyes visible => facing toward the camera
+        # Horizontal turn: where the nose sits within the shoulder span. Centre -> straight toward/away;
+        # off to one side -> turned that way (a profile view has narrow shoulders, so the offset saturates).
+        hx = 0.0
+        if ok(_NOSE) and sh_w > 1e-3:
+            hx = max(-1.0, min(1.0, (float(k[_NOSE][0]) - mx) / (0.5 * sh_w)))
+        # Depth component: toward the viewer (down the image, +y) when the face is visible, away (up) if not.
+        # Its magnitude shrinks as the horizontal turn grows, so a strong side turn reads as sideways.
+        vy = (1.0 if frontal else -1.0) * math.sqrt(max(0.0, 1.0 - hx * hx))
+        if abs(hx) < 1e-3 and abs(vy) < 1e-3:
+            return None
+        return round(math.degrees(math.atan2(vy, hx)), 1)   # image-space heading (0 = right, +90 = down/toward)
 
     def detect(self, frame: np.ndarray) -> list[dict]:
         """Return [{behavior, bbox(normalized)}] for hand-raise poses."""
