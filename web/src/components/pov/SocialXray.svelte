@@ -13,7 +13,7 @@
   const D2R = Math.PI / 180
   const CONE_HALF = 26 * D2R          // half-angle of the attention cone
   const CONE_LEN = 2.6                // cone length in body-heights
-  const TOWARD = Math.cos(48 * D2R)   // alignment above which one is "facing" the other
+  const TOWARD = Math.cos(42 * D2R)   // alignment above which one is "facing" the other (tight, to be sure)
 
   const head = (t: FTrack) => ({ x: t.cx * W, y: (t.cy - t.h / 2) * H })   // eyes ~ box top-centre
 
@@ -58,14 +58,19 @@
         const avgH = (a.h + b.h) / 2 || 0.1
         const prox = gap / avgH                          // separation in body-heights
         const ha = head(a), hb = head(b)
-        const aFb = facesToward(a, hb.x, hb.y)
-        const bFa = facesToward(b, ha.x, ha.y)
-        const closing = ((a.vx - b.vx) * (a.gx - b.gx) + (a.vy - b.vy) * (a.gy - b.gy)) < -0.002
+        // Only claim an interaction with real evidence: facing (engaged/watching) or clear dynamics
+        // (approaching). Mere proximity is NOT enough - people standing side by side in a queue face
+        // the same way, not each other, so they get no link. Facing must be a pose read (both moving
+        // subjects share a heading, which would false-positive), so require a still-ish subject.
+        const aFacing = typeof a.facing === 'number' && a.speed < 0.06
+        const bFacing = typeof b.facing === 'number' && b.speed < 0.06
+        const aFb = aFacing ? facesToward(a, hb.x, hb.y) : -1
+        const bFa = bFacing ? facesToward(b, ha.x, ha.y) : -1
+        const closing = ((a.vx - b.vx) * (a.gx - b.gx) + (a.vy - b.vy) * (a.gy - b.gy)) < -0.003
         let label = '', kind = ''
-        if (prox < 2.3 && aFb > TOWARD && bFa > TOWARD) { label = 'ENGAGED'; kind = 'engaged' }
-        else if (prox < 2.3 && (aFb > TOWARD || bFa > TOWARD)) { label = 'WATCHING'; kind = 'watch' }
-        else if (prox < 1.8 && a.speed < 0.05 && b.speed < 0.05) { label = 'TOGETHER'; kind = 'group' }
-        else if (prox < 3.4 && closing && (a.speed > 0.04 || b.speed > 0.04)) { label = 'APPROACHING'; kind = 'approach' }
+        if (prox < 2.1 && aFb > TOWARD && bFa > TOWARD) { label = 'ENGAGED'; kind = 'engaged' }
+        else if (prox < 2.1 && (aFb > TOWARD || bFa > TOWARD)) { label = 'WATCHING'; kind = 'watch' }
+        else if (prox < 3.2 && closing && (a.speed > 0.05 || b.speed > 0.05)) { label = 'APPROACHING'; kind = 'approach' }
         else continue
         out.push({ ax: ha.x, ay: ha.y, bx: hb.x, by: hb.y, mx: (ha.x + hb.x) / 2, my: (ha.y + hb.y) / 2, label, kind, prox })
       }

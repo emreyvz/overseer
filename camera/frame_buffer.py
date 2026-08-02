@@ -22,6 +22,9 @@ class FrameBuffer:
         self._lock = threading.Lock()
         self._not_empty = threading.Condition(self._lock)
         self.dropped = 0
+        # Optional display tap: called (off the lock) with EVERY captured frame, at full camera rate,
+        # so the live stream can be served at capture rate instead of the slower analysis rate.
+        self.on_put = None
 
     def put(self, frame: Frame) -> bool:
         with self._lock:
@@ -32,7 +35,13 @@ class FrameBuffer:
                 accepted = False
             self._queue.append(frame)
             self._not_empty.notify()
-            return accepted
+        cb = self.on_put
+        if cb is not None:
+            try:
+                cb(frame)
+            except Exception:  # noqa: BLE001 - a display-tap error must never break capture
+                pass
+        return accepted
 
     def get(self, timeout: float | None = None) -> Frame | None:
         with self._not_empty:

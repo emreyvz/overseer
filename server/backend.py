@@ -270,6 +270,8 @@ class Backend:
 
         self._latest_jpeg: bytes | None = None
         self._latest_img: Any = None
+        self._latest_raw_jpeg: bytes | None = None   # full-rate display frame (decoupled from analysis)
+        self._last_raw_enc = 0.0
         self._bg_plate: Any = None       # running background estimate (EMA) of the active camera
         self._bg_plate_sid: Any = None   # which camera the plate belongs to
         self._bg_plate_n = 0             # frames accumulated (plate is only trusted once warmed up)
@@ -394,6 +396,8 @@ class Backend:
             self.alert_engine.reset(); self.alert_engine.set_rules(self.db.list_alert_rules())
 
             self._buffer = FrameBuffer(maxsize=int(self.config.get("camera.buffer_size", 5)))
+            self._latest_raw_jpeg = None
+            self._buffer.on_put = self._tap_frame   # full-rate display, independent of the analysis loop
             self._health = HealthMonitor(freeze_timeout=float(self.config.get("camera.freeze_timeout", 10.0)))
             self._plugins = PluginManager()
             self._motion_det = MotionDetector(self.config)
@@ -484,6 +488,7 @@ class Backend:
             self._source_id = None
             self._latest_jpeg = None
             self._latest_img = None
+            self._latest_raw_jpeg = None
             self.set_conn("offline")
 
     # ---- detection class filters (operator MODULES rail) ---------------------------
@@ -1335,6 +1340,23 @@ class Backend:
                 pass
         return attrs
 
+    def _tap_frame(self, frame: Any) -> None:
+        """Display tap: runs on the CAPTURE thread for every captured frame. Encodes the raw frame to
+        JPEG at up to ~22 fps so the live stream plays at camera rate, instead of stuttering at the
+        (much slower) analysis rate. Detection boxes are streamed separately over the WebSocket and
+        interpolated client-side, so they still line up on the faster video. Throttled + guarded so it
+        never slows capture; analysis quality is untouched."""
+        now = time.time()
+        if now - self._last_raw_enc < 0.045:
+            return
+        self._last_raw_enc = now
+        try:
+            ok, buf = cv2.imencode(".jpg", frame.image, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
+            if ok:
+                self._latest_raw_jpeg = buf.tobytes()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _on_result(self, r: AnalysisResult) -> None:
         img = r.frame.image
         self._latest_img = img
@@ -1988,16 +2010,18 @@ class Backend:
         return self._latest_jpeg
 
     def stream_frame(self, source_id: str) -> bytes | None:
-        """POV frame for a specific camera. The active (analysed) camera returns its
-        enhanced analysed JPEG; any other camera returns the persistent warm relay
-        frame — one connection per camera, referenced everywhere, so switching in
-        and out of feeds never drops to a blank while a reader re-establishes."""
+        """POV frame for a specific camera. The active camera returns its full-rate DISPLAY frame
+        (the capture-thread tap) so the video is smooth, falling back to the analysed JPEG until the
+        first raw frame lands; any other camera returns the persistent warm relay frame — one
+        connection per camera, referenced everywhere, so switching feeds never drops to a blank."""
         try:
             same = str(self._source_id) == str(source_id)
         except Exception:  # noqa: BLE001
             same = False
-        if same and self._latest_jpeg is not None:
-            return self._latest_jpeg
+        if same:
+            j = self._latest_raw_jpeg or self._latest_jpeg
+            if j is not None:
+                return j
         src = next((s for s in self.db.list_sources() if str(s.id) == str(source_id)), None)
         if src is not None:
             j = self.thumb_jpeg(src.id)  # spins up / keeps the relay warm (YouTube -> local file)

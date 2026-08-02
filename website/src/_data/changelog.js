@@ -1,7 +1,13 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.0", codename: "Fourth Dimension", date: "2026-08-02", tag: "latest",
+    { version: "0.12.1", codename: "Fourth Dimension", date: "2026-08-02", tag: "latest",
+      changes: [
+        { type: "improved", text: "Much smoother live video: the displayed feed now runs at camera rate, decoupled from the (slower) analysis pipeline, with detection boxes interpolated on top. No loss of analysis quality." },
+        { type: "fixed", text: "Chronoscape now works: it freezes a fixed clip of the recorded history on entry (no more markers drifting over the frozen scene), scopes trails to the camera, drops standing-still jitter, and says so when there is no movement to replay yet." },
+        { type: "fixed", text: "Social X-ray is conservative: it only links people with real evidence (facing each other, watching, approaching). People merely standing side by side, like a queue, are no longer labelled as together." },
+      ] },
+    { version: "0.12.0", codename: "Fourth Dimension", date: "2026-08-02", tag: "",
       changes: [
         { type: "added", text: "Chronoscape: a 4D time-travel replay inside the 3D view. Every tracked subject's recent path is lifted onto the reconstructed ground as an age-graded trail, with playheads that glide along each path. Scrub or play the scene's last minutes through time." },
         { type: "added", text: "Social X-ray: each person's attention direction as a cone, and live links between people who are interacting (engaged, watching, together, approaching), from a pose-derived facing that works even when they stand still." },

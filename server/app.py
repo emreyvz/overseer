@@ -149,13 +149,15 @@ def _resolve_source(token: str) -> int | None:
 async def stream(source_id: str) -> StreamingResponse:
     async def gen():
         boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+        last = None
         while True:
-            # the requested camera specifically: analysed frame if it's the active
-            # one, else the persistent warm relay — so the feed never gaps on switch.
+            # the requested camera specifically: full-rate display frame if it's the active one,
+            # else the persistent warm relay — so the feed never gaps on switch.
             jpeg = backend.stream_frame(source_id) if backend else None
-            if jpeg:
+            if jpeg is not None and jpeg is not last:   # poll fast, but only send genuinely new frames
                 yield boundary + jpeg + b"\r\n"
-            await asyncio.sleep(1 / 15)
+                last = jpeg
+            await asyncio.sleep(1 / 30)
     return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 
