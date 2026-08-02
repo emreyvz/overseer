@@ -271,8 +271,13 @@ class Backend:
         self._latest_jpeg: bytes | None = None
         self._latest_img: Any = None
         self._latest_raw_jpeg: bytes | None = None   # full-rate display frame (decoupled from analysis)
-        self._last_raw_enc = 0.0
+        self._latest_raw: Any = None                 # newest RAW capture frame (ref only, set on the capture thread)
+        self._raw_seq = 0                            # bumped on every capture; the encoder thread watches it
+        self._enc_seq = -1
+        self._disp_run = False                       # dedicated display-encoder thread: steady 30 fps, off the hot paths
+        self._disp_thread: threading.Thread | None = None
         self._last_anal_enc = 0.0                    # throttle the analysed-frame JPEG (a warm fallback now)
+        self._last_det_push = 0.0                    # throttle the detections WS emit so it can't starve /stream
         self._bgp_ctr = 0                            # background-plate EMA runs every 3rd frame
         self._bg_plate: Any = None       # running background estimate (EMA) of the active camera
         self._bg_plate_sid: Any = None   # which camera the plate belongs to
@@ -398,8 +403,9 @@ class Backend:
             self.alert_engine.reset(); self.alert_engine.set_rules(self.db.list_alert_rules())
 
             self._buffer = FrameBuffer(maxsize=int(self.config.get("camera.buffer_size", 5)))
-            self._latest_raw_jpeg = None
+            self._latest_raw_jpeg = None; self._latest_raw = None
             self._buffer.on_put = self._tap_frame   # full-rate display, independent of the analysis loop
+            self._start_display_encoder()
             self._health = HealthMonitor(freeze_timeout=float(self.config.get("camera.freeze_timeout", 10.0)))
             self._plugins = PluginManager()
             self._motion_det = MotionDetector(self.config)
@@ -1343,21 +1349,38 @@ class Backend:
         return attrs
 
     def _tap_frame(self, frame: Any) -> None:
-        """Display tap: runs on the CAPTURE thread for every captured frame. Encodes the raw frame to
-        JPEG at up to ~22 fps so the live stream plays at camera rate, instead of stuttering at the
-        (much slower) analysis rate. Detection boxes are streamed separately over the WebSocket and
-        interpolated client-side, so they still line up on the faster video. Throttled + guarded so it
-        never slows capture; analysis quality is untouched."""
-        now = time.time()
-        if now - self._last_raw_enc < 0.045:
+        """Display tap: runs on the CAPTURE thread for every captured frame. It only STORES the newest
+        raw frame (a reference assignment, instant), so it never slows capture. A dedicated encoder
+        thread turns it into a JPEG at a steady rate, so the live feed plays at camera rate rather than
+        stuttering at the analysis rate. Boxes are streamed separately and interpolated client-side."""
+        self._latest_raw = frame.image
+        self._raw_seq += 1
+
+    def _display_encoder_loop(self) -> None:
+        """Encode the newest raw frame to JPEG at a steady ~30 fps, off the capture and analysis
+        threads. cv2.imencode releases the GIL, so this produces a smooth display source independent
+        of how busy analysis is. Only encodes when a new frame has arrived."""
+        while self._disp_run:
+            time.sleep(1.0 / 30.0)
+            if self._raw_seq == self._enc_seq:
+                continue
+            img = self._latest_raw
+            if img is None:
+                continue
+            self._enc_seq = self._raw_seq
+            try:
+                ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
+                if ok:
+                    self._latest_raw_jpeg = buf.tobytes()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _start_display_encoder(self) -> None:
+        if self._disp_thread is not None:
             return
-        self._last_raw_enc = now
-        try:
-            ok, buf = cv2.imencode(".jpg", frame.image, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
-            if ok:
-                self._latest_raw_jpeg = buf.tobytes()
-        except Exception:  # noqa: BLE001
-            pass
+        self._disp_run = True
+        self._disp_thread = threading.Thread(target=self._display_encoder_loop, name="display-encoder", daemon=True)
+        self._disp_thread.start()
 
     def _on_result(self, r: AnalysisResult) -> None:
         img = r.frame.image
@@ -1486,7 +1509,11 @@ class Backend:
                 self._source_id, brightness=float(getattr(r.metrics, "brightness", 0.0)),
                 motion=float(r.motion_percent), fps=float(r.fps), dets=prof_dets,
                 points=prof_points)
-        self._emit({"t": "detections", "d": dets})
+        # Throttle the detections emit (~15 Hz) so it can never saturate the single event loop and
+        # starve /stream. Boxes are interpolated client-side, so a lower cadence is invisible.
+        if _enc_now - self._last_det_push > 0.066:
+            self._last_det_push = _enc_now
+            self._emit({"t": "detections", "d": dets})
 
         # weapon alert with a cropped image of the weapon itself (throttled)
         if weapon_box is not None and now - self._last_weapon > 12.0:
@@ -2075,6 +2102,7 @@ class Backend:
         if self._roster_harvester is not None:
             self._roster_harvester.stop()
         self.plates.stop()
+        self._disp_run = False
         self.live_make.stop()
         self.live_bodytype.stop()
         self.thumbs.stop_all()

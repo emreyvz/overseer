@@ -36,22 +36,40 @@ async def broadcast(msg: dict[str, Any]) -> None:
         _clients.discard(ws)
 
 
+_nvml_handle: Any = None
+_nvml_tried = False
+
+
+def _gpu_util() -> float | None:
+    """GPU utilisation via NVML, initialised ONCE (nvmlInit was being called every heartbeat, a
+    periodic hitch on the event loop)."""
+    global _nvml_handle, _nvml_tried
+    if not _nvml_tried:
+        _nvml_tried = True
+        try:
+            import pynvml  # type: ignore
+            pynvml.nvmlInit()
+            _nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        except Exception:  # noqa: BLE001
+            _nvml_handle = None
+    if _nvml_handle is None:
+        return None
+    try:
+        import pynvml  # type: ignore
+        return float(pynvml.nvmlDeviceGetUtilizationRates(_nvml_handle).gpu)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _system_payload() -> dict[str, Any]:
     cpu = ram = 0.0
-    gpu = None
     try:
         import psutil
         cpu = psutil.cpu_percent(interval=None)
         ram = psutil.virtual_memory().percent
     except Exception:  # noqa: BLE001
         pass
-    try:
-        import pynvml  # type: ignore
-        pynvml.nvmlInit()
-        h = pynvml.nvmlDeviceGetHandleByIndex(0)
-        gpu = float(pynvml.nvmlDeviceGetUtilizationRates(h).gpu)
-    except Exception:  # noqa: BLE001
-        gpu = None
+    gpu = _gpu_util()
     storage = 0.0
     if backend is not None:
         try:
@@ -68,9 +86,13 @@ def _system_payload() -> dict[str, Any]:
 async def _heartbeat() -> None:
     while True:
         await asyncio.sleep(2.0)
-        await broadcast({"t": "system", "d": _system_payload()})
+        # Build the payloads OFF the event loop (NVML + psutil + SQLite), so the heartbeat never
+        # hitches the loop that is serving /stream.
+        sysd = await asyncio.to_thread(_system_payload)
+        await broadcast({"t": "system", "d": sysd})
         if backend is not None:
-            await broadcast({"t": "cameras", "d": backend.sources_payload()})
+            cams = await asyncio.to_thread(backend.sources_payload)
+            await broadcast({"t": "cameras", "d": cams})
             backend.reap_thumbs()
 
 

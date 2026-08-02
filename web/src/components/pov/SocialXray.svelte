@@ -18,18 +18,20 @@
   const CONE_LEN = 1.35               // body-heights: short, so a cone never reaches a distant person
   const TOWARD = Math.cos(38 * D2R)   // tight facing gate
   const EASE = 0.18                   // position smoothing per frame
-  const RISE = 0.09                   // link fade-in per frame (~0.4 s to full)
-  const FALL = 0.045                  // link fade-out per frame (~0.9 s lingering)
+  const RISE = 0.12                   // link fade-in per frame (~0.25 s to full)
+  const FALL = 0.006                  // link fade-out per frame (~2.8 s lingering, so you can read it)
+  const SHOW = 0.35                   // only draw a link once it has persisted past this strength
 
   interface P { hx: number; hy: number; fx: number; fy: number; appear: number; facing: boolean }
-  interface L { s: number; kind: string; label: string }
+  interface L { s: number; kind: string; label: string; shown: boolean }
   const P = new Map<string, P>()      // eased per-track head position + facing
   const LNK = new Map<string, L>()    // link strengths (hysteresis), key = "idA|idB"
 
   let cones = $state<Array<{ x: number; y: number; p1x: number; p1y: number; p2x: number; p2y: number; op: number; alarm: boolean }>>([])
   let links = $state<Array<{ ax: number; ay: number; bx: number; by: number; mx: number; my: number; op: number; kind: string; label: string }>>([])
 
-  const headPix = (t: FTrack) => ({ x: t.cx * W, y: (t.cy - t.h / 2) * H })
+  // Eye level: a little below the top of the head, so the attention cone reads as a line of sight.
+  const headPix = (t: FTrack) => ({ x: t.cx * W, y: (t.cy - t.h * 0.42) * H })
 
   function facesToward(fx: number, fy: number, fromx: number, fromy: number, tox: number, toy: number): number {
     const vx = tox - fromx, vy = toy - fromy
@@ -91,19 +93,20 @@
     // 3. hysteresis: strengthen present links, decay absent ones
     for (const [k, c] of cand) {
       let l = LNK.get(k)
-      if (!l) { l = { s: 0, kind: c.kind, label: c.label }; LNK.set(k, l) }
+      if (!l) { l = { s: 0, kind: c.kind, label: c.label, shown: false }; LNK.set(k, l) }
       l.kind = c.kind; l.label = c.label
       l.s = Math.min(1, l.s + RISE)
+      if (l.s >= SHOW) l.shown = true          // latch on once it has genuinely persisted
     }
     for (const [k, l] of LNK) {
-      if (!cand.has(k)) { l.s -= FALL; if (l.s <= 0.02) LNK.delete(k) }
+      if (!cand.has(k)) { l.s -= FALL; if (l.s <= 0.02) LNK.delete(k) }   // linger + slow fade
     }
 
     // 4. render lists (respecting the click-to-focus filter)
     const cs: typeof cones = []
     for (const [id, p] of P) {
       if (!p.facing || p.appear < 0.06) continue
-      if (focus && id !== focus && !hasLinkWith(id, focus)) continue
+      if (focus && id !== focus) continue        // focused: show ONLY that person's cone + gaze
       const t = list.find((x) => x.id === id)
       const len = Math.max((t ? t.h : 0.1) * CONE_LEN * H, 34)
       const ang = Math.atan2(p.fy, p.fx)
@@ -116,19 +119,15 @@
     }
     const ls: typeof links = []
     for (const [k, l] of LNK) {
+      if (!l.shown || l.s < 0.1) continue        // only latched links, lingering as they slowly fade
       const [ia, ib] = k.split('|')
-      if (focus && ia !== focus && ib !== focus) continue
+      if (focus && ia !== focus && ib !== focus) continue   // focused: only this person's links
       const pa = P.get(ia), pb = P.get(ib)
       if (!pa || !pb) continue
       ls.push({ ax: pa.hx, ay: pa.hy, bx: pb.hx, by: pb.hy, mx: (pa.hx + pb.hx) / 2, my: (pa.hy + pb.hy) / 2, op: Math.min(1, l.s), kind: l.kind, label: l.label })
     }
     cones = cs
     links = ls.sort((p, q) => q.op - p.op).slice(0, 14)
-  }
-
-  function hasLinkWith(id: string, focus: string): boolean {
-    const k = id < focus ? `${id}|${focus}` : `${focus}|${id}`
-    return LNK.has(k)
   }
 
   onMount(() => { raf = requestAnimationFrame(frame) })
