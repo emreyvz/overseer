@@ -76,3 +76,14 @@ def dominant_color_name_conf(crop_bgr: np.ndarray, ignore_skin: bool = False) ->
 
 def dominant_color_name(crop_bgr: np.ndarray, ignore_skin: bool = False) -> str:
     return dominant_color_name_conf(crop_bgr, ignore_skin=ignore_skin)[0]
+
+
+def skin_fraction(crop_bgr: np.ndarray) -> float:
+    """Share of a crop that is bare skin (YCrCb, robust across skin tones). Used to tag a shirtless
+    torso as bare rather than inventing a garment colour for it."""
+    if crop_bgr is None or getattr(crop_bgr, "size", 0) == 0:
+        return 0.0
+    ycc = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2YCrCb).reshape(-1, 3)
+    cr, cb = ycc[:, 1], ycc[:, 2]
+    skin = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
+    return float(skin.mean())

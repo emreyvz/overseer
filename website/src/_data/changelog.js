@@ -1,18 +1,19 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.11.1", codename: "Acuity", date: "2026-08-02", tag: "latest",
+    { version: "0.11.2", codename: "Acuity", date: "2026-08-02", tag: "latest",
       changes: [
         { type: "added", text: "Vehicle body type (sedan, hatchback, SUV, station wagon, pickup, van, minibus...) via zero-shot CLIP, shown on cards and filterable in the roster." },
         { type: "added", text: "Estimated person stature (band plus approximate cm), shown on the card and filterable." },
-        { type: "added", text: "More read behaviours: sitting, lying, swimming and standing, from posture and motion." },
+        { type: "added", text: "More read behaviours: sitting, lying, swimming, standing, approaching and moving away, from posture, motion and apparent size." },
+        { type: "improved", text: "Clothing colour reads from the torso only and is shown only when it is clearly that colour, so a murky crop no longer gets a wrong one; a shirtless torso is reported as bare skin." },
         { type: "improved", text: "Live Enhance is sharper and more natural: multi-pass reconstruction fitted to the loupe, no cartoon or pixel blocks." },
         { type: "improved", text: "Turkish speech-to-text accuracy, on a larger on-device Whisper model." },
-        { type: "fixed", text: "Clothing colour no longer reads bare skin as a garment; storage now counts every snapshot and clip on disk; the operator answers on-screen visual questions by looking at the frame." },
+        { type: "fixed", text: "Voice and body type no longer fail on a full GPU (speech-to-text falls back to CPU, body type runs on CPU). Storage counts every snapshot and clip on disk. The operator answers on-screen visual questions by looking at the frame." },
       ] },
     { version: "0.10.0", codename: "AI Operator", date: "2026-08-02", tag: "",
       changes: [
-        { type: "added", text: "AI Operator: run the whole app by voice or text — 70+ chained actions with data passing between steps, and vision Q&A about what is on screen." },
+        { type: "added", text: "AI Operator: run the whole app by voice or text, 70+ chained actions with data passing between steps, and vision Q&A about what is on screen." },
         { type: "added", text: "Offline voice: on-device Whisper speech-to-text (Turkish + English) and spoken replies." },
         { type: "added", text: "Live narration, follow-cam, and occlusion x-ray." },
         { type: "added", text: "Live 'enhance': box-select any region for a photographic close-up." },
