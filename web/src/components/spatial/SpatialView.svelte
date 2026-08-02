@@ -56,7 +56,6 @@
   let reelPlaying = $state(false)
   let reelIdx = $state(0)
   let reelFrames = $state<Scene[]>([])
-  let reelTimer: ReturnType<typeof setInterval> | null = null
 
   // Back-projection / depth-to-Z tuning (settled by visual iteration across cameras).
   const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6
@@ -911,46 +910,44 @@
 
   // ---- HoloReel: record a short 3D reel, then replay it as a fly-through video -----------------
   let reelBuilding = false
-  async function reelShow(i: number) {
-    if (reelBuilding || !reelFrames[i]) return
+  async function reelShow(i: number): Promise<boolean> {
+    if (reelBuilding || !reelFrames[i]) return false
     reelBuilding = true
-    try { await buildCloud(reelFrames[i]) } catch { /* skip */ } finally { reelBuilding = false }
+    try { await buildCloud(reelFrames[i]); return true } catch { return false } finally { reelBuilding = false }
   }
   async function startReel() {
     if (reel) return
     if (autoTimer) { clearInterval(autoTimer); autoTimer = null; auto = false }   // the reel owns the scene
     reel = true; reelRec = true; reelPlaying = false; reelFrames = []; reelIdx = 0
     sfx('sonar')
-    for (let i = 0; i < REEL_N && reel; i++) {          // capture N successive reconstructions
+    // Capture back-to-back at a lighter grid so the frames are as CLOSE together in time as the
+    // backend can build them (that is what makes the replay read like video rather than jumping).
+    for (let i = 0; i < REEL_N && reel; i++) {
       try {
-        const r = await api.spatial(cam, 384)
+        const r = await api.spatial(cam, 256)
         if (r?.scene) reelFrames = [...reelFrames, r.scene]
       } catch { /* skip a frame */ }
-      await new Promise((res) => setTimeout(res, 120))  // a small gap so successive frames differ
     }
     if (!reel) return
     reelRec = false; reelIdx = 0
-    if (reelFrames.length) { await reelShow(0); reelToggle() } else exitReel()   // auto-play
+    if (reelFrames.length) { await reelShow(0); reelPlaying = true; reelPlayLoop() } else exitReel()
+  }
+  async function reelPlayLoop() {
+    while (reelPlaying && reel && reelFrames.length) {
+      const t0 = performance.now()
+      const ok = await reelShow(reelIdx)                 // build + await; advance ONLY when it built
+      if (ok) reelIdx = (reelIdx + 1) % reelFrames.length
+      const rem = 150 - (performance.now() - t0)          // pace toward ~6 fps, builds permitting
+      if (rem > 0) await new Promise((res) => setTimeout(res, rem))
+    }
   }
   function reelToggle() {
     reelPlaying = !reelPlaying; sfx('click', { volume: 0.25 })
-    if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
-    if (reelPlaying) {
-      reelTimer = setInterval(() => {                   // ~4.5 fps; each frame is a full mesh rebuild
-        if (!reelFrames.length || reelBuilding) return
-        reelIdx = (reelIdx + 1) % reelFrames.length
-        reelShow(reelIdx)
-      }, 220)
-    }
+    if (reelPlaying) reelPlayLoop()
   }
-  function reelOnSeek() {
-    reelPlaying = false
-    if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
-    reelShow(reelIdx)
-  }
+  function reelOnSeek() { reelPlaying = false; reelShow(reelIdx) }
   function exitReel() {
     reel = false; reelRec = false; reelPlaying = false
-    if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
     reelFrames = []
     sfx('click'); loadScene(false)
   }
@@ -967,8 +964,7 @@
   onDestroy(() => {
     window.removeEventListener('keydown', onkey, true)
     if (autoTimer) clearInterval(autoTimer)
-    if (reelTimer) clearInterval(reelTimer)
-    reel = false
+    reel = false; reelPlaying = false
     if (raf) cancelAnimationFrame(raf)
     ro?.disconnect()
     if (renderer) { renderer.domElement.removeEventListener('pointerdown', onPointerDown); renderer.domElement.removeEventListener('pointerup', onPointerUp) }

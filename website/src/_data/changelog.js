@@ -1,7 +1,13 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.4", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+    { version: "0.12.5", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+      changes: [
+        { type: "improved", text: "Video delivery decoupled further: the stream now runs in a worker thread instead of on the server event loop, and the background roster harvester (which runs detection on every camera) backs off about 8x while you are watching a camera live, freeing the GPU and interpreter. The display encoder was independently confirmed to hold 30fps even under heavy load." },
+        { type: "improved", text: "HoloReel captures frames back to back at a lighter grid so they sit closer together in time, and playback advances only when a frame has finished rebuilding, so it no longer skips." },
+        { type: "fixed", text: "Social X-ray interaction labels are back (a tightened facing test had removed almost all links); labels no longer stack on each other, and the facing judgement stays strict." },
+      ] },
+    { version: "0.12.4", codename: "Fourth Dimension", date: "2026-08-03", tag: "",
       changes: [
         { type: "fixed", text: "The actual video-smoothness bug: the display encoder ran sleep(1/30)+encode back to back, so it only hit ~22 fps and stuttered. It is now deadline-paced to a real 30 fps, with a 1ms timer and a shorter GIL switch interval so the encoder and the server loop share time cleanly. The feed should finally be smooth." },
         { type: "added", text: "HoloReel: capture a few seconds of successive 3D reconstructions, then replay them like a video with a scrub bar while you fly through the scene in 3D. Pause any time. (The 3D live mode keeps its old LIVE name.)" },
