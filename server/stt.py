@@ -40,8 +40,16 @@ class STT:
             try:
                 from faster_whisper import WhisperModel
                 Path(_MODELS_DIR).mkdir(parents=True, exist_ok=True)
-                log.info("loading offline STT model '{}' (one time)...", _MODEL_NAME)
-                self._model = WhisperModel(_MODEL_NAME, device="cpu", compute_type="int8",
+                # Use the GPU when present (much faster); fall back to int8 on CPU.
+                device, compute = "cpu", "int8"
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        device, compute = "cuda", "float16"
+                except Exception:  # noqa: BLE001
+                    pass
+                log.info("loading offline STT model '{}' on {} (one time)...", _MODEL_NAME, device)
+                self._model = WhisperModel(_MODEL_NAME, device=device, compute_type=compute,
                                            download_root=_MODELS_DIR)
                 return True
             except Exception as exc:  # noqa: BLE001
@@ -83,15 +91,17 @@ class STT:
         tmp = None
         try:
             arr = self._wav_to_array(audio)
+            # Fast decode: greedy (beam 1), no cross-segment context, no timestamps. language is
+            # honoured (e.g. 'tr' for Turkish); None auto-detects.
+            opts = dict(language=(lang or None), vad_filter=True, beam_size=1,
+                        condition_on_previous_text=False, without_timestamps=True)
             if arr is not None:
-                segments, _info = self._model.transcribe(
-                    arr, language=(lang or None), vad_filter=True, beam_size=1)
+                segments, _info = self._model.transcribe(arr, **opts)
             else:
                 with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
                     f.write(audio)
                     tmp = f.name
-                segments, _info = self._model.transcribe(
-                    tmp, language=(lang or None), vad_filter=True, beam_size=1)
+                segments, _info = self._model.transcribe(tmp, **opts)
             return " ".join(s.text for s in segments).strip() or None
         except Exception as exc:  # noqa: BLE001
             log.warning("STT transcribe failed: {}", str(exc)[:200])

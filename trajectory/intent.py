@@ -97,12 +97,19 @@ class IntentEstimator:
             scores.append((label, round(s, 2), f"mostly stationary for {int(span)}s"))
         if spread >= loiter_r * 0.8:                         # genuinely moving around
             if path_ratio > 0.65:
-                label = "hurrying" if speed_px > 0.18 * frame_diag else "transiting"
+                if speed_px > 0.30 * frame_diag:
+                    label = "running"
+                elif speed_px > 0.18 * frame_diag:
+                    label = "hurrying"
+                elif speed_px < 0.055 * frame_diag:
+                    label = "strolling"
+                else:
+                    label = "transiting"
                 scores.append((label, round(min(1.0, path_ratio), 2),
-                               f"direct, purposeful movement ({int(path_ratio * 100)}% direct)"))
+                               f"direct movement ({int(path_ratio * 100)}% direct)"))
             elif total > move_eps * 4 and path_ratio < 0.45:
                 s = min(1.0, (0.45 - path_ratio) / 0.45 + 0.3)
-                label = "pacing" if reversals >= 2 else "searching"
+                label = "pacing" if reversals >= 2 else ("wandering" if speed_px < 0.08 * frame_diag else "searching")
                 scores.append((label, round(s, 2),
                                f"moving but not getting anywhere ({int(path_ratio * 100)}% direct)"))
             if reversals >= 3:
