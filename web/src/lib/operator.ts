@@ -18,6 +18,7 @@ import { api } from './api'
 import { annotate } from './annotations'
 import { zones, delZone } from './zones'
 import { recordFeedback } from './feedback'
+import { aiStatus } from './ai'
 import { sfx, toggleMute } from './audio'
 
 // A compact guide to the whole app, given to the assistant so it can answer "how do I…" and
@@ -822,8 +823,11 @@ export async function operate(command: string): Promise<Plan> {
   const cmd = command.trim()
   if (!cmd) return { say: '' }
   olog(cmd, 'you')
-  // Simple single commands take the instant local path; compound ones go straight to the planner.
-  const local = isCompound(cmd) ? null : routeCommand(cmd)
+  // When a provider is configured, the LLM interprets EVERYTHING — no local keyword guessing, so a
+  // stray word never fires the wrong command. The deterministic router is only a fallback for when
+  // there is no LLM at all.
+  const aiUp = get(aiStatus).enabled
+  const local = aiUp ? null : routeCommand(cmd)
   if (local) { await runPlan(local); return local }
   // LLM fallback: give the planner live context so it can resolve references.
   const context = {

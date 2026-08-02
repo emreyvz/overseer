@@ -27,11 +27,11 @@
   {/each}
   <!-- experiential toggles, driven by their own stores -->
   <div class="grp caps">VISION</div>
-  <button class="tog cy caps" class:on={$xrayOn} onclick={() => toggleStore(xrayOn)} title="Keep tracking a subject behind cover">
+  <button class="tog caps" class:on={$xrayOn} onclick={() => toggleStore(xrayOn)} title="Keep tracking a subject behind cover">
     <span class="dot"></span><span class="lbl">OCCLUSION X-RAY</span>
   </button>
   <div class="grp caps">AUDIO</div>
-  <button class="tog cy caps" class:on={$narrateOn} onclick={() => toggleStore(narrateOn)} title="Describe the scene aloud (needs a vision model)">
+  <button class="tog caps" class:on={$narrateOn} onclick={() => toggleStore(narrateOn)} title="Describe the scene aloud (needs a vision model)">
     <span class="dot"></span><span class="lbl">LIVE NARRATION</span>
   </button>
 </div>
@@ -40,12 +40,11 @@
   .rail { position: absolute; left: 20px; top: 50%; transform: translateY(-50%); z-index: var(--z-panel);
     width: 164px; max-height: 78vh; overflow-y: auto; padding: 8px 10px; }
   .head { font-size: var(--fs-micro); color: var(--scarlet); letter-spacing: var(--tracking); margin-bottom: 6px; white-space: nowrap; }
-  .grp { font-size: 8px; color: var(--ink-ghost); margin: 8px 0 3px; white-space: nowrap; }
-  .tog { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 2px; font-size: var(--fs-micro); color: var(--ink-ghost); white-space: nowrap; }
-  .tog:hover { color: var(--ink-dim); }
+  .grp { font-size: 8px; color: var(--ink); opacity: 0.55; letter-spacing: 0.18em; margin: 9px 0 3px; white-space: nowrap; }
+  .tog { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 2px; font-size: var(--fs-micro); color: var(--ink-dim); white-space: nowrap; }
+  .tog:hover { color: var(--ink); }
   .tog.on { color: var(--ink); }
-  .dot { width: 8px; height: 8px; border: 1px solid var(--ink-ghost); flex: 0 0 auto; }
+  .dot { width: 8px; height: 8px; border: 1px solid var(--ink-dim); flex: 0 0 auto; }
   .tog.on .dot { background: var(--scarlet); border-color: var(--scarlet); }
-  .tog.cy.on .dot { background: var(--cyan); border-color: var(--cyan); }
   .lbl { opacity: 1; }
 </style>
