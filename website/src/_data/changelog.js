@@ -1,7 +1,13 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.2", codename: "Fourth Dimension", date: "2026-08-02", tag: "latest",
+    { version: "0.12.3", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+      changes: [
+        { type: "improved", text: "Smooth video, properly this time. The real cause was the single server event loop being saturated by an unthrottled per-frame detections push plus a blocking status heartbeat, which starved the stream. The detections push is now throttled, the heartbeat runs off the loop (and the GPU handle is cached, not re-opened every 2s), and a dedicated encoder thread produces the display feed at a steady 30fps independent of analysis." },
+        { type: "improved", text: "Social X-ray is much easier to read: links persist far longer (about 3 seconds) so you can follow them, the attention cone starts at eye level, and focusing a person (click) now shows only that person's cone and links, nothing else." },
+        { type: "changed", text: "Chronoscape is replaced by Walkthrough: the 3D view keeps rebuilding from successive captures so you can move through the live scene in 3D, instead of replaying trails." },
+      ] },
+    { version: "0.12.2", codename: "Fourth Dimension", date: "2026-08-02", tag: "",
       changes: [
         { type: "improved", text: "Big analysis speed-up: the wind analyzer's dense optical flow (the single biggest per-frame cost) now runs on a downscaled frame, plus a cheaper sharpness metric and throttled background-plate / fallback encode. Roughly 5x the analysed frame rate, so a crossing car is tracked across many more frames." },
         { type: "improved", text: "Social X-ray is readable now: eased motion and hysteresis (links fade in and linger instead of flickering), only real interactions are drawn (no lines to unrelated distant people), shorter attention cones, and clicking a person shows only that person's interactions." },

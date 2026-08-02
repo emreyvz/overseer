@@ -7,7 +7,7 @@
 import { get, writable } from 'svelte/store'
 import {
   mode, activeCam, cameras, stage, forensicSeed, zoneEditor, alertRules, watchlistOpen, operatorOpen,
-  suggestionsOpen, spatialOpen, chronoAuto, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
+  suggestionsOpen, spatialOpen, walkthroughAuto, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
   rosterInit, modules, toggleModule, detections, alerts, timeline, timelineOpen, petRegistry,
   povZoom, muted, frame, system, narrateOn, followOn, xrayOn, enhanceMode, selectedDetection,
   flashBanner, triggerGlitch, type Mode,
@@ -642,12 +642,12 @@ export const ACTIONS: Record<string, Action> = {
     if (m && m.on !== want) toggleModule('social')
     return want ? 'social x-ray on — showing gaze and who is interacting' : 'social x-ray off'
   },
-  // Chronoscape: open the 3D view in time-travel mode to replay the scene's recent history.
-  chronoscape: ({ camera }) => {
+  // Walkthrough: open the 3D view in live mode so you can move through the scene as it rebuilds.
+  walkthrough: ({ camera }) => {
     const id = camera ? (findCam(S(camera))?.id ?? get(activeCam)) : get(activeCam)
-    if (!id) return 'no camera selected for the time-travel view'
-    stage.set('live'); mode.set('pov'); chronoAuto.set(true); spatialOpen.set(String(id))
-    return 'opening Chronoscape — replaying the recent history in 3D; use the scrubber to travel through time'
+    if (!id) return 'no camera selected for the 3D walkthrough'
+    stage.set('live'); mode.set('pov'); walkthroughAuto.set(true); spatialOpen.set(String(id))
+    return 'opening the 3D walkthrough — the scene keeps rebuilding; drag to move through it in 3D'
   },
   enhance: () => {
     stage.set('live'); mode.set('pov'); enhanceMode.set(true)
@@ -791,7 +791,7 @@ export function routeCommand(raw: string): Plan | null {
   if (/(follow.?cam|takip et|takip kamerası|follow (the |that )?(target|subject|him|her|it|kişi))/i.test(low)) return { steps: [{ action: 'follow', args: { on: !/(kapat|stop|\boff\b|durdur|bırak)/i.test(low) } }], border: 'nav' }
   if (/(x.?ray|röntgen|thru cover|behind cover|arkasını gör|occlusion)/i.test(low)) return { steps: [{ action: 'xray', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
   if (/(social x.?ray|sosyal|gaze|attention|who.*(talking|interact)|kim.*(konuş|etkileş)|bakış)/i.test(low)) return { steps: [{ action: 'social_xray', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
-  if (/(chronoscape|time.?travel|zaman yolcul|geçmişi (oynat|göster)|replay.*(history|3d)|4d)/i.test(low)) return { steps: [{ action: 'chronoscape', args: {} }], border: 'nav' }
+  if (/(walkthrough|walk.?through|chronoscape|zaman yolcul|3d.*(gez|dolaş|walk|yürü)|içinde (gez|dolaş))/i.test(low)) return { steps: [{ action: 'walkthrough', args: {} }], border: 'nav' }
   if (/(enhance|netleştir|yakınlaş.*netleş|clarify|zoom.*enhance|büyüt.*netleş)/i.test(low)) return { steps: [{ action: 'enhance', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }
 

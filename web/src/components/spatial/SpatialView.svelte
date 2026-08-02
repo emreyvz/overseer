@@ -17,8 +17,7 @@
   import { get } from 'svelte/store'
   import { api } from '../../lib/api'
   import { sfx } from '../../lib/audio'
-  import { chronoAuto } from '../../lib/stores'
-  import { chronSnapshot, chronSpan, type ChronTrack } from '../../lib/chronicle'
+  import { walkthroughAuto } from '../../lib/stores'
 
   let { cam, onclose }: { cam: string; onclose: () => void } = $props()
 
@@ -48,14 +47,6 @@
   let auto = $state(false)
   let measure = $state(false)                  // click-to-measure mode
   let measureDist = $state<number | null>(null) // last measured distance (scene units)
-  // Chronoscape: replay the scene's recent history as 3D trails you can scrub through time.
-  let chrono = $state(false)
-  let playing = $state(false)
-  let scrubFrac = $state(1)                     // 0 = oldest recorded, 1 = now (live head)
-  let chronoSpanS = $state(0)                   // recorded span in seconds (for the readout)
-  let chronoAgeS = $state(0)                    // seconds-ago at the current scrub position
-  let chronoTracks = $state(0)                  // number of trails currently drawn
-  let chronoEmpty = $state(false)               // no usable movement recorded for this camera
 
   // Back-projection / depth-to-Z tuning (settled by visual iteration across cameras).
   const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6
@@ -94,15 +85,6 @@
   let markers: THREE.Group | null = null
   let shadows: THREE.Group | null = null       // soft contact-shadow blobs grounding entities
   let shadowTex: THREE.Texture | null = null   // shared radial blob (cached across rebuilds)
-  // Chronoscape state: the back-projection params of the current scene (so history foot-points can be
-  // lifted onto the reconstructed ground), the recorded trails, and the moving "playhead" markers.
-  let trails: THREE.Group | null = null
-  let heads: THREE.Group | null = null
-  let bp: { fx: number; cx: number; cy: number; w: number; h: number; disp: Float32Array } | null = null
-  let chronData: ChronTrack[] = []
-  let chronMap: { color: string; pts: { x: number; z: number; t: number }[] }[] = []   // top-down trails for the minimap
-  let chronT0 = 0, chronT1 = 0                  // span bounds (performance.now ms)
-  let lastRaf = 0
   let fgTex: THREE.Texture | null = null       // full-res texture map for the foreground mesh
   let raf = 0
   let ro: ResizeObserver | null = null
@@ -143,15 +125,6 @@
     const loop = () => {
       raf = requestAnimationFrame(loop)
       controls?.update()
-      if (chrono && chronT1 > chronT0) {
-        const now = performance.now()
-        if (playing) {
-          scrubFrac += (now - (lastRaf || now)) / PLAYBACK_MS   // replay the span in ~PLAYBACK_MS
-          if (scrubFrac >= 1) { scrubFrac = 1; playing = false }
-        }
-        lastRaf = now
-        updateHeads()
-      }
       if (composer) composer.render()
       else if (renderer && scene && camera) renderer.render(scene, camera)
       drawMinimap()
@@ -526,144 +499,6 @@
     return inl.length >= 20 ? (quad(inl) ?? best) : best
   }
 
-  // ---- Chronoscape: replay the recent history as 3D trails ----------------------------------
-  const CLS_COL3: Record<string, number> = { person: 0x35e0ff, vehicle: 0xffb038, animal: 0x6be675 }
-  const PLAYBACK_MS = 12000   // replay the whole recorded span in ~12 s, whatever its real length
-
-  // Lift a normalised image foot-point onto the reconstructed ground, in the scene's world coords.
-  function unproject(nx: number, ny: number): THREE.Vector3 | null {
-    if (!bp) return null
-    const { fx, cx, cy, w, h, disp } = bp
-    const px = Math.min(w - 1, Math.max(0, Math.round(nx * (w - 1))))
-    const py = Math.min(h - 1, Math.max(0, Math.round(ny * (h - 1))))
-    // Sample the ground depth in a small neighbourhood (median) so a single noisy pixel does not
-    // fling a point into the far distance. Reject near-zero disparity (sky / very far), which is where
-    // the old "ball flying off into an irrelevant place" came from.
-    const ds: number[] = []
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const qx = Math.min(w - 1, Math.max(0, px + dx)), qy = Math.min(h - 1, Math.max(0, py + dy))
-      const v = disp[qy * w + qx]
-      if (isFinite(v)) ds.push(v)
-    }
-    if (!ds.length) return null
-    ds.sort((a, b) => a - b)
-    const d01 = ds[ds.length >> 1]
-    if (d01 < 0.08) return null                    // too far / sky -> unreliable ground point
-    const Z = zOf(d01)
-    return new THREE.Vector3(((px - cx) * Z) / fx, (-(py - cy) * Z) / fx, -Z)
-  }
-
-  function disposeChrono(g: THREE.Group | null) {
-    // disposeGroup only frees materials; our line/marker geometries must be freed too (rebuilt every
-    // few seconds), so dispose both to avoid a GPU-memory leak.
-    g?.traverse((o) => {
-      const m = o as THREE.Mesh
-      m.geometry?.dispose()
-      if (m.material) (m.material as THREE.Material).dispose()
-    })
-  }
-  function clearChrono() {
-    if (trails && scene) { scene.remove(trails); disposeChrono(trails) }
-    if (heads && scene) { scene.remove(heads); disposeChrono(heads) }
-    trails = null; heads = null; chronMap = []
-  }
-
-  function buildTrails() {
-    if (!scene || !bp) return
-    clearChrono()
-    // Scope to THIS camera (det ids are TK_<src:03d>.<tid>) and keep only subjects that actually
-    // MOVED, so a person standing still (whose foot point jitters) does not become a wandering blob.
-    const prefix = `TK_${String(cam).padStart(3, '0')}.`
-    const snap = chronSnapshot().filter((t) => t.samples.length >= 3)
-    let mine = snap.filter((t) => t.id.startsWith(prefix))
-    if (!mine.length) mine = snap                       // id-numbering mismatch: use all, not nothing
-    chronData = mine.filter((t) => {
-      let minx = 1, maxx = 0, miny = 1, maxy = 0
-      for (const s of t.samples) { minx = Math.min(minx, s.x); maxx = Math.max(maxx, s.x); miny = Math.min(miny, s.y); maxy = Math.max(maxy, s.y) }
-      return Math.hypot(maxx - minx, maxy - miny) > 0.04   // moved at least ~4% of the frame
-    })
-    // FREEZE the replay window at this instant: history is a fixed clip you scrub, not a live feed
-    // (the live head used to jump the markers around over the frozen 3D snapshot).
-    let t0 = Infinity, t1 = -Infinity
-    for (const tk of chronData) { const s = tk.samples; if (s[0].t < t0) t0 = s[0].t; if (s[s.length - 1].t > t1) t1 = s[s.length - 1].t }
-    chronT0 = isFinite(t0) ? t0 : performance.now(); chronT1 = isFinite(t1) ? t1 : chronT0
-    chronoSpanS = Math.max(0, (chronT1 - chronT0) / 1000)
-    chronoTracks = chronData.length
-    chronoEmpty = chronData.length === 0
-    if (chronoEmpty) return
-    trails = new THREE.Group(); heads = new THREE.Group()
-    chronMap = []
-    const headGeo = new THREE.SphereGeometry(0.12, 14, 12)
-    const span = Math.max(1, chronT1 - chronT0)
-    for (const tk of chronData) {
-      const base = CLS_COL3[tk.cls] ?? 0xc9d4dc
-      const c0 = new THREE.Color(base)
-      const pts: number[] = [], cols: number[] = []
-      const mp: { x: number; z: number; t: number }[] = []
-      for (const s of tk.samples) {
-        const v = unproject(s.x, s.y)
-        if (!v) continue
-        pts.push(v.x, v.y + 0.03, v.z)               // a hair above the ground so it isn't z-fought
-        mp.push({ x: v.x, z: v.z, t: s.t })          // top-down copy for the minimap
-        const age = (chronT1 - s.t) / span            // 0 = recent, 1 = oldest
-        const f = 1 - 0.72 * age                       // older = dimmer
-        cols.push(c0.r * f, c0.g * f, c0.b * f)
-      }
-      if (pts.length < 6) continue
-      if (mp.length) chronMap.push({ color: CLS_COLOR[tk.cls] || '#c9d4dc', pts: mp })
-      const g = new THREE.BufferGeometry()
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
-      g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
-      const line = new THREE.Line(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, depthTest: false }))
-      line.renderOrder = 990
-      trails.add(line)
-      const hm = new THREE.Mesh(headGeo, new THREE.MeshBasicMaterial({ color: base, depthTest: false, transparent: true }))
-      hm.renderOrder = 992; hm.visible = false
-      heads.add(hm)
-    }
-    scene.add(trails); scene.add(heads)
-    updateHeads()
-  }
-
-  function fmtAge(sec: number): string {
-    const s = Math.max(0, Math.round(sec)), m = Math.floor(s / 60)
-    return `${m}:${(s % 60).toString().padStart(2, '0')}`
-  }
-
-  // Position each subject's glowing marker at where it was at the scrubbed time (hidden if the
-  // subject wasn't present then), interpolating between its recorded samples.
-  function updateHeads() {
-    if (!heads || !chronData.length || chronT1 <= chronT0) return
-    const t = chronT0 + scrubFrac * (chronT1 - chronT0)
-    chronoAgeS = Math.max(0, (chronT1 - t) / 1000)
-    let hi = 0
-    for (const tk of chronData) {
-      const hm = heads.children[hi++] as THREE.Mesh | undefined
-      if (!hm) continue
-      const s = tk.samples
-      if (t < s[0].t - 250 || t > s[s.length - 1].t + 250) { hm.visible = false; continue }
-      let a = s[0], b = s[s.length - 1]
-      for (let i = 0; i < s.length - 1; i++) { if (s[i].t <= t && t <= s[i + 1].t) { a = s[i]; b = s[i + 1]; break } }
-      const f = b.t > a.t ? (t - a.t) / (b.t - a.t) : 0
-      const v = unproject(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
-      if (!v) { hm.visible = false; continue }
-      hm.position.set(v.x, v.y + 0.05, v.z); hm.visible = true
-    }
-  }
-
-  function toggleChrono() {
-    chrono = !chrono; sfx('click')
-    // Entering freezes a fixed clip of the recorded history at this instant and replays THAT (no live
-    // refresh, which used to jump the markers around over the static 3D snapshot). Re-snapshot by
-    // toggling off/on, or via the RESNAP button.
-    if (chrono) { scrubFrac = 1; buildTrails() }
-    else { playing = false; clearChrono() }
-  }
-  function resnapChrono() { scrubFrac = 1; buildTrails(); sfx('click', { volume: 0.25 }) }
-
-  function togglePlay() { if (scrubFrac >= 1) scrubFrac = 0; playing = !playing; sfx('click', { volume: 0.25 }) }
-  function onScrub() { playing = false; updateHeads() }
-
   async function buildCloud(d: NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>) {
     if (!scene) return
     const { w, h, fov, image, depth, entities, bg_image, bg_depth } = d
@@ -747,10 +582,6 @@
       const Z = zOf(e.depth), X = (e.cx * w - cx) * Z / fx
       mapPts.push({ x: X, z: -Z, color: CLS_COLOR[e.cls] || '#c9d4dc' })
     }
-    // Chronoscape: remember this scene's back-projection so recorded history can be lifted onto its
-    // ground, then (re)build the 3D trails if the time-travel view is active.
-    bp = { fx, cx, cy, w, h, disp: fgDisp }
-    if (chrono) buildTrails()
 
     // soft contact shadows: a dark blob on the flattened ground under each entity, so they read
     // as standing ON the surface rather than floating (complements the GTAO crease occlusion).
@@ -975,28 +806,7 @@
     const toY = (z: number) => oy + (z - minZ) * sc      // far (most-negative Z) -> top
     g.strokeStyle = 'rgba(120,224,255,0.30)'; g.lineWidth = 1
     g.strokeRect(toX(minX), toY(minZ), sc * (maxX - minX), sc * (maxZ - minZ))
-    // Chronoscape: draw the recorded paths from above (instantly legible), with a marker at the
-    // scrubbed time. This top-down view is robust even where the 3D depth is noisy.
-    if (chrono && chronMap.length) {
-      const tCur = chronT0 + scrubFrac * (chronT1 - chronT0)
-      for (const tr of chronMap) {
-        g.strokeStyle = tr.color; g.globalAlpha = 0.55; g.lineWidth = 1.5; g.beginPath()
-        tr.pts.forEach((p, i) => { const X = toX(p.x), Y = toY(p.z); i ? g.lineTo(X, Y) : g.moveTo(X, Y) })
-        g.stroke()
-        // marker at the scrubbed moment (interpolated), if the subject existed then
-        const s = tr.pts
-        if (tCur >= s[0].t - 250 && tCur <= s[s.length - 1].t + 250) {
-          let a = s[0], b = s[s.length - 1]
-          for (let i = 0; i < s.length - 1; i++) if (s[i].t <= tCur && tCur <= s[i + 1].t) { a = s[i]; b = s[i + 1]; break }
-          const f = b.t > a.t ? (tCur - a.t) / (b.t - a.t) : 0
-          g.globalAlpha = 1; g.fillStyle = tr.color; g.beginPath()
-          g.arc(toX(a.x + (b.x - a.x) * f), toY(a.z + (b.z - a.z) * f), 3.4, 0, Math.PI * 2); g.fill()
-        }
-      }
-      g.globalAlpha = 1
-    } else {
-      for (const p of mapPts) { g.fillStyle = p.color; g.beginPath(); g.arc(toX(p.x), toY(p.z), 3, 0, Math.PI * 2); g.fill() }
-    }
+    for (const p of mapPts) { g.fillStyle = p.color; g.beginPath(); g.arc(toX(p.x), toY(p.z), 3, 0, Math.PI * 2); g.fill() }
     // camera marker (clamped to the panel) + sight line toward the view target
     const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
     const cxp = clamp(toX(camera.position.x), 2, W - 2), cyp = clamp(toY(camera.position.z), 2, H - 2)
@@ -1085,7 +895,8 @@
   function toggleAuto() {
     auto = !auto
     sfx('click')
-    if (auto) autoTimer = setInterval(() => loadScene(false), 4000)
+    // Walkthrough: rebuild the scene often so it feels like moving through the live moment in 3D.
+    if (auto) autoTimer = setInterval(() => loadScene(false), 2200)
     else { if (autoTimer) { clearInterval(autoTimer); autoTimer = null } prevDisp = null }
   }
 
@@ -1095,15 +906,12 @@
     sfx('sonar')
     initThree()
     loadScene(false)
-    // Operator "chronoscape" request: open straight into time-travel mode (buildCloud builds the
-    // trails once the scene is reconstructed, since `chrono` is already true by then).
-    if (get(chronoAuto)) { chronoAuto.set(false); chrono = true; scrubFrac = 1 }   // buildCloud builds the frozen trails
+    if (get(walkthroughAuto)) { walkthroughAuto.set(false); toggleAuto() }   // operator opened it in walkthrough
     window.addEventListener('keydown', onkey, true)
   })
   onDestroy(() => {
     window.removeEventListener('keydown', onkey, true)
     if (autoTimer) clearInterval(autoTimer)
-    clearChrono()
     if (raf) cancelAnimationFrame(raf)
     ro?.disconnect()
     if (renderer) { renderer.domElement.removeEventListener('pointerdown', onPointerDown); renderer.domElement.removeEventListener('pointerup', onPointerUp) }
@@ -1130,8 +938,7 @@
     <span class="spacer"></span>
     {#if entityCount}<span class="ec caps">◈ {entityCount} ENTIT{entityCount === 1 ? 'Y' : 'IES'}</span>{/if}
     <button class="ref caps" class:on={measure} onclick={toggleMeasure}>⟺ MEASURE</button>
-    <button class="ref caps" class:on={chrono} onclick={toggleChrono}>◷ CHRONO</button>
-    <button class="ref caps" class:on={auto} onclick={toggleAuto}>{auto ? '● LIVE' : '○ LIVE'}</button>
+    <button class="ref caps" class:on={auto} onclick={toggleAuto} title="keep rebuilding the scene so you can walk through the live moment in 3D">{auto ? '◉ WALKTHROUGH' : '○ WALKTHROUGH'}</button>
     <button class="ref caps" onclick={() => loadScene(true)}>↻ RECAPTURE</button>
     <button class="x caps" onclick={onclose}>✕ CLOSE</button>
   </header>
@@ -1166,21 +973,10 @@
       <span class="mmlabel caps">◹ TOP-DOWN</span>
       <canvas bind:this={mapCv} width="184" height="150"></canvas>
     </div>
-    {#if chrono && chronoEmpty}
-      <div class="chrono caps empty">
-        <span>◷ NO MOVEMENT RECORDED FOR THIS CAMERA YET · WATCH THE LIVE VIEW A WHILE, THEN REOPEN CHRONO</span>
-        <button class="cresnap" onclick={resnapChrono}>↻ RESNAP</button>
-      </div>
-    {:else if chrono}
-      <div class="chrono caps">
-        <button class="cplay" onclick={togglePlay} aria-label={playing ? 'pause' : 'play'}>{playing ? '❚❚' : '▶'}</button>
-        <input class="cscrub" type="range" min="0" max="1" step="0.001" bind:value={scrubFrac} oninput={onScrub} />
-        <span class="ctime">{scrubFrac >= 0.999 ? 'LATEST' : `-${fmtAge(chronoAgeS)}`}</span>
-        <span class="cspan">◷ {fmtAge(chronoSpanS)} · {chronoTracks} PATHS</span>
-        <button class="cresnap" onclick={resnapChrono} title="capture newer history">↻</button>
-      </div>
-    {:else if measure}
+    {#if measure}
       <div class="hint caps meas">⟺ MEASURE · CLICK TWO POINTS ON THE SURFACE{#if measureDist !== null} · <b>{measureDist.toFixed(2)} UNITS</b>{/if}</div>
+    {:else if auto}
+      <div class="hint caps">◉ WALKTHROUGH · THE SCENE REBUILDS LIVE · DRAG TO WALK THROUGH IT IN 3D</div>
     {:else}
       <div class="hint caps">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
     {/if}
@@ -1226,20 +1022,6 @@
   .hint { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: var(--ink-ghost);
     font-size: 8px; letter-spacing: 0.2em; pointer-events: none; }
   .hint.meas { color: var(--cyan); } .hint b { color: #eaf2f6; }
-  /* Chronoscape time scrubber */
-  .chrono { position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; display: flex; align-items: center; gap: 12px;
-    padding: 8px 14px; border: 1px solid var(--hairline); background: rgba(4,7,10,0.72); backdrop-filter: blur(3px);
-    width: min(620px, 66vw); }
-  .chrono .cplay { width: 26px; height: 22px; flex: 0 0 auto; border: 1px solid var(--hairline); background: none;
-    color: var(--cyan); font-size: 10px; cursor: pointer; }
-  .chrono .cplay:hover { border-color: var(--cyan); }
-  .chrono .cscrub { flex: 1 1 auto; accent-color: var(--cyan); cursor: pointer; }
-  .chrono .ctime { flex: 0 0 auto; min-width: 42px; text-align: right; color: #eaf2f6; font-size: 9px; letter-spacing: 0.14em; }
-  .chrono .cspan { flex: 0 0 auto; color: var(--ink-ghost); font-size: 7.5px; letter-spacing: 0.18em; }
-  .chrono.empty { color: var(--ink-ghost); font-size: 8px; letter-spacing: 0.16em; gap: 14px; justify-content: center; }
-  .chrono .cresnap { flex: 0 0 auto; border: 1px solid var(--hairline); background: none; color: var(--ink-dim);
-    font-size: 8px; letter-spacing: 0.14em; padding: 3px 7px; cursor: pointer; }
-  .chrono .cresnap:hover { border-color: var(--cyan); color: var(--cyan); }
   .minimap { position: absolute; left: 16px; bottom: 16px; padding: 6px; border: 1px solid var(--hairline);
     background: rgba(4,7,10,0.55); backdrop-filter: blur(2px); pointer-events: none; }
   .minimap canvas { display: block; }
