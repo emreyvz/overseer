@@ -24,19 +24,38 @@ export const detections = writable<Detection[]>([])
 // last-known box for a short grace window and re-emit it as `coasting` (drawn faded) until it
 // reappears or the window lapses — so tracking stays visually continuous. Only real ByteTrack
 // ids are coasted (TK_<src>.<n>); per-frame recall extras (TK_<src>.x<n>) are not.
-const COAST_MS = 700
-const _coast = new Map<string, { det: Detection; ts: number }>()
+const COAST_MS = 700       // normal brief hold through a momentary detector drop
+const XRAY_MS = 2600       // occlusion x-ray: hold a subject much longer while it is behind cover
+const _clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
+const _coast = new Map<string, { det: Detection; ts: number; cx: number; cy: number; vx: number; vy: number }>()
 const _stableTrack = (id: string) => /^TK_\d+\.\d+$/.test(id)
 export function applyDetections(list: Detection[], now = Date.now()) {
   const seen = new Set<string>()
   for (const d of list) {
-    if (_stableTrack(d.id)) { _coast.set(d.id, { det: d, ts: now }); seen.add(d.id) }
+    if (!_stableTrack(d.id)) continue
+    const cx = d.bbox[0] + d.bbox[2] / 2, cy = d.bbox[1] + d.bbox[3] / 2
+    const prev = _coast.get(d.id)
+    let vx = 0, vy = 0
+    if (prev) {
+      const dt = Math.max(50, now - prev.ts)
+      vx = prev.vx * 0.6 + ((cx - prev.cx) / dt) * 0.4     // smoothed normalized velocity /ms
+      vy = prev.vy * 0.6 + ((cy - prev.cy) / dt) * 0.4
+    }
+    _coast.set(d.id, { det: d, ts: now, cx, cy, vx, vy })
+    seen.add(d.id)
   }
   const out = list.slice()
+  const window = get(xrayOn) ? XRAY_MS : COAST_MS
   for (const [id, rec] of _coast) {
     if (seen.has(id)) continue
-    if (now - rec.ts > COAST_MS) { _coast.delete(id); continue }
-    out.push({ ...rec.det, coasting: true })
+    const age = now - rec.ts
+    if (age > window) { _coast.delete(id); continue }
+    // extrapolate the box forward along its last velocity, so the ghost is where the subject
+    // WOULD be behind cover, not frozen where it disappeared.
+    const b = rec.det.bbox
+    const ex = _clamp01(b[0] + rec.vx * age)
+    const ey = _clamp01(b[1] + rec.vy * age)
+    out.push({ ...rec.det, bbox: [ex, ey, b[2], b[3]], coasting: true, occluded: age > COAST_MS })
   }
   detections.set(out)
 }
@@ -170,6 +189,10 @@ activeCam.subscribe((id) => {
 
 export const railsHover = writable(false)
 export const timelineOpen = writable(false)
+// Experiential "new way to see" features:
+export const narrateOn = writable(false)   // live VLM narration of the active camera (spoken)
+export const followOn = writable(false)    // follow-cam: digital PTZ keeps the locked subject centred
+export const xrayOn = writable(true)       // occlusion x-ray: hold + predict a subject behind cover
 export const muted = writable(false)
 export const banner = writable<{ text: string; alarm: boolean } | null>(null)
 export const shuttingDown = writable(false)  // exit animation gate (item 16)

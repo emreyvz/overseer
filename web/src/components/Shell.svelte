@@ -3,6 +3,8 @@
   import HeatmapOverlay from './pov/HeatmapOverlay.svelte'
   import ZoneOverlay from './pov/ZoneOverlay.svelte'
   import OOIOverlay from './pov/OOIOverlay.svelte'
+  import NarrateOverlay from './pov/NarrateOverlay.svelte'
+  import FollowController from './pov/FollowController.svelte'
   import Dossier from './pov/Dossier.svelte'
   import CornerBrackets from './hud/CornerBrackets.svelte'
   import TrackletIds from './hud/TrackletIds.svelte'
@@ -34,6 +36,8 @@
   <HeatmapOverlay />
   <ZoneOverlay />
   <OOIOverlay />
+  <NarrateOverlay />
+  <FollowController />
   <CornerBrackets />
   <TrackletIds />
   <MicroHud />

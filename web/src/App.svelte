@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
-    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, hydrateAlerts, hydrateModules, type Mode,
+    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, hydrateAlerts, hydrateModules, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
@@ -147,6 +147,8 @@
     if (k === 'w') { watchlistOpen.set(true); return }
     if (k === 'g') { suggestionsOpen.set(true); sfx('click'); return }
     if (k === 'd' && $activeCam) { spatialOpen.set($activeCam); sfx('click'); return }
+    if (k === 'n' && $mode === 'pov') { narrateOn.update((v) => !v); sfx('click'); return }
+    if (k === 'f' && $mode === 'pov') { if ($selectedDetection) { followOn.update((v) => !v); sfx('click') } else { flashBanner('SELECT A TARGET TO FOLLOW', true, 1400) } return }
     if (/^[1-9]$/.test(k)) { switchCam(Number(k)); return }
     if (k in MODE_KEYS) { toMode(MODE_KEYS[k]); return }
   }
