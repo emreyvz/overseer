@@ -192,6 +192,9 @@ export const timelineOpen = writable(false)
 // Experiential "new way to see" features:
 export const narrateOn = writable(false)   // live VLM narration of the active camera (spoken)
 export const followOn = writable(false)    // follow-cam: digital PTZ keeps the locked subject centred
+// The tracked target's current live id (updates on re-acquire) + whether it is momentarily lost,
+// published by DetectionLayer so the follow-cam can ride re-acquisition and stop when truly lost.
+export const followState = writable<{ id: string; lost: boolean } | null>(null)
 export const xrayOn = writable(true)       // occlusion x-ray: hold + predict a subject behind cover
 export const muted = writable(false)
 export const banner = writable<{ text: string; alarm: boolean } | null>(null)

@@ -20,6 +20,31 @@ import { zones, delZone } from './zones'
 import { recordFeedback } from './feedback'
 import { sfx, toggleMute } from './audio'
 
+// A compact guide to the whole app, given to the assistant so it can answer "how do I…" and
+// "what does X do" questions about ANY feature, not just run commands.
+export const APP_GUIDE = `Overseer is a single-camera AI surveillance app. You are its operator assistant: you can DO things
+(the actions) and also EXPLAIN how to use any part of the app. Key knowledge:
+SCREENS (open by voice/text, a nav button, or a key): POV live view; Roster (people/vehicles seen,
+filter by colour/type/height/BOLO); Forensic (appearance search by colour/type/plate/time); Watchlist;
+Smart Suggestions (key G — proactive alert & zone recommendations you accept in one click); Spatial 3D
+(key D — lift a frame into a 3D scene); Storage; Cases; Alerts board (all alerts across cameras);
+Alert Rules; Zone editor (key Z).
+HOW TO ADD AN ALERT: three ways — (1) open Smart Suggestions (G) and accept a proposed rule; (2) open
+Alert Rules and add one; (3) just tell me, e.g. "alarm on loitering at the store" or "alarm if you see
+a weapon" (a weapon turns on weapon detection which auto-alerts).
+HOW TO MAKE A ZONE: press Z (or say "draw zone") to draw a line/area on the POV, or accept a zone
+suggestion in Smart Suggestions (it proposes where to put it). Zones drive loitering/line-cross/
+restricted alerts.
+HOW TO WATCH SOMEONE/A PLATE: click a subject then ENROLL, or say "watch that person"/"watch plate 34ABC".
+DETECTION & OVERLAYS: the left panel toggles every detector (person/vehicle/animal/weapon/motion/
+tracking) and overlays (heatmap, tactical, foresight, tracklet), plus OCCLUSION X-RAY (keep tracking a
+subject behind cover) and LIVE NARRATION (describe the scene aloud). Say "show the heatmap" etc.
+EXPERIENTIAL: Follow-Cam (key F or the FOLLOW button on a locked target's card) keeps them centred;
+Live Narration (key N) speaks what the camera sees; Occlusion X-ray shows subjects behind cover.
+SHORTCUTS: I operator, G suggestions, Z zone, W watchlist, A forensic, D spatial 3D, N narration,
+F follow, 1-9 switch camera, SPACE command palette.
+YOU (the operator) can chain 70+ actions from one sentence and answer questions from live data.`
+
 // ---- operator state (read by the border overlay + the console transcript) ------------------
 export type BorderKind = 'nav' | 'alert'
 export const operatorActive = writable<BorderKind | null>(null)
@@ -807,7 +832,8 @@ export async function operate(command: string): Promise<Plan> {
     // A question the planner didn't turn into actions or an answer -> answer it as chat.
     if (!plan?.steps?.length && !plan?.say && !plan?.ask) {
       const { reply, disabled } = await api.aiChat(
-        cmd, 'You are Overseer, a concise surveillance operations assistant. Answer in 1-2 sentences.')
+        cmd, `${APP_GUIDE}\n\nAnswer the operator concisely. For "how do I…" or "what does X do" give the
+quick steps from the guide above; for anything else answer in 1-2 sentences.`)
       const say = disabled ? 'chat needs a provider configured (settings ⚙)' : (reply || 'no answer')
       olog(say, 'say')
       return { say }

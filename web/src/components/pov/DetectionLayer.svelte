@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack, onMount, onDestroy } from 'svelte'
-  import { detections, selectedDetection, dossierOpen, flashBanner, forensicSeed, mode, cameras, activeCam, enrollOpen, modules } from '../../lib/stores'
+  import { detections, selectedDetection, dossierOpen, flashBanner, forensicSeed, mode, cameras, activeCam, enrollOpen, modules, followOn, followState } from '../../lib/stores'
   import { predictedDetections } from '../../lib/motion'
   import { sfx } from '../../lib/audio'
   import { trUpper } from '../../lib/lexicon'
@@ -136,6 +136,11 @@
     })
   })
 
+  // Publish the tracked target (its id follows re-acquisition) so the follow-cam can ride it and
+  // stop when the subject is truly lost.
+  $effect(() => { followState.set(target ? { id: target.id, lost: target.lost } : null) })
+  function toggleFollow() { sfx('click'); followOn.update((v) => !v) }
+
   function pick(d: Detection) { sfx('ping', { volume: 0.3 }); selectedDetection.set(d) }
   function openFile() { sfx('click'); dossierOpen.set(true) }
   function findSimilar(d: Detection) {
@@ -219,7 +224,7 @@
         <div class="tbtns">
           <button class="tfile caps" onclick={() => enrollOpen.set(t.d)}>⊕ ENROLL</button>
           <button class="tfile caps" onclick={openFile}>FILE ▸</button>
-          <button class="tfile caps" onclick={() => findSimilar(t.d)}>≈ SIMILAR</button>
+          <button class="tfile foll caps" class:on={$followOn} onclick={toggleFollow} title="Follow this target with the camera (F)">◎ {$followOn ? 'FOLLOWING' : 'FOLLOW'}</button>
           {#if t.d.klass === 'TARGET'}<button class="tfile rej caps" onclick={() => rejectMatch(t.d)} title="Not the right match — tighten future searches">✕ NOT THIS</button>{/if}
         </div>
       </div>
@@ -307,4 +312,6 @@
   .tfile { padding: 3px 6px; border: 1px solid var(--ink-dim); font-size: 8px; letter-spacing: var(--tracking); color: var(--ink-dim); background: none; cursor: pointer; }
   .tfile:hover { border-color: var(--scarlet); color: var(--scarlet); }
   .tfile.rej:hover { border-color: var(--amber, #d8a200); color: var(--amber, #d8a200); }
+  .tfile.foll.on { border-color: #2fbf8f; color: #2fbf8f; }
+  .tfile.foll:hover { border-color: #2fbf8f; color: #2fbf8f; }
 </style>

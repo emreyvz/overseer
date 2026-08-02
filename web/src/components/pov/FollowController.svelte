@@ -4,19 +4,29 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
-  import { followOn, selectedDetection, povZoom, mode } from '../../lib/stores'
+  import { followOn, followState, povZoom, mode, flashBanner } from '../../lib/stores'
   import { predictedDetections } from '../../lib/motion'
 
   const FOLLOW_ZOOM = 2.3
   const EASE = 0.1
+  const LOST_GRACE = 1600         // hold this long while the target is lost; re-acquire resumes
   let raf = 0
+  let lostSince = 0
   const clamp = (v: number, m: number) => (v < -m ? -m : v > m ? m : v)
 
   function loop() {
     raf = requestAnimationFrame(loop)
     if (!get(followOn) || get(mode) !== 'pov') return
-    const id = get(selectedDetection)?.id
-    const d = id ? get(predictedDetections).find((x) => x.id === id) : null
+    const fs = get(followState)
+    // Lost: keep the framing for a grace window; if the tracker re-acquires it (fs.lost clears),
+    // follow resumes seamlessly; otherwise drop out of follow.
+    if (!fs || fs.lost) {
+      if (!lostSince) lostSince = performance.now()
+      else if (performance.now() - lostSince > LOST_GRACE) { lostSince = 0; followOn.set(false); flashBanner('TARGET LOST · FOLLOW OFF', true, 1200) }
+      return
+    }
+    lostSince = 0
+    const d = get(predictedDetections).find((x) => x.id === fs.id)
     if (!d) return
     const cx = d.bbox[0] + d.bbox[2] / 2
     const cy = d.bbox[1] + d.bbox[3] / 2
@@ -39,7 +49,7 @@
     if ($followOn) wasOn = true
     else if (wasOn) { wasOn = false; povZoom.set({ zoom: 1, x: 0, y: 0 }) }
   })
-  const hasTarget = $derived($followOn && !!$selectedDetection)
+  const hasTarget = $derived($followOn && !!$followState && !$followState.lost)
 </script>
 
 {#if $followOn && $mode === 'pov'}
