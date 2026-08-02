@@ -19,7 +19,7 @@ _NIGHT_BRIGHTNESS = 55.0    # mean frame brightness below this counts as "night"
 # Coarse foot-point density grid used to auto-suggest WHERE a watch zone belongs (the busiest
 # region of a camera's scene). Kept tiny so it is essentially free per frame.
 _GW, _GH = 16, 12
-_ZONE_MIN_SAMPLES = 40      # need this many foot-points before proposing a zone
+_ZONE_MIN_SAMPLES = 24      # need this many foot-points before proposing a zone
 
 
 def _ema(prev: float, x: float, a: float = 0.03) -> float:

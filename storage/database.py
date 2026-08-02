@@ -796,6 +796,10 @@ class Database:
         for acc in accessories or []:
             query += " AND accessories LIKE ?"
             params.append(f"%{json.dumps(acc)}%")
+        # When filtering on appearance, drop tracklets whose attributes were read with low confidence
+        # (blurry/far crops) — those are the source of "irrelevant" hits for a colour/type search.
+        if colors or clothing_types or height_bands or builds:
+            query += " AND (attr_conf IS NULL OR attr_conf >= 0.30)"
         if source_id is not None:
             query += " AND source_id = ?"
             params.append(source_id)
