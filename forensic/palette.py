@@ -27,6 +27,19 @@ def _hue_to_name(deg: float, value: float) -> str:
     return base
 
 
+def _name_bgr(bgr: np.ndarray) -> str:
+    """Name a single BGR colour: achromatic (black/gray/white) by value when weakly saturated,
+    else by hue."""
+    px = np.uint8([[[max(0, min(255, int(bgr[0]))), max(0, min(255, int(bgr[1]))), max(0, min(255, int(bgr[2])))]]])
+    hsv = cv2.cvtColor(px, cv2.COLOR_BGR2HSV)[0][0]
+    hh, s, v = float(hsv[0]), float(hsv[1]), float(hsv[2])
+    if v < 68:                 # very dark = black, even with a faint hue (a black car reflects blue-ish)
+        return "black"
+    if s < 60:                 # weakly saturated = neutral
+        return "gray" if v < 180 else "white"
+    return _hue_to_name(hh * 2.0, v)
+
+
 def dominant_color_name_conf(crop_bgr: np.ndarray, ignore_skin: bool = False) -> tuple[str, float]:
     """Named dominant colour plus a confidence in [0,1]. Confidence reflects how
     concentrated the evidence is: for a neutral result, the fraction of achromatic pixels;
@@ -38,40 +51,41 @@ def dominant_color_name_conf(crop_bgr: np.ndarray, ignore_skin: bool = False) ->
     NOT clothing, so naming it "brown/orange" would be wrong. When set, skin-toned pixels are
     dropped before naming, and a crop that is mostly bare skin returns ("unknown", 0.0) rather
     than inventing a garment colour. Left off for vehicles so a tan/beige car is unaffected."""
-    if crop_bgr.size == 0:
+    if crop_bgr is None or getattr(crop_bgr, "size", 0) == 0:
         return ("unknown", 0.0)
-    hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
-    h = hsv[..., 0].reshape(-1)
-    s = hsv[..., 1].reshape(-1)
-    v = hsv[..., 2].reshape(-1)
+    img = crop_bgr
+    h0, w0 = img.shape[:2]
+    # Central core: trim the edges, where the background around the object bleeds in. That bleed was
+    # the main reason colours came out wrong (a car's road/sky, a person's surroundings).
+    if h0 >= 12 and w0 >= 12:
+        core = img[int(h0 * 0.12):int(h0 * 0.88), int(w0 * 0.16):int(w0 * 0.84)]
+        if core.size:
+            img = core
+    # Downsample (denoise + speed), then cluster the pixels and name the DOMINANT cluster. Clustering
+    # is robust to a two-tone object (windows/shadows on a car, a logo on a shirt) where a raw hue
+    # histogram would smear; the cluster's share of pixels is the confidence.
+    small = cv2.resize(img, (36, 36), interpolation=cv2.INTER_AREA)
+    px = small.reshape(-1, 3).astype(np.float32)
     if ignore_skin:
-        ycc = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2YCrCb).reshape(-1, 3)
+        ycc = cv2.cvtColor(small, cv2.COLOR_BGR2YCrCb).reshape(-1, 3)
         cr, cb = ycc[:, 1], ycc[:, 2]
-        skin = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)   # robust across skin tones
-        keep = ~skin
-        if float(keep.mean()) < 0.30:        # mostly bare skin -> no reliable clothing colour
+        keep = ~((cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127))
+        if float(keep.mean()) < 0.28:        # mostly bare skin -> no reliable clothing colour
             return ("unknown", 0.0)
-        if keep.any():
-            h, s, v = h[keep], s[keep], v[keep]
-    # A wider achromatic band (s<55) + a lower majority threshold, plus an overall-desaturation
-    # guard, so greys (which often carry a faint tint or a little coloured background bleed) are
-    # named grey/black/white instead of falling through to a saturated hue like "blue".
-    achromatic = s < 55
-    ach_frac = float(achromatic.mean())
-    if ach_frac > 0.5 or float(s.mean()) < 45:
-        mv = float(v[achromatic].mean()) if achromatic.any() else float(v.mean())
-        name = "black" if mv < 60 else ("gray" if mv < 175 else "white")
-        return (name, max(ach_frac, 0.5))
-    chroma = ~achromatic
-    n_chroma = int(chroma.sum())
-    if n_chroma == 0:
+        px = px[keep]
+    if len(px) < 8:
         return ("unknown", 0.0)
-    hist = np.bincount(h[chroma], minlength=180)
-    dom = int(hist.argmax())
-    # concentration: share of chromatic pixels within ~±16 degrees (±8 bins) of the peak
-    idx = (np.arange(dom - 8, dom + 9) % 180)
-    concentration = float(hist[idx].sum()) / n_chroma
-    return (_hue_to_name(dom * 2.0, float(v[chroma].mean())), concentration)
+    k = int(min(3, len(px)))
+    crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 12, 1.0)
+    try:
+        _compact, labels, centers = cv2.kmeans(px, k, None, crit, 2, cv2.KMEANS_PP_CENTERS)
+    except Exception:  # noqa: BLE001
+        centers = np.array([px.mean(axis=0)]); labels = np.zeros(len(px), np.int32)
+    labels = labels.ravel()
+    counts = np.bincount(labels, minlength=len(centers))
+    dom = int(np.argmax(counts))
+    frac = float(counts[dom]) / float(len(px))
+    return (_name_bgr(centers[dom]), round(frac, 3))
 
 
 def dominant_color_name(crop_bgr: np.ndarray, ignore_skin: bool = False) -> str:

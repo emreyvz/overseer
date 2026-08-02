@@ -1,7 +1,15 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.1", codename: "Fourth Dimension", date: "2026-08-02", tag: "latest",
+    { version: "0.12.2", codename: "Fourth Dimension", date: "2026-08-02", tag: "latest",
+      changes: [
+        { type: "improved", text: "Big analysis speed-up: the wind analyzer's dense optical flow (the single biggest per-frame cost) now runs on a downscaled frame, plus a cheaper sharpness metric and throttled background-plate / fallback encode. Roughly 5x the analysed frame rate, so a crossing car is tracked across many more frames." },
+        { type: "improved", text: "Social X-ray is readable now: eased motion and hysteresis (links fade in and linger instead of flickering), only real interactions are drawn (no lines to unrelated distant people), shorter attention cones, and clicking a person shows only that person's interactions." },
+        { type: "fixed", text: "Colour is more accurate for cars and people: it reads the central core (less background bleed), names the dominant colour cluster, and a dark reflective body is read as black instead of blue." },
+        { type: "fixed", text: "Chronoscape is clearer: paths also draw on the top-down minimap (robust and legible), depth is sampled robustly so a marker no longer flies off into the distance." },
+        { type: "fixed", text: "Occlusion x-ray defaults off and remembers being turned off." },
+      ] },
+    { version: "0.12.1", codename: "Fourth Dimension", date: "2026-08-02", tag: "",
       changes: [
         { type: "improved", text: "Much smoother live video: the displayed feed now runs at camera rate, decoupled from the (slower) analysis pipeline, with detection boxes interpolated on top. No loss of analysis quality." },
         { type: "fixed", text: "Chronoscape now works: it freezes a fixed clip of the recorded history on entry (no more markers drifting over the frozen scene), scopes trails to the camera, drops standing-still jitter, and says so when there is no movement to replay yet." },
