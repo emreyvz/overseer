@@ -196,7 +196,15 @@ export const followOn = writable(false)    // follow-cam: digital PTZ keeps the 
 // The tracked target's current live id (updates on re-acquire) + whether it is momentarily lost,
 // published by DetectionLayer so the follow-cam can ride re-acquisition and stop when truly lost.
 export const followState = writable<{ id: string; lost: boolean } | null>(null)
-export const xrayOn = writable(true)       // occlusion x-ray: hold + predict a subject behind cover
+// A boolean toggle that remembers its state across sessions, so turning it off stays off.
+function persistedBool(key: string, def: boolean) {
+  let init = def
+  try { const v = localStorage.getItem(key); if (v !== null) init = v === '1' } catch { /* no storage */ }
+  const s = writable(init)
+  s.subscribe((v) => { try { localStorage.setItem(key, v ? '1' : '0') } catch { /* no storage */ } })
+  return s
+}
+export const xrayOn = persistedBool('overseer.xray', false)   // occlusion x-ray: default OFF, and a user's off choice sticks
 export const enhanceMode = writable(false)                  // live "enhance": box-select clarify tool active
 export const enhanceResult = writable<string | null>(null)  // last enhanced crop (data URL)
 // Switching cameras closes the enhance tool + its result (they belong to the old feed), and also

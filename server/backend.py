@@ -272,6 +272,8 @@ class Backend:
         self._latest_img: Any = None
         self._latest_raw_jpeg: bytes | None = None   # full-rate display frame (decoupled from analysis)
         self._last_raw_enc = 0.0
+        self._last_anal_enc = 0.0                    # throttle the analysed-frame JPEG (a warm fallback now)
+        self._bgp_ctr = 0                            # background-plate EMA runs every 3rd frame
         self._bg_plate: Any = None       # running background estimate (EMA) of the active camera
         self._bg_plate_sid: Any = None   # which camera the plate belongs to
         self._bg_plate_n = 0             # frames accumulated (plate is only trusted once warmed up)
@@ -1249,7 +1251,7 @@ class Backend:
                 attrs = {"upper_color": "bare skin"}   # shirtless: report it, not a made-up shirt colour
             else:
                 col, cconf = dominant_color_name_conf(band, ignore_skin=(cls == "person")) if getattr(band, "size", 0) else ("unknown", 0.0)
-                attrs = {"upper_color": col} if (col != "unknown" and cconf >= 0.5) else {}
+                attrs = {"upper_color": col} if (col != "unknown" and cconf >= 0.42) else {}
             if cls == "vehicle":
                 hit = self.make.classify(crop)   # confidence-gated brand; None if unsure
                 if hit:
@@ -1334,7 +1336,7 @@ class Backend:
                         name, conf = dominant_color_name_conf(roi, ignore_skin=(cls == "person"))
                         # Only assert a colour when the crop is clearly that colour: on a murky/contaminated
                         # crop the operator would far rather see nothing than a confident wrong guess.
-                        if name != "unknown" and conf >= 0.5:
+                        if name != "unknown" and conf >= 0.42:
                             attrs["upper_color"] = name
             except Exception:  # noqa: BLE001
                 pass
@@ -1360,17 +1362,26 @@ class Backend:
     def _on_result(self, r: AnalysisResult) -> None:
         img = r.frame.image
         self._latest_img = img
-        # Running background PLATE (EMA) for the active camera: moving objects average out, leaving
-        # the true static scene — so the spatial view can show what's really BEHIND them, not a guess.
-        sid = self._source_id
-        if (self._bg_plate is None or sid != self._bg_plate_sid or self._bg_plate.shape != img.shape):
-            self._bg_plate = img.astype(np.float32).copy(); self._bg_plate_sid = sid; self._bg_plate_n = 1
-        else:
-            self._bg_plate += 0.02 * (img.astype(np.float32) - self._bg_plate); self._bg_plate_n += 1
+        _enc_now = time.time()
         h, w = img.shape[:2]
-        ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-        if ok:
-            self._latest_jpeg = buf.tobytes()
+        sid = self._source_id
+        # Background PLATE (EMA): moving objects average out, leaving the true static scene so the 3D
+        # view can show what's really BEHIND them. It is only consumed when the spatial view is built,
+        # so update it every 3rd frame (a faster EMA rate compensates) instead of a 26 ms float32 pass
+        # on every frame.
+        self._bgp_ctr = (self._bgp_ctr + 1) % 3
+        if self._bgp_ctr == 0:
+            if (self._bg_plate is None or sid != self._bg_plate_sid or self._bg_plate.shape != img.shape):
+                self._bg_plate = img.astype(np.float32).copy(); self._bg_plate_sid = sid; self._bg_plate_n = 1
+            else:
+                self._bg_plate += 0.06 * (img.astype(np.float32) - self._bg_plate); self._bg_plate_n += 1
+        # The display feed is served at capture rate by the frame tap; this analysed-frame JPEG is only
+        # a warm fallback now, so encode it at ~5 fps rather than on every analysed frame.
+        if _enc_now - self._last_anal_enc > 0.2:
+            self._last_anal_enc = _enc_now
+            ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            if ok:
+                self._latest_jpeg = buf.tobytes()
         # keep a rolling window of recent frames (downscaled) for incident clips
         self._clip_ring.append(cv2.resize(img, (640, max(1, int(h * 640 / w)))) if w > 640 else img.copy())
 

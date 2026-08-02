@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+import cv2
 from loguru import logger
 
 from camera.frame_buffer import Frame, FrameBuffer
@@ -182,9 +183,9 @@ class AnalysisWorker(threading.Thread):
                     # worker could otherwise see mostly odd (or mostly even) seqs
                     # and starve or double-run the analyzers.
                     if self._analyzer_frames % self._analyzer_interval == 0:
-                        readings, env_events = self._analyzers.analyze_frame(frame, metrics)
+                        readings, env_events = self._analyzers.analyze_frame(self._analyzer_frame(frame), metrics)
                         self._last_environment = readings
-                        self._publish_environment(env_events, frame, now)
+                        self._publish_environment(env_events, frame, now)   # full-res frame for the snapshot
                     self._analyzer_frames += 1
                 tracklets: list = []
                 if self._forensic is not None:
@@ -222,6 +223,19 @@ class AnalysisWorker(threading.Thread):
                     logger.exception("on_result callback failed")
             except Exception:
                 logger.exception("frame processing failed (seq={})", frame.seq)
+
+    def _analyzer_frame(self, frame: Frame) -> Frame:
+        """A downscaled copy for the scene analyzers. The wind analyzer runs DENSE optical flow, which
+        is ~340 ms on a 1080p frame and the single biggest per-frame cost; at ~480 px wide it is ~20 ms,
+        and the scene-condition estimates (fog / rain / wind / weather / day-night) are ratios that read
+        the same on the smaller frame. This is the main throughput fix."""
+        img = frame.image
+        h, w = img.shape[:2]
+        if w <= 480:
+            return frame
+        tw = 480
+        th = max(1, round(h * tw / w))
+        return Frame(image=cv2.resize(img, (tw, th)), timestamp=frame.timestamp, seq=frame.seq)
 
     def _motion_percent(self, motion: object | None, motion_enabled: bool) -> float:
         if not motion_enabled:

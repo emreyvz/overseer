@@ -100,6 +100,7 @@
   let heads: THREE.Group | null = null
   let bp: { fx: number; cx: number; cy: number; w: number; h: number; disp: Float32Array } | null = null
   let chronData: ChronTrack[] = []
+  let chronMap: { color: string; pts: { x: number; z: number; t: number }[] }[] = []   // top-down trails for the minimap
   let chronT0 = 0, chronT1 = 0                  // span bounds (performance.now ms)
   let lastRaf = 0
   let fgTex: THREE.Texture | null = null       // full-res texture map for the foreground mesh
@@ -535,8 +536,19 @@
     const { fx, cx, cy, w, h, disp } = bp
     const px = Math.min(w - 1, Math.max(0, Math.round(nx * (w - 1))))
     const py = Math.min(h - 1, Math.max(0, Math.round(ny * (h - 1))))
-    const d01 = disp[py * w + px]
-    if (!isFinite(d01)) return null
+    // Sample the ground depth in a small neighbourhood (median) so a single noisy pixel does not
+    // fling a point into the far distance. Reject near-zero disparity (sky / very far), which is where
+    // the old "ball flying off into an irrelevant place" came from.
+    const ds: number[] = []
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const qx = Math.min(w - 1, Math.max(0, px + dx)), qy = Math.min(h - 1, Math.max(0, py + dy))
+      const v = disp[qy * w + qx]
+      if (isFinite(v)) ds.push(v)
+    }
+    if (!ds.length) return null
+    ds.sort((a, b) => a - b)
+    const d01 = ds[ds.length >> 1]
+    if (d01 < 0.08) return null                    // too far / sky -> unreliable ground point
     const Z = zOf(d01)
     return new THREE.Vector3(((px - cx) * Z) / fx, (-(py - cy) * Z) / fx, -Z)
   }
@@ -553,7 +565,7 @@
   function clearChrono() {
     if (trails && scene) { scene.remove(trails); disposeChrono(trails) }
     if (heads && scene) { scene.remove(heads); disposeChrono(heads) }
-    trails = null; heads = null
+    trails = null; heads = null; chronMap = []
   }
 
   function buildTrails() {
@@ -580,21 +592,25 @@
     chronoEmpty = chronData.length === 0
     if (chronoEmpty) return
     trails = new THREE.Group(); heads = new THREE.Group()
-    const headGeo = new THREE.SphereGeometry(0.09, 14, 12)
+    chronMap = []
+    const headGeo = new THREE.SphereGeometry(0.12, 14, 12)
     const span = Math.max(1, chronT1 - chronT0)
     for (const tk of chronData) {
       const base = CLS_COL3[tk.cls] ?? 0xc9d4dc
       const c0 = new THREE.Color(base)
       const pts: number[] = [], cols: number[] = []
+      const mp: { x: number; z: number; t: number }[] = []
       for (const s of tk.samples) {
         const v = unproject(s.x, s.y)
         if (!v) continue
         pts.push(v.x, v.y + 0.03, v.z)               // a hair above the ground so it isn't z-fought
+        mp.push({ x: v.x, z: v.z, t: s.t })          // top-down copy for the minimap
         const age = (chronT1 - s.t) / span            // 0 = recent, 1 = oldest
         const f = 1 - 0.72 * age                       // older = dimmer
         cols.push(c0.r * f, c0.g * f, c0.b * f)
       }
       if (pts.length < 6) continue
+      if (mp.length) chronMap.push({ color: CLS_COLOR[tk.cls] || '#c9d4dc', pts: mp })
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
       g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
@@ -959,7 +975,28 @@
     const toY = (z: number) => oy + (z - minZ) * sc      // far (most-negative Z) -> top
     g.strokeStyle = 'rgba(120,224,255,0.30)'; g.lineWidth = 1
     g.strokeRect(toX(minX), toY(minZ), sc * (maxX - minX), sc * (maxZ - minZ))
-    for (const p of mapPts) { g.fillStyle = p.color; g.beginPath(); g.arc(toX(p.x), toY(p.z), 3, 0, Math.PI * 2); g.fill() }
+    // Chronoscape: draw the recorded paths from above (instantly legible), with a marker at the
+    // scrubbed time. This top-down view is robust even where the 3D depth is noisy.
+    if (chrono && chronMap.length) {
+      const tCur = chronT0 + scrubFrac * (chronT1 - chronT0)
+      for (const tr of chronMap) {
+        g.strokeStyle = tr.color; g.globalAlpha = 0.55; g.lineWidth = 1.5; g.beginPath()
+        tr.pts.forEach((p, i) => { const X = toX(p.x), Y = toY(p.z); i ? g.lineTo(X, Y) : g.moveTo(X, Y) })
+        g.stroke()
+        // marker at the scrubbed moment (interpolated), if the subject existed then
+        const s = tr.pts
+        if (tCur >= s[0].t - 250 && tCur <= s[s.length - 1].t + 250) {
+          let a = s[0], b = s[s.length - 1]
+          for (let i = 0; i < s.length - 1; i++) if (s[i].t <= tCur && tCur <= s[i + 1].t) { a = s[i]; b = s[i + 1]; break }
+          const f = b.t > a.t ? (tCur - a.t) / (b.t - a.t) : 0
+          g.globalAlpha = 1; g.fillStyle = tr.color; g.beginPath()
+          g.arc(toX(a.x + (b.x - a.x) * f), toY(a.z + (b.z - a.z) * f), 3.4, 0, Math.PI * 2); g.fill()
+        }
+      }
+      g.globalAlpha = 1
+    } else {
+      for (const p of mapPts) { g.fillStyle = p.color; g.beginPath(); g.arc(toX(p.x), toY(p.z), 3, 0, Math.PI * 2); g.fill() }
+    }
     // camera marker (clamped to the panel) + sight line toward the view target
     const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
     const cxp = clamp(toX(camera.position.x), 2, W - 2), cyp = clamp(toY(camera.position.z), 2, H - 2)
