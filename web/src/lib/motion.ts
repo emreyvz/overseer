@@ -20,8 +20,9 @@ const tracks = new Map<string, Track>()
 /** Detections with smoothed, latency-compensated boxes, refreshed every animation frame. */
 export const predictedDetections = writable<Detection[]>([])
 
-const TAU_MS = 80        // smoothing time constant (smaller = snappier, larger = smoother)
-const LEAD_MS = 100      // velocity feed-forward to cancel push latency (keeps box centred)
+const TAU_MS = 70        // smoothing time constant (smaller = snappier, larger = smoother)
+const LEAD_MS = 45       // velocity feed-forward to cancel push latency (kept small so the box sits
+                         // ON the subject, not ahead of it)
 const VEL_EMA = 0.35     // velocity smoothing
 const MAX_SPEED = 0.004  // per-ms normalized speed clamp — rejects id-reuse / detector jumps
 const SNAP_DIST = 0.25   // centre jump beyond this => teleport (don't glide across the frame)

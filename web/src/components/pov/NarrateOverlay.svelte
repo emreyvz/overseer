@@ -3,7 +3,8 @@
      without reading anything. Toggled by the N key, a HUD button, or the AI Operator. -->
 <script lang="ts">
   import { onDestroy } from 'svelte'
-  import { narrateOn, activeCam, mode, stage } from '../../lib/stores'
+  import { get } from 'svelte/store'
+  import { narrateOn, activeCam, mode, stage, detections } from '../../lib/stores'
   import { api } from '../../lib/api'
   import { speak, loadPrefs } from '../../lib/speech'
 
@@ -12,17 +13,30 @@
   let busy = $state(false)
   let timer: ReturnType<typeof setInterval> | undefined
 
+  // Narrate from live detections when there's no vision model (or the VLM returns nothing) — so
+  // narration is never silent: it always says who/what is in view.
+  function liveNarration(): string {
+    const d = get(detections).filter((x) => !x.coasting)
+    const p = d.filter((x) => x.cls === 'person').length
+    const v = d.filter((x) => x.cls === 'vehicle').length
+    if (!p && !v) return 'The scene is quiet, nothing moving.'
+    const bits: string[] = []
+    if (p) bits.push(`${p} ${p === 1 ? 'person' : 'people'}`)
+    if (v) bits.push(`${v} ${v === 1 ? 'vehicle' : 'vehicles'}`)
+    return `${bits.join(' and ')} in view.`
+  }
+
   async function tick() {
     if (busy) return
     const id = $activeCam
     if (!id) return
     busy = true
     try {
-      const r = await api.aiDescribe(id)
-      if (r?.disabled) { caption = 'NARRATION NEEDS A VISION MODEL (⚙ set a vision model)'; stopLoop(); return }
-      if (r?.description) { caption = r.description; speak(r.description, loadPrefs().lang) }
-    } catch { /* keep the last caption on a transient failure */ }
-    busy = false
+      const r = await api.aiDescribe(id).catch(() => null)
+      const text = r?.description || liveNarration()   // VLM if available, else live-data narration
+      caption = text
+      speak(text, loadPrefs().lang)
+    } finally { busy = false }
   }
 
   function stopLoop() { if (timer) { clearInterval(timer); timer = undefined } busy = false }

@@ -930,9 +930,31 @@ async def api_storage() -> Any:
         ]
     except Exception:  # noqa: BLE001
         recent = []
+    # Also count what actually accumulates on disk: alert snapshots + clips. Otherwise the screen
+    # shows 0 even when there is plenty of data (manual recording is not the only source).
+    def _dir_stats(d: Path) -> tuple[int, int]:
+        n = sz = 0
+        if d.exists():
+            for f in d.rglob("*"):
+                if f.is_file():
+                    n += 1
+                    try:
+                        sz += f.stat().st_size
+                    except OSError:
+                        pass
+        return n, sz
+
+    snap_root = backend.data_dir / "snapshots"
+    clip_n, clip_sz = _dir_stats(snap_root / "clips")
+    all_n, all_sz = _dir_stats(snap_root)
+    snap_n, snap_sz = max(0, all_n - clip_n), max(0, all_sz - clip_sz)
+    rec_sz = db.total_recordings_size() or 0
     return {
         "recordings": db.count_recordings(),
-        "sizeGB": round((db.total_recordings_size() or 0) / 1e9, 2),
+        "sizeGB": round((rec_sz + all_sz) / 1e9, 2),          # total disk: recordings + clips + snapshots
+        "recGB": round(rec_sz / 1e9, 2),
+        "snapshots": snap_n, "snapshotsMB": round(snap_sz / 1e6, 1),
+        "clips": clip_n, "clipsMB": round(clip_sz / 1e6, 1),
         "oldest": (db.oldest_recording_ts() or 0) * 1000,
         "recent": recent,
     }
