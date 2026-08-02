@@ -56,7 +56,9 @@ class IntentEstimator:
             tr = _Track(points=deque(maxlen=self._buffer))
             self._tracks[track_id] = tr
         x, y = _bottom_center(bbox)
-        tr.points.append((x, y, now))
+        bx1, by1, bx2, by2 = bbox
+        aspect = (bx2 - bx1) / max(1.0, (by2 - by1))   # width/height: >1 horizontal, <0.6 upright
+        tr.points.append((x, y, now, aspect))
         tr.last_seen = now
         while len(tr.points) > 2 and now - tr.points[1][2] > self._window:
             tr.points.popleft()
@@ -89,14 +91,26 @@ class IntentEstimator:
         path_ratio = net / total if total > 1e-6 else 0.0    # 1 = straight, 0 = wandering
         speed_px = total / span                              # px per second
         dwell = max(0.0, 1.0 - spread / loiter_r)            # 1 = tight, 0 at/over the radius
+        asps = sorted(p[3] for p in pts)
+        aspect = asps[len(asps) // 2]                        # median box shape over the window
+        horizontal = aspect > 1.15                           # wider than tall => lying / swimming
+        seated = 0.62 < aspect <= 1.15                       # compact box => seated posture
 
         scores: list[tuple[str, float, str]] = []
-        if dwell > 0.35:                                     # staying in one place
-            s = dwell * min(1.0, span / self._loiter)
-            label = "loitering" if span >= self._loiter else "waiting"
-            scores.append((label, round(s, 2), f"mostly stationary for {int(span)}s"))
+        if dwell > 0.35:                                     # staying in one place: read the posture
+            s = round(dwell * min(1.0, span / self._loiter), 2)
+            if horizontal:
+                scores.append(("lying down", max(s, 0.4), f"horizontal, still for {int(span)}s"))
+            elif seated:
+                scores.append(("sitting", max(s, 0.4), f"seated, still for {int(span)}s"))
+            else:
+                label = "loitering" if span >= self._loiter else "waiting"
+                scores.append((label, s, f"standing still for {int(span)}s"))
         if spread >= loiter_r * 0.8:                         # genuinely moving around
-            if path_ratio > 0.65:
+            if horizontal and speed_px < 0.16 * frame_diag:  # horizontal + slow drift => swimming
+                scores.append(("swimming", round(min(0.85, 0.4 + path_ratio * 0.5), 2),
+                               "horizontal, moving slowly through the scene"))
+            elif path_ratio > 0.65:
                 if speed_px > 0.30 * frame_diag:
                     label = "running"
                 elif speed_px > 0.18 * frame_diag:

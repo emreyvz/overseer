@@ -46,14 +46,19 @@ class ClassicalAttributes:
             lower = core[core.shape[0] // 2:]
         else:
             upper = lower = core
-        up_name, up_conf = dominant_color_name_conf(upper)
-        lo_name, lo_conf = dominant_color_name_conf(lower)
+        up_name, up_conf = dominant_color_name_conf(upper, ignore_skin=True)   # bare torso isn't clothing
+        lo_name, lo_conf = dominant_color_name_conf(lower, ignore_skin=True)   # bare legs above shorts either
         x1, y1, x2, y2 = bbox
         bh = max(1, y2 - y1)
         bw = max(1, x2 - x1)
         h_frame = max(1, frame_hw[0])
-        ratio = bh / h_frame
-        height_band = "short" if ratio < 0.33 else ("medium" if ratio < 0.66 else "tall")
+        # Perspective-normalized stature: divide the box-height fraction by the foot position so a
+        # close (large) and a far (small) person of the same height read alike, instead of the raw
+        # fraction that labelled nearly everyone "short".
+        fy = min(1.0, y2 / h_frame)
+        stature = (bh / h_frame) / max(0.30, fy)
+        cm = int(round(max(150.0, min(200.0, 120.0 + stature * 130.0))))
+        height_band = "short" if cm < 168 else ("tall" if cm > 182 else "medium")
         aspect = bw / bh
         build = "slim" if aspect < 0.35 else ("broad" if aspect > 0.5 else "medium")
         return AttributeSet(

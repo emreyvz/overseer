@@ -39,7 +39,7 @@
   let subtype = $state('')
   let height = $state('')
   const COLORS = ['black', 'white', 'gray', 'red', 'blue', 'green', 'yellow', 'brown', 'orange', 'purple']
-  const SUBTYPES = ['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'van']
+  const SUBTYPES = ['sedan', 'hatchback', 'suv', 'station wagon', 'coupe', 'pickup', 'minivan', 'van', 'minibus', 'bus', 'truck', 'motorcycle', 'bicycle']
   const HEIGHTS = ['short', 'medium', 'tall']
   const tog = (cur: string, v: string) => (cur === v ? '' : v)
   const attrActive = $derived(!!(color || subtype || height))
@@ -52,12 +52,12 @@
       .filter((e) => filter === 'all' || e.cls === filter)
       .filter((e) => !bolo || e.watched)
       .filter((e) => !color || (e.attrs?.upper_color ?? '').toLowerCase() === color)
-      .filter((e) => !subtype || (e.attrs?.subtype ?? '').toLowerCase().includes(subtype))
+      .filter((e) => !subtype || [e.attrs?.bodytype ?? '', e.attrs?.subtype ?? ''].some((v) => v.toLowerCase().includes(subtype)))
       .filter((e) => !height || (e.attrs?.height ?? '').toLowerCase() === height)
       .filter((e) => {
         if (!q) return true
         const a = anns[e.id] ?? {}
-        const hay = [e.id, a.alias, e.plate, e.attrs?.make, e.attrs?.subtype, e.attrs?.upper_color, e.attrs?.height, e.cam, e.first_cam]
+        const hay = [e.id, a.alias, e.plate, e.attrs?.make, e.attrs?.bodytype, e.attrs?.subtype, e.attrs?.upper_color, e.attrs?.height, e.cam, e.first_cam]
           .filter(Boolean).join(' ').toLowerCase()
         return hay.includes(q)
       })
@@ -107,7 +107,7 @@
   function hoverStop(ev: PointerEvent) { const v = (ev.currentTarget as HTMLElement).querySelector('video'); if (v) { v.pause(); v.currentTime = 0 } }
   // compact combined line for the small gallery cards
   const attrLine = (e: RosterEntry) =>
-    [e.attrs?.make, e.attrs?.subtype, e.attrs?.upper_color, e.cls === 'person' ? e.attrs?.height : undefined]
+    [e.attrs?.make, e.attrs?.bodytype ?? e.attrs?.subtype, e.attrs?.upper_color, e.cls === 'person' ? e.attrs?.height : undefined]
       .filter(Boolean).map((s) => trUpper(String(s))).join(' · ')
   function open(e: RosterEntry) { sfx('ping', { volume: 0.25 }); selected = e }
   const FILTERS: [typeof filter, string][] = [['all', 'ALL'], ['person', 'PEOPLE'], ['vehicle', 'VEHICLES']]

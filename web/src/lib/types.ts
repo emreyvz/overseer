@@ -18,11 +18,13 @@ export interface Detection {
     upper_color?: string
     lower_color?: string
     height?: 'short' | 'medium' | 'tall'
+    height_cm?: number  // people: rough estimated stature in cm (uncalibrated → approximate)
     accessory?: string[]
   }
   caseAlias?: string    // analyst-assigned only, case-scoped
   plate?: string        // vehicles: estimated licence plate from live ANPR
   subtype?: string      // vehicles: fine COCO type — car / truck / bus / motorcycle / bicycle
+  bodytype?: string     // vehicles: fine body type — sedan / hatchback / SUV / ... (CLIP zero-shot, gated)
   speed?: number        // vehicles: rough km/h estimate (uncalibrated → comparable, not exact)
   make?: string         // vehicles: estimated brand from the ViT classifier (confidence-gated)
   intent?: { intent: string; confidence: number; why: string; alt?: string }  // people: estimated behaviour (probabilistic)
@@ -88,7 +90,7 @@ export interface RosterEntry {
   cls: 'person' | 'vehicle' | string
   snapshot: string | null      // /snapshots/... path, prefix with the API base
   plate: string | null
-  attrs: { upper_color?: string; lower_color?: string; height?: string; accessory?: string[]; subtype?: string; make?: string }
+  attrs: { upper_color?: string; lower_color?: string; height?: string; height_cm?: number; accessory?: string[]; subtype?: string; bodytype?: string; make?: string }
   obs: number
   cam?: string | null           // camera the subject was last seen on
   first_cam?: string | null     // camera the subject was FIRST seen on
