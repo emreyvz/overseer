@@ -1,7 +1,16 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.9.0", codename: "Spatial Foresight", date: "2026-07-31", tag: "latest",
+    { version: "0.10.0", codename: "AI Operator", date: "2026-08-02", tag: "latest",
+      changes: [
+        { type: "added", text: "AI Operator: run the whole app by voice or text — 70+ chained actions with data passing between steps, and vision Q&A about what is on screen." },
+        { type: "added", text: "Offline voice: on-device Whisper speech-to-text (Turkish + English) and spoken replies." },
+        { type: "added", text: "Live narration, follow-cam, and occlusion x-ray." },
+        { type: "added", text: "Live 'enhance': box-select any region for a photographic close-up." },
+        { type: "added", text: "Auto zone detection surfaced in Smart Suggestions — proposed, editable, and explained." },
+        { type: "fixed", text: "Colour naming, vehicle attributes, storage stats, forensic precision and detection-box alignment." },
+      ] },
+    { version: "0.9.0", codename: "Spatial Foresight", date: "2026-07-31", tag: "",
       changes: [
         { type: "added", text: "Tactical god-view radar with depth-locked contact placement (Depth Anything)." },
         { type: "added", text: "Predictive ghosts overlay with path-convergence detection." },

@@ -3,6 +3,30 @@
 module.exports = {
   groups: [
     {
+      title: "AI Operator",
+      summary: "Run the whole system by voice or text — one command, chained across the app.",
+      features: [
+        { name: "Natural-language operator", status: "shipped", tags: ["Voice", "Text", "LLM"],
+          blurb: "Speak or type a command and it is planned into a chain of system actions and executed.",
+          detail: "An LLM planner turns any request into an ordered chain of 70+ actions with data passing between steps — go to a camera, find a subject, add it to the watchlist, enhance its photo, then report when it was last seen. It also answers questions from live data, and when a vision model is configured it looks at the frame to answer visual questions (\"what colour is that car\", \"what's in their hand\"). While it drives the app a border lights up and it steps aside into a companion dock." },
+        { name: "Offline voice", status: "shipped", tags: ["Whisper", "TTS"],
+          blurb: "On-device speech-to-text (Turkish + English) and spoken replies — no cloud.",
+          detail: "faster-whisper transcribes locally (GPU-accelerated when present); replies are spoken through the OS voice. Push-to-talk with a live transcript and selectable input/output devices." },
+        { name: "Live narration", status: "shipped", tags: ["VLM"],
+          blurb: "The camera narrates itself aloud, as a subtitle — watch it or just listen.",
+          detail: "With one key the vision model continuously describes the active camera; it falls back to a live-data narration when no vision model is set, so it is never silent." },
+        { name: "Follow-cam", status: "shipped", tags: ["Digital PTZ"],
+          blurb: "Lock a subject and the digital PTZ keeps them centred as they move.",
+          detail: "Rides the same motion model as the boxes and re-acquires the target through brief losses; it drops out cleanly when the subject is truly gone." },
+        { name: "Occlusion x-ray", status: "shipped", tags: ["Prediction"],
+          blurb: "See where a tracked subject is even while they are behind cover.",
+          detail: "Holds and extrapolates a subject along its last velocity when it passes behind an obstacle, drawn as a distinct predicted ghost." },
+        { name: "Live enhance", status: "shipped", tags: ["Super-res"],
+          blurb: "Draw a box on any region and get a crisp, photographic close-up.",
+          detail: "Upscales with Lanczos and a learned super-resolution blend, plus edge-preserving denoise and gentle local contrast — a sharp optical zoom, not a cartoonish upscale." },
+      ],
+    },
+    {
       title: "Perception",
       summary: "Frame-level understanding: what is in view, where, and how it moves.",
       features: [
