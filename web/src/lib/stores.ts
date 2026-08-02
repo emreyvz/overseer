@@ -196,6 +196,8 @@ export const followOn = writable(false)    // follow-cam: digital PTZ keeps the 
 // published by DetectionLayer so the follow-cam can ride re-acquisition and stop when truly lost.
 export const followState = writable<{ id: string; lost: boolean } | null>(null)
 export const xrayOn = writable(true)       // occlusion x-ray: hold + predict a subject behind cover
+export const enhanceMode = writable(false)                  // live "enhance": box-select clarify tool active
+export const enhanceResult = writable<string | null>(null)  // last enhanced crop (data URL)
 export const muted = writable(false)
 export const banner = writable<{ text: string; alarm: boolean } | null>(null)
 export const shuttingDown = writable(false)  // exit animation gate (item 16)

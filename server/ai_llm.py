@@ -131,6 +131,7 @@ _OPERATOR_ACTIONS = (
     "narrate {on} — live narration: continuously describe the active camera aloud (needs a vision model).\n"
     "follow {on} — follow-cam: keep the locked target centred with digital PTZ (lock a target first).\n"
     "xray {on} — occlusion x-ray: keep tracking a subject that goes behind cover.\n"
+    "enhance {} — start the box-select 'enhance' tool (the operator then drags a box to clarify it).\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 
