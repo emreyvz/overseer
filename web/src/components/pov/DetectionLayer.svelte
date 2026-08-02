@@ -160,10 +160,11 @@
     {@const m = markerOf(d)}
     {@const a = $annotations[d.id] ?? {}}
     <div
-      class="det" class:alarm={isAlarm(d) || a.threat === 'high'} class:sel={$selectedDetection?.id === d.id} class:coasting={d.coasting}
+      class="det" class:alarm={isAlarm(d) || a.threat === 'high'} class:sel={$selectedDetection?.id === d.id} class:coasting={d.coasting} class:occluded={d.occluded}
       role="button" tabindex="-1"
       style={`left:${pc(d.bbox[0])};top:${pc(d.bbox[1])};width:${pc(d.bbox[2])};height:${pc(d.bbox[3])}`}
       onclick={() => pick(d)} onkeydown={(e) => { if (e.key === 'Enter') pick(d) }} oncontextmenu={(e) => addCase(e, d)}>
+      {#if d.occluded}<span class="xray caps">◊ THRU COVER</span>{/if}
       <span class="cnr a"></span><span class="cnr b"></span><span class="cnr c"></span><span class="cnr d"></span>
       <span class="marker m-{m}">
         {#if m === 'ring'}
@@ -246,6 +247,16 @@
      it reads as "predicted, briefly holding" rather than a live lock. */
   .det.coasting { opacity: 0.5; }
   .det.coasting .cnr { border-style: dashed; }
+  /* occlusion x-ray: the subject is behind cover — the AI holds + predicts it. Drawn as a cyan
+     ghost with scanlines so it clearly reads as "seen through cover", not a live detection. */
+  .det.occluded { opacity: 0.72; background: repeating-linear-gradient(0deg, rgba(56,208,227,0.11) 0 1px, transparent 1px 4px);
+    box-shadow: inset 0 0 12px rgba(56,208,227,0.22); animation: xrayPulse 1.5s ease-in-out infinite; }
+  .det.occluded .cnr { border-color: var(--cyan); border-style: dashed; opacity: 1; }
+  .det.occluded .marker { opacity: 0.35; }
+  .xray { position: absolute; top: -15px; left: 0; font-size: 8px; letter-spacing: 0.14em; color: var(--cyan);
+    text-shadow: 0 0 4px #000; white-space: nowrap; }
+  @keyframes xrayPulse { 50% { box-shadow: inset 0 0 16px rgba(56,208,227,0.4); } }
+  @media (prefers-reduced-motion: reduce) { .det.occluded { animation: none; } }
 
   .marker { position: absolute; left: 50%; top: 50%; width: 60px; height: 60px; transform: translate(-50%, -50%); }
   .marker svg { width: 100%; height: 100%; overflow: visible; }

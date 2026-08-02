@@ -128,6 +128,9 @@ _OPERATOR_ACTIONS = (
     "where_seen {subject} — answer the camera trail a subject was seen on.\n"
     "locate {subject} — find where a subject is now and switch to that camera.\n"
     "repeat_last {} — repeat the last answer.\n"
+    "narrate {on} — live narration: continuously describe the active camera aloud (needs a vision model).\n"
+    "follow {on} — follow-cam: keep the locked target centred with digital PTZ (lock a target first).\n"
+    "xray {on} — occlusion x-ray: keep tracking a subject that goes behind cover.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 

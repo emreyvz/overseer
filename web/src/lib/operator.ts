@@ -9,7 +9,8 @@ import {
   mode, activeCam, cameras, stage, forensicSeed, zoneEditor, alertRules, watchlistOpen, operatorOpen,
   suggestionsOpen, spatialOpen, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
   rosterInit, modules, toggleModule, detections, alerts, timeline, timelineOpen, petRegistry,
-  povZoom, muted, frame, system, flashBanner, triggerGlitch, type Mode,
+  povZoom, muted, frame, system, narrateOn, followOn, xrayOn, selectedDetection,
+  flashBanner, triggerGlitch, type Mode,
 } from './stores'
 import { sendCommand } from './ws'
 import { SIM } from './sim'
@@ -561,6 +562,25 @@ export const ACTIONS: Record<string, Action> = {
     return last ? last.text : 'nothing to repeat'
   },
 
+  // ---- experiential: narrate / follow-cam / occlusion x-ray ------------------
+  narrate: ({ on }) => {
+    const want = on !== false
+    if (want) { stage.set('live'); mode.set('pov') }
+    narrateOn.set(want)
+    return want ? 'live narration on — I will describe the scene aloud' : 'narration off'
+  },
+  follow: ({ on }) => {
+    const want = on !== false
+    if (want && !get(selectedDetection)) return 'lock onto a target first, then I can follow it'
+    followOn.set(want)
+    return want ? 'follow-cam on' : 'follow-cam off'
+  },
+  xray: ({ on }) => {
+    const want = on !== false
+    xrayOn.set(want)
+    return `occlusion x-ray ${want ? 'on — subjects behind cover stay tracked' : 'off'}`
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -694,6 +714,9 @@ export function routeCommand(raw: string): Plan | null {
   if (/(night|gece).*(camera|kamera)|karanlık kamera/i.test(low)) return { steps: [{ action: 'night_cameras', args: {} }], border: 'nav' }
   if (/(list|hangi|which).*(zone|bölge)|bölgeleri listele/i.test(low)) return { steps: [{ action: 'list_zones', args: {} }], border: 'nav' }
   if (/(repeat|tekrar( et| söyle)|ne demiştin)/i.test(low)) return { steps: [{ action: 'repeat_last', args: {} }], border: 'nav' }
+  if (/(narrat|sesli anlat|canlı anlat|anlatmaya başla|start describing)/i.test(low)) return { steps: [{ action: 'narrate', args: { on: !/(kapat|stop|\boff\b|durdur|sustur)/i.test(low) } }], border: 'nav' }
+  if (/(follow.?cam|takip et|takip kamerası|follow (the |that )?(target|subject|him|her|it|kişi))/i.test(low)) return { steps: [{ action: 'follow', args: { on: !/(kapat|stop|\boff\b|durdur|bırak)/i.test(low) } }], border: 'nav' }
+  if (/(x.?ray|röntgen|thru cover|behind cover|arkasını gör|occlusion)/i.test(low)) return { steps: [{ action: 'xray', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }
 
   // "search/find <q>" / "<q> ara/bul"

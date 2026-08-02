@@ -27,6 +27,7 @@ export interface Detection {
   make?: string         // vehicles: estimated brand from the ViT classifier (confidence-gated)
   intent?: { intent: string; confidence: number; why: string; alt?: string }  // people: estimated behaviour (probabilistic)
   coasting?: boolean    // last-known box held briefly through a momentary detection drop (predicted, not fresh)
+  occluded?: boolean    // occlusion x-ray: held+extrapolated while the subject is behind cover
 }
 
 export interface FrameMeta {
