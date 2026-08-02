@@ -1,7 +1,13 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.11.2", codename: "Acuity", date: "2026-08-02", tag: "latest",
+    { version: "0.12.0", codename: "Fourth Dimension", date: "2026-08-02", tag: "latest",
+      changes: [
+        { type: "added", text: "Chronoscape: a 4D time-travel replay inside the 3D view. Every tracked subject's recent path is lifted onto the reconstructed ground as an age-graded trail, with playheads that glide along each path. Scrub or play the scene's last minutes through time." },
+        { type: "added", text: "Social X-ray: each person's attention direction as a cone, and live links between people who are interacting (engaged, watching, together, approaching), from a pose-derived facing that works even when they stand still." },
+        { type: "added", text: "Both are driven from the operator by voice or text (\"time travel\", \"social x-ray\") and the modules rail; S toggles Social X-ray, the CHRONO button opens time-travel." },
+      ] },
+    { version: "0.11.2", codename: "Acuity", date: "2026-08-02", tag: "",
       changes: [
         { type: "added", text: "Vehicle body type (sedan, hatchback, SUV, station wagon, pickup, van, minibus...) via zero-shot CLIP, shown on cards and filterable in the roster." },
         { type: "added", text: "Estimated person stature (band plus approximate cm), shown on the card and filterable." },

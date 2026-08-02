@@ -137,6 +137,8 @@ _OPERATOR_ACTIONS = (
     "narrate {on} — live narration: continuously describe the active camera aloud (needs a vision model).\n"
     "follow {on} — follow-cam: keep the locked target centred with digital PTZ (lock a target first).\n"
     "xray {on} — occlusion x-ray: keep tracking a subject that goes behind cover.\n"
+    "social_xray {on} — Social X-ray: show each person's attention direction and who is interacting with whom.\n"
+    "chronoscape {camera?} — open the 3D view in time-travel mode: replay the scene's recent history as trails you scrub through time.\n"
     "enhance {} — start the box-select 'enhance' tool (the operator then drags a box to clarify it).\n"
     "say {text} — just speak a reply, for questions that need no action."
 )

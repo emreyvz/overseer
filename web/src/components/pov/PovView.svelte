@@ -9,6 +9,7 @@
   import { initFeedGL, type FeedGL } from '../../lib/hud/feedgl'
   import DetectionLayer from './DetectionLayer.svelte'
   import GhostLayer from './GhostLayer.svelte'
+  import SocialXray from './SocialXray.svelte'
   import TacticalMap from './TacticalMap.svelte'
   import MatchHighlight from './MatchHighlight.svelte'
   import PtzPad from './PtzPad.svelte'
@@ -26,6 +27,7 @@
   // experiential overlays (left MODULES rail): predictive ghosts on the feed + the top-down
   // tactical god-view. Both feed off the shared foresight engine; shown only over a real feed.
   let ghostsOn = $derived(!!$modules.find((m) => m.key === 'ghosts')?.on)
+  let socialOn = $derived(!!$modules.find((m) => m.key === 'social')?.on)
   let tacticalOn = $derived(!!$modules.find((m) => m.key === 'tactical')?.on)
   let showOverlays = $derived((live && !failed) || SIM)
 
@@ -114,6 +116,7 @@
     <div class="grid-overlay"></div>
     <DetectionLayer />
     {#if ghostsOn && showOverlays}<GhostLayer />{/if}
+    {#if socialOn && showOverlays}<SocialXray />{/if}
     <MatchHighlight />
   </div>
 

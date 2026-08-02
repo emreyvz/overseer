@@ -7,7 +7,7 @@
 import { get, writable } from 'svelte/store'
 import {
   mode, activeCam, cameras, stage, forensicSeed, zoneEditor, alertRules, watchlistOpen, operatorOpen,
-  suggestionsOpen, spatialOpen, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
+  suggestionsOpen, spatialOpen, chronoAuto, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
   rosterInit, modules, toggleModule, detections, alerts, timeline, timelineOpen, petRegistry,
   povZoom, muted, frame, system, narrateOn, followOn, xrayOn, enhanceMode, selectedDetection,
   flashBanner, triggerGlitch, type Mode,
@@ -634,6 +634,21 @@ export const ACTIONS: Record<string, Action> = {
     xrayOn.set(want)
     return `occlusion x-ray ${want ? 'on — subjects behind cover stay tracked' : 'off'}`
   },
+  // Social X-ray: draw each person's attention direction + who is interacting with whom.
+  social_xray: ({ on }) => {
+    const want = on !== false
+    if (want) { stage.set('live'); mode.set('pov') }
+    const m = get(modules).find((x) => x.key === 'social')
+    if (m && m.on !== want) toggleModule('social')
+    return want ? 'social x-ray on — showing gaze and who is interacting' : 'social x-ray off'
+  },
+  // Chronoscape: open the 3D view in time-travel mode to replay the scene's recent history.
+  chronoscape: ({ camera }) => {
+    const id = camera ? (findCam(S(camera))?.id ?? get(activeCam)) : get(activeCam)
+    if (!id) return 'no camera selected for the time-travel view'
+    stage.set('live'); mode.set('pov'); chronoAuto.set(true); spatialOpen.set(String(id))
+    return 'opening Chronoscape — replaying the recent history in 3D; use the scrubber to travel through time'
+  },
   enhance: () => {
     stage.set('live'); mode.set('pov'); enhanceMode.set(true)
     return 'draw a box on the frame and I will clarify that region'
@@ -775,6 +790,8 @@ export function routeCommand(raw: string): Plan | null {
   if (/(narrat|sesli anlat|canlı anlat|anlatmaya başla|start describing)/i.test(low)) return { steps: [{ action: 'narrate', args: { on: !/(kapat|stop|\boff\b|durdur|sustur)/i.test(low) } }], border: 'nav' }
   if (/(follow.?cam|takip et|takip kamerası|follow (the |that )?(target|subject|him|her|it|kişi))/i.test(low)) return { steps: [{ action: 'follow', args: { on: !/(kapat|stop|\boff\b|durdur|bırak)/i.test(low) } }], border: 'nav' }
   if (/(x.?ray|röntgen|thru cover|behind cover|arkasını gör|occlusion)/i.test(low)) return { steps: [{ action: 'xray', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  if (/(social x.?ray|sosyal|gaze|attention|who.*(talking|interact)|kim.*(konuş|etkileş)|bakış)/i.test(low)) return { steps: [{ action: 'social_xray', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  if (/(chronoscape|time.?travel|zaman yolcul|geçmişi (oynat|göster)|replay.*(history|3d)|4d)/i.test(low)) return { steps: [{ action: 'chronoscape', args: {} }], border: 'nav' }
   if (/(enhance|netleştir|yakınlaş.*netleş|clarify|zoom.*enhance|büyüt.*netleş)/i.test(low)) return { steps: [{ action: 'enhance', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }
 

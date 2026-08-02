@@ -114,7 +114,7 @@ function seedModules() {
   try { saved = JSON.parse(localStorage.getItem(MODULES_LS) || '{}') } catch { saved = {} }
   return MODULES.map((m) => ({
     ...m,
-    on: m.key in saved ? !!saved[m.key] : !['heatmap', 'motion', 'tactical', 'ghosts'].includes(m.key),
+    on: m.key in saved ? !!saved[m.key] : !['heatmap', 'motion', 'tactical', 'ghosts', 'social'].includes(m.key),
   }))
 }
 export const modules = writable(seedModules())
@@ -165,6 +165,7 @@ export const aiOpen = writable(false)                        // AI assistant con
 export const investigateCase = writable<number | null>(null) // open case id in the investigation workspace
 export const suggestionsOpen = writable(false)               // smart suggestions advisor screen
 export const spatialOpen = writable<string | null>(null)     // 3D spatial scene for a camera (source id)
+export const chronoAuto = writable(false)                    // request the spatial view to open in Chronoscape (time-travel) mode
 export const dossierOpen = writable(false)  // stationary editor panel for the selected tracklet
 export const alertsScreen = writable(false)                  // cross-camera alerts board (all cameras)
 export const operatorOpen = writable(false)                  // central AI Operator console (voice + text)

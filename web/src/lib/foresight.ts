@@ -19,6 +19,7 @@ export interface FTrack {
   w: number; h: number       // box size, normalised
   vx: number; vy: number     // ground-point velocity, normalised units / second
   speed: number              // |v|
+  facing?: number            // attention heading, image-space degrees (pose-based; else motion heading when moving)
   hist: { x: number; y: number }[]  // recent ground points (trail), newest last
 }
 
@@ -66,11 +67,15 @@ function update(dets: Detection[]) {
     let speed = Math.hypot(vx, vy)
     if (speed < JITTER) { vx = 0; vy = 0; speed = 0 }   // kill idle jitter
     const d = e.det
+    // Attention heading: prefer the pose-derived facing (works when standing still); otherwise fall
+    // back to the motion heading while the subject is actually moving.
+    let facing: number | undefined = typeof d.facing === 'number' ? d.facing : undefined
+    if (facing === undefined && speed > 0.03) facing = (Math.atan2(vy, vx) * 180) / Math.PI
     out.push({
       id, cls: d.cls, klass: d.klass, alarm: isAlarm(d),
       gx: cur.gx, gy: cur.gy,
       cx: d.bbox[0] + d.bbox[2] / 2, cy: d.bbox[1] + d.bbox[3] / 2,
-      w: d.bbox[2], h: d.bbox[3], vx, vy, speed,
+      w: d.bbox[2], h: d.bbox[3], vx, vy, speed, facing,
       hist: s.slice(-MAX_TRAIL).map((p) => ({ x: p.gx, y: p.gy })),
     })
   }
