@@ -47,6 +47,16 @@
   let auto = $state(false)
   let measure = $state(false)                  // click-to-measure mode
   let measureDist = $state<number | null>(null) // last measured distance (scene units)
+  // HoloReel: capture a few seconds of successive 3D reconstructions, then replay them like a video
+  // you can fly through. Each frame is a full /api/spatial scene rebuilt on the fly as it plays.
+  type Scene = NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>
+  const REEL_N = 20                            // frames to capture (~6-10 s at the backend's build rate)
+  let reel = $state(false)
+  let reelRec = $state(false)
+  let reelPlaying = $state(false)
+  let reelIdx = $state(0)
+  let reelFrames = $state<Scene[]>([])
+  let reelTimer: ReturnType<typeof setInterval> | null = null
 
   // Back-projection / depth-to-Z tuning (settled by visual iteration across cameras).
   const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6
@@ -895,9 +905,54 @@
   function toggleAuto() {
     auto = !auto
     sfx('click')
-    // Walkthrough: rebuild the scene often so it feels like moving through the live moment in 3D.
-    if (auto) autoTimer = setInterval(() => loadScene(false), 2200)
+    if (auto) autoTimer = setInterval(() => loadScene(false), 4000)
     else { if (autoTimer) { clearInterval(autoTimer); autoTimer = null } prevDisp = null }
+  }
+
+  // ---- HoloReel: record a short 3D reel, then replay it as a fly-through video -----------------
+  let reelBuilding = false
+  async function reelShow(i: number) {
+    if (reelBuilding || !reelFrames[i]) return
+    reelBuilding = true
+    try { await buildCloud(reelFrames[i]) } catch { /* skip */ } finally { reelBuilding = false }
+  }
+  async function startReel() {
+    if (reel) return
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; auto = false }   // the reel owns the scene
+    reel = true; reelRec = true; reelPlaying = false; reelFrames = []; reelIdx = 0
+    sfx('sonar')
+    for (let i = 0; i < REEL_N && reel; i++) {          // capture N successive reconstructions
+      try {
+        const r = await api.spatial(cam, 384)
+        if (r?.scene) reelFrames = [...reelFrames, r.scene]
+      } catch { /* skip a frame */ }
+      await new Promise((res) => setTimeout(res, 120))  // a small gap so successive frames differ
+    }
+    if (!reel) return
+    reelRec = false; reelIdx = 0
+    if (reelFrames.length) { await reelShow(0); reelToggle() } else exitReel()   // auto-play
+  }
+  function reelToggle() {
+    reelPlaying = !reelPlaying; sfx('click', { volume: 0.25 })
+    if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
+    if (reelPlaying) {
+      reelTimer = setInterval(() => {                   // ~4.5 fps; each frame is a full mesh rebuild
+        if (!reelFrames.length || reelBuilding) return
+        reelIdx = (reelIdx + 1) % reelFrames.length
+        reelShow(reelIdx)
+      }, 220)
+    }
+  }
+  function reelOnSeek() {
+    reelPlaying = false
+    if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
+    reelShow(reelIdx)
+  }
+  function exitReel() {
+    reel = false; reelRec = false; reelPlaying = false
+    if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
+    reelFrames = []
+    sfx('click'); loadScene(false)
   }
 
   function onkey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); onclose() } }
@@ -912,6 +967,8 @@
   onDestroy(() => {
     window.removeEventListener('keydown', onkey, true)
     if (autoTimer) clearInterval(autoTimer)
+    if (reelTimer) clearInterval(reelTimer)
+    reel = false
     if (raf) cancelAnimationFrame(raf)
     ro?.disconnect()
     if (renderer) { renderer.domElement.removeEventListener('pointerdown', onPointerDown); renderer.domElement.removeEventListener('pointerup', onPointerUp) }
@@ -938,7 +995,8 @@
     <span class="spacer"></span>
     {#if entityCount}<span class="ec caps">◈ {entityCount} ENTIT{entityCount === 1 ? 'Y' : 'IES'}</span>{/if}
     <button class="ref caps" class:on={measure} onclick={toggleMeasure}>⟺ MEASURE</button>
-    <button class="ref caps" class:on={auto} onclick={toggleAuto} title="keep rebuilding the scene so you can walk through the live moment in 3D">{auto ? '◉ WALKTHROUGH' : '○ WALKTHROUGH'}</button>
+    <button class="ref caps" class:on={reel} onclick={reel ? exitReel : startReel} title="capture a few seconds of 3D and replay it like a video you can fly through">◆ HOLOREEL</button>
+    <button class="ref caps" class:on={auto} onclick={toggleAuto}>{auto ? '● LIVE' : '○ LIVE'}</button>
     <button class="ref caps" onclick={() => loadScene(true)}>↻ RECAPTURE</button>
     <button class="x caps" onclick={onclose}>✕ CLOSE</button>
   </header>
@@ -973,10 +1031,19 @@
       <span class="mmlabel caps">◹ TOP-DOWN</span>
       <canvas bind:this={mapCv} width="184" height="150"></canvas>
     </div>
-    {#if measure}
+    {#if reel}
+      <div class="reelbar caps">
+        {#if reelRec}
+          <span class="rlrec">● CAPTURING 3D REEL · {reelFrames.length}/{REEL_N}</span>
+        {:else}
+          <button class="cplay" onclick={reelToggle} aria-label={reelPlaying ? 'pause' : 'play'}>{reelPlaying ? '❚❚' : '▶'}</button>
+          <input class="cscrub" type="range" min="0" max={Math.max(0, reelFrames.length - 1)} step="1" bind:value={reelIdx} oninput={reelOnSeek} />
+          <span class="ctime">{reelFrames.length ? reelIdx + 1 : 0}/{reelFrames.length}</span>
+          <span class="cspan">◆ 3D REEL · DRAG TO ORBIT WHILE IT PLAYS</span>
+        {/if}
+      </div>
+    {:else if measure}
       <div class="hint caps meas">⟺ MEASURE · CLICK TWO POINTS ON THE SURFACE{#if measureDist !== null} · <b>{measureDist.toFixed(2)} UNITS</b>{/if}</div>
-    {:else if auto}
-      <div class="hint caps">◉ WALKTHROUGH · THE SCENE REBUILDS LIVE · DRAG TO WALK THROUGH IT IN 3D</div>
     {:else}
       <div class="hint caps">DRAG TO ORBIT · SCROLL TO ZOOM · RIGHT-DRAG TO PAN</div>
     {/if}
@@ -1022,6 +1089,15 @@
   .hint { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: var(--ink-ghost);
     font-size: 8px; letter-spacing: 0.2em; pointer-events: none; }
   .hint.meas { color: var(--cyan); } .hint b { color: #eaf2f6; }
+  /* HoloReel replay bar */
+  .reelbar { position: absolute; left: 50%; transform: translateX(-50%); bottom: 14px; display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px; border: 1px solid var(--hairline); background: rgba(4,7,10,0.72); backdrop-filter: blur(3px); width: min(620px, 66vw); }
+  .reelbar .cplay { width: 26px; height: 22px; flex: 0 0 auto; border: 1px solid var(--hairline); background: none; color: var(--cyan); font-size: 10px; cursor: pointer; }
+  .reelbar .cplay:hover { border-color: var(--cyan); }
+  .reelbar .cscrub { flex: 1 1 auto; accent-color: var(--cyan); cursor: pointer; }
+  .reelbar .ctime { flex: 0 0 auto; min-width: 42px; text-align: right; color: #eaf2f6; font-size: 9px; letter-spacing: 0.14em; }
+  .reelbar .cspan { flex: 0 0 auto; color: var(--ink-ghost); font-size: 7.5px; letter-spacing: 0.18em; }
+  .reelbar .rlrec { color: var(--scarlet); font-size: 9px; letter-spacing: 0.16em; }
   .minimap { position: absolute; left: 16px; bottom: 16px; padding: 6px; border: 1px solid var(--hairline);
     background: rgba(4,7,10,0.55); backdrop-filter: blur(2px); pointer-events: none; }
   .minimap canvas { display: block; }
