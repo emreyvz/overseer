@@ -428,8 +428,10 @@ class RosterHarvester(threading.Thread):
                  relate_fn: Callable[[list, Any, float], None] | None = None,
                  profile_fn: Callable[[object, float, list, list], None] | None = None,
                  watch_cooldown: float = 45.0,
-                 interval: float = 4.0) -> None:
+                 interval: float = 4.0,
+                 pov_active_fn: Callable[[], bool] | None = None) -> None:
         super().__init__(daemon=True, name="RosterHarvester")
+        self._pov_active_fn = pov_active_fn
         self._roster = roster
         self._sources_fn = sources_fn
         self._frame_fn = frame_fn
@@ -569,8 +571,16 @@ class RosterHarvester(threading.Thread):
                     self._roster.auto_merge_pass()
                 except Exception:  # noqa: BLE001 - auto-merge must never kill the harvester
                     pass
-            # pace so every camera is visited about once per `interval`
-            self._stopped.wait(max(0.25, self._interval / len(sources)))
+            # Pace so every camera is visited about once per `interval`. While a camera is being
+            # actively viewed (live POV analysis), back WAY off: the harvester's own YOLO + ReID on
+            # every camera otherwise competes for the GPU and the GIL and makes the live feed stutter.
+            base = self._interval / len(sources)
+            try:
+                if self._pov_active_fn is not None and self._pov_active_fn():
+                    base = self._interval * 2.0   # ~8x slower per-camera sweep while viewing live
+            except Exception:  # noqa: BLE001
+                pass
+            self._stopped.wait(max(0.25, base))
 
     def stop(self) -> None:
         self._stopped.set()

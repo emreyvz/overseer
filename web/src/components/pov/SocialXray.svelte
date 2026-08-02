@@ -82,9 +82,9 @@
         const bFa = pb.facing ? facesToward(pb.fx, pb.fy, pb.hx, pb.hy, pa.hx, pa.hy) : -1
         const closing = ((a.vx - b.vx) * (a.gx - b.gx) + (a.vy - b.vy) * (a.gy - b.gy)) < -0.003
         let kind = '', label = ''
-        if (prox < 1.8 && aFb > TOWARD && bFa > TOWARD) { kind = 'engaged'; label = 'ENGAGED' }
-        else if (prox < 1.9 && (aFb > TOWARD || bFa > TOWARD)) { kind = 'watch'; label = 'WATCHING' }
-        else if (prox < 3.0 && closing && (a.speed > 0.055 || b.speed > 0.055)) { kind = 'approach'; label = 'APPROACHING' }
+        if (prox < 2.1 && aFb > TOWARD && bFa > TOWARD) { kind = 'engaged'; label = 'ENGAGED' }
+        else if (prox < 2.2 && (aFb > TOWARD || bFa > TOWARD)) { kind = 'watch'; label = 'WATCHING' }
+        else if (prox < 3.2 && closing && (a.speed > 0.05 || b.speed > 0.05)) { kind = 'approach'; label = 'APPROACHING' }
         else continue
         cand.set(a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`, { kind, label })
       }
@@ -127,11 +127,11 @@
       ls.push({ ax: pa.hx, ay: pa.hy, bx: pb.hx, by: pb.hy, mx: (pa.hx + pb.hx) / 2, my: (pa.hy + pb.hy) / 2, op: Math.min(1, l.s), kind: l.kind, label: l.label, lab: false })
     }
     ls.sort((p, q) => q.op - p.op)
-    // Show a label only on strong links, and never two labels on top of each other (greedy spacing).
+    // Label every visible link, but never stack two labels on the same spot (greedy spacing).
     const placed: { x: number; y: number }[] = []
     for (const l of ls) {
-      if (l.op < 0.6) continue
-      if (placed.every((p) => Math.hypot(p.x - l.mx, p.y - l.my) > 42)) { l.lab = true; placed.push({ x: l.mx, y: l.my }) }
+      if (l.op < 0.35) continue
+      if (placed.every((p) => Math.hypot(p.x - l.mx, p.y - l.my) > 44)) { l.lab = true; placed.push({ x: l.mx, y: l.my }) }
     }
     cones = cs
     links = ls.slice(0, 14)

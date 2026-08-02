@@ -607,6 +607,7 @@ class Backend:
                     profile_fn=self._roster_profile_frame,
                     watch_cooldown=float(self.config.get("roster.watch_cooldown", 45.0)),
                     interval=float(self.config.get("roster.interval", 4.0)),
+                    pov_active_fn=lambda: self._source_id is not None,   # back off while viewing live
                 )
                 self._apply_detection_filters()  # gate the harvester's YOLO to enabled classes too
                 self._roster_harvester.start()

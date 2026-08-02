@@ -169,17 +169,19 @@ def _resolve_source(token: str) -> int | None:
 
 @app.get("/stream/{source_id}")
 async def stream(source_id: str) -> StreamingResponse:
-    async def gen():
+    # A SYNC generator: Starlette iterates it in a threadpool, so its pacing (time.sleep) and
+    # frame-fetch run OFF the single asyncio event loop. Only the socket send touches the loop, so
+    # the video stream stops competing with WebSocket emits / other endpoints for the loop's time.
+    def gen():
+        import time as _t
         boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
         last = None
         while True:
-            # the requested camera specifically: full-rate display frame if it's the active one,
-            # else the persistent warm relay — so the feed never gaps on switch.
             jpeg = backend.stream_frame(source_id) if backend else None
             if jpeg is not None and jpeg is not last:   # poll fast, but only send genuinely new frames
                 yield boundary + jpeg + b"\r\n"
                 last = jpeg
-            await asyncio.sleep(1 / 60)   # poll faster than the 30 fps source so no new frame waits
+            _t.sleep(1 / 60)   # poll faster than the 30 fps source so no new frame waits
     return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 
