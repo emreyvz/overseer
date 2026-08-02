@@ -16,7 +16,7 @@
   const D2R = Math.PI / 180
   const CONE_HALF = 24 * D2R
   const CONE_LEN = 1.35               // body-heights: short, so a cone never reaches a distant person
-  const TOWARD = Math.cos(38 * D2R)   // tight facing gate
+  const TOWARD = Math.cos(32 * D2R)   // tight facing gate: only a definite "looking at" counts
   const EASE = 0.18                   // position smoothing per frame
   const RISE = 0.12                   // link fade-in per frame (~0.25 s to full)
   const FALL = 0.006                  // link fade-out per frame (~2.8 s lingering, so you can read it)
@@ -28,7 +28,7 @@
   const LNK = new Map<string, L>()    // link strengths (hysteresis), key = "idA|idB"
 
   let cones = $state<Array<{ x: number; y: number; p1x: number; p1y: number; p2x: number; p2y: number; op: number; alarm: boolean }>>([])
-  let links = $state<Array<{ ax: number; ay: number; bx: number; by: number; mx: number; my: number; op: number; kind: string; label: string }>>([])
+  let links = $state<Array<{ ax: number; ay: number; bx: number; by: number; mx: number; my: number; op: number; kind: string; label: string; lab: boolean }>>([])
 
   // Eye level: a little below the top of the head, so the attention cone reads as a line of sight.
   const headPix = (t: FTrack) => ({ x: t.cx * W, y: (t.cy - t.h * 0.42) * H })
@@ -82,9 +82,9 @@
         const bFa = pb.facing ? facesToward(pb.fx, pb.fy, pb.hx, pb.hy, pa.hx, pa.hy) : -1
         const closing = ((a.vx - b.vx) * (a.gx - b.gx) + (a.vy - b.vy) * (a.gy - b.gy)) < -0.003
         let kind = '', label = ''
-        if (prox < 2.0 && aFb > TOWARD && bFa > TOWARD) { kind = 'engaged'; label = 'ENGAGED' }
-        else if (prox < 2.0 && (aFb > TOWARD || bFa > TOWARD)) { kind = 'watch'; label = 'WATCHING' }
-        else if (prox < 3.2 && closing && (a.speed > 0.05 || b.speed > 0.05)) { kind = 'approach'; label = 'APPROACHING' }
+        if (prox < 1.8 && aFb > TOWARD && bFa > TOWARD) { kind = 'engaged'; label = 'ENGAGED' }
+        else if (prox < 1.9 && (aFb > TOWARD || bFa > TOWARD)) { kind = 'watch'; label = 'WATCHING' }
+        else if (prox < 3.0 && closing && (a.speed > 0.055 || b.speed > 0.055)) { kind = 'approach'; label = 'APPROACHING' }
         else continue
         cand.set(a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`, { kind, label })
       }
@@ -124,10 +124,17 @@
       if (focus && ia !== focus && ib !== focus) continue   // focused: only this person's links
       const pa = P.get(ia), pb = P.get(ib)
       if (!pa || !pb) continue
-      ls.push({ ax: pa.hx, ay: pa.hy, bx: pb.hx, by: pb.hy, mx: (pa.hx + pb.hx) / 2, my: (pa.hy + pb.hy) / 2, op: Math.min(1, l.s), kind: l.kind, label: l.label })
+      ls.push({ ax: pa.hx, ay: pa.hy, bx: pb.hx, by: pb.hy, mx: (pa.hx + pb.hx) / 2, my: (pa.hy + pb.hy) / 2, op: Math.min(1, l.s), kind: l.kind, label: l.label, lab: false })
+    }
+    ls.sort((p, q) => q.op - p.op)
+    // Show a label only on strong links, and never two labels on top of each other (greedy spacing).
+    const placed: { x: number; y: number }[] = []
+    for (const l of ls) {
+      if (l.op < 0.6) continue
+      if (placed.every((p) => Math.hypot(p.x - l.mx, p.y - l.my) > 42)) { l.lab = true; placed.push({ x: l.mx, y: l.my }) }
     }
     cones = cs
-    links = ls.sort((p, q) => q.op - p.op).slice(0, 14)
+    links = ls.slice(0, 14)
   }
 
   onMount(() => { raf = requestAnimationFrame(frame) })
@@ -143,7 +150,7 @@
       <line class="link {l.kind}" style="opacity:{l.op}" x1={l.ax} y1={l.ay} x2={l.bx} y2={l.by} />
       <circle class="node {l.kind}" style="opacity:{l.op}" cx={l.ax} cy={l.ay} r="3" />
       <circle class="node {l.kind}" style="opacity:{l.op}" cx={l.bx} cy={l.by} r="3" />
-      {#if l.op > 0.55}<text class="ltxt {l.kind}" style="opacity:{l.op}" x={l.mx} y={l.my - 4}>{l.label}</text>{/if}
+      {#if l.lab}<text class="ltxt {l.kind}" style="opacity:{l.op}" x={l.mx} y={l.my - 4}>{l.label}</text>{/if}
     {/each}
   </svg>
 </div>

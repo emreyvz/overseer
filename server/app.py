@@ -179,7 +179,7 @@ async def stream(source_id: str) -> StreamingResponse:
             if jpeg is not None and jpeg is not last:   # poll fast, but only send genuinely new frames
                 yield boundary + jpeg + b"\r\n"
                 last = jpeg
-            await asyncio.sleep(1 / 30)
+            await asyncio.sleep(1 / 60)   # poll faster than the 30 fps source so no new frame waits
     return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 

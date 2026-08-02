@@ -1357,27 +1357,44 @@ class Backend:
         self._raw_seq += 1
 
     def _display_encoder_loop(self) -> None:
-        """Encode the newest raw frame to JPEG at a steady ~30 fps, off the capture and analysis
-        threads. cv2.imencode releases the GIL, so this produces a smooth display source independent
-        of how busy analysis is. Only encodes when a new frame has arrived."""
+        """Encode the newest raw frame to JPEG at a steady 30 fps, off the capture and analysis threads.
+        DEADLINE-paced: the loop absorbs its own ~8 ms encode into the frame interval (a naive
+        sleep(1/30)+encode ran at only ~22 fps), so the display source is genuinely 30 fps."""
+        target = 1.0 / 30.0
+        nxt = time.perf_counter()
         while self._disp_run:
-            time.sleep(1.0 / 30.0)
-            if self._raw_seq == self._enc_seq:
-                continue
-            img = self._latest_raw
-            if img is None:
-                continue
-            self._enc_seq = self._raw_seq
-            try:
-                ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
-                if ok:
-                    self._latest_raw_jpeg = buf.tobytes()
-            except Exception:  # noqa: BLE001
-                pass
+            nxt += target
+            if self._raw_seq != self._enc_seq:
+                img = self._latest_raw
+                if img is not None:
+                    self._enc_seq = self._raw_seq
+                    try:
+                        ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
+                        if ok:
+                            self._latest_raw_jpeg = buf.tobytes()
+                    except Exception:  # noqa: BLE001
+                        pass
+            rem = nxt - time.perf_counter()
+            if rem > 0:
+                time.sleep(rem)
+            else:
+                nxt = time.perf_counter()   # fell behind; resync rather than spiral
 
     def _start_display_encoder(self) -> None:
         if self._disp_thread is not None:
             return
+        # Sharpen thread scheduling so the encoder + event loop share the GIL smoothly: a shorter GIL
+        # switch interval, and (Windows) a 1 ms timer so time.sleep is precise instead of ~15 ms.
+        try:
+            import sys
+            sys.setswitchinterval(0.0005)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            import ctypes
+            ctypes.windll.winmm.timeBeginPeriod(1)   # no-op off Windows (AttributeError caught)
+        except Exception:  # noqa: BLE001
+            pass
         self._disp_run = True
         self._disp_thread = threading.Thread(target=self._display_encoder_loop, name="display-encoder", daemon=True)
         self._disp_thread.start()

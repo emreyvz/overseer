@@ -1,7 +1,14 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.3", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+    { version: "0.12.4", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+      changes: [
+        { type: "fixed", text: "The actual video-smoothness bug: the display encoder ran sleep(1/30)+encode back to back, so it only hit ~22 fps and stuttered. It is now deadline-paced to a real 30 fps, with a 1ms timer and a shorter GIL switch interval so the encoder and the server loop share time cleanly. The feed should finally be smooth." },
+        { type: "added", text: "HoloReel: capture a few seconds of successive 3D reconstructions, then replay them like a video with a scrub bar while you fly through the scene in 3D. Pause any time. (The 3D live mode keeps its old LIVE name.)" },
+        { type: "improved", text: "Detection boxes glide more smoothly (more velocity feed-forward to carry them between updates)." },
+        { type: "improved", text: "Social X-ray: link labels no longer overlap, and the facing test is stricter so a link is a definite judgement." },
+      ] },
+    { version: "0.12.3", codename: "Fourth Dimension", date: "2026-08-03", tag: "",
       changes: [
         { type: "improved", text: "Smooth video, properly this time. The real cause was the single server event loop being saturated by an unthrottled per-frame detections push plus a blocking status heartbeat, which starved the stream. The detections push is now throttled, the heartbeat runs off the loop (and the GPU handle is cached, not re-opened every 2s), and a dedicated encoder thread produces the display feed at a steady 30fps independent of analysis." },
         { type: "improved", text: "Social X-ray is much easier to read: links persist far longer (about 3 seconds) so you can follow them, the attention cone starts at eye level, and focusing a person (click) now shows only that person's cone and links, nothing else." },
