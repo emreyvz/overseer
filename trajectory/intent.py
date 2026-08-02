@@ -57,14 +57,15 @@ class IntentEstimator:
             self._tracks[track_id] = tr
         x, y = _bottom_center(bbox)
         bx1, by1, bx2, by2 = bbox
-        aspect = (bx2 - bx1) / max(1.0, (by2 - by1))   # width/height: >1 horizontal, <0.6 upright
-        tr.points.append((x, y, now, aspect))
+        box_h = by2 - by1
+        aspect = (bx2 - bx1) / max(1.0, box_h)         # width/height: >1 horizontal, <0.6 upright
+        tr.points.append((x, y, now, aspect, box_h))
         tr.last_seen = now
         while len(tr.points) > 2 and now - tr.points[1][2] > self._window:
             tr.points.popleft()
         if len(tr.points) < self._min_points:
             return None
-        x0, y0, t0, _ = tr.points[0]
+        x0, y0, t0, *_ = tr.points[0]
         span = now - t0
         if span < self._min_span:
             return None
@@ -95,6 +96,13 @@ class IntentEstimator:
         aspect = asps[len(asps) // 2]                        # median box shape over the window
         horizontal = aspect > 1.15                           # wider than tall => lying / swimming
         seated = 0.62 < aspect <= 1.15                       # compact box => seated posture
+        # depth cue from apparent size: a growing box is coming toward the camera, a shrinking one
+        # is walking away. Median over the first/last third of the window to shrug off jitter.
+        heights = [p[4] for p in pts]
+        third = max(1, len(heights) // 3)
+        early_h = sorted(heights[:third])[third // 2]
+        late_h = sorted(heights[-third:])[(len(heights[-third:]) - 1) // 2]
+        grew = late_h / max(1.0, early_h)
 
         scores: list[tuple[str, float, str]] = []
         if dwell > 0.35:                                     # staying in one place: read the posture
@@ -107,6 +115,12 @@ class IntentEstimator:
                 label = "loitering" if span >= self._loiter else "waiting"
                 scores.append((label, s, f"mostly stationary for {int(span)}s"))
         if spread >= loiter_r * 0.8:                         # genuinely moving around
+            if grew > 1.30:                                  # apparent size rising => coming closer
+                scores.append(("approaching", round(min(0.9, grew - 1.0 + 0.2), 2),
+                               "getting closer to the camera"))
+            elif grew < 0.77:                                # apparent size falling => walking off
+                scores.append(("moving away", round(min(0.9, 1.0 - grew + 0.2), 2),
+                               "moving away from the camera"))
             if horizontal and speed_px < 0.16 * frame_diag:  # horizontal + slow drift => swimming
                 scores.append(("swimming", round(min(0.85, 0.4 + path_ratio * 0.5), 2),
                                "horizontal, moving slowly through the scene"))

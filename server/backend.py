@@ -31,7 +31,7 @@ from core.config import load_config
 from core.pipeline import AnalysisResult, AnalysisWorker, EventRecorder
 from events.bus import EventBus
 from events.types import Event
-from forensic.palette import dominant_color_name
+from forensic.palette import dominant_color_name, dominant_color_name_conf, skin_fraction
 from match.engine import SourceFrames
 from match.rolling import RollingFrameStore
 from match.types import Query
@@ -1234,9 +1234,16 @@ class Backend:
 
     def _roster_attrs(self, crop: Any, cls: str) -> dict:
         try:
-            band = crop[: max(1, crop.shape[0] // 2)] if cls == "person" else crop
-            col = dominant_color_name(band, ignore_skin=(cls == "person"))
-            attrs = {"upper_color": col} if col and col != "unknown" else {}
+            if cls == "person":
+                ph, pw = crop.shape[:2]   # torso ROI: below the head, centre only (see _appearance)
+                band = crop[int(ph * 0.18):int(ph * 0.55), int(pw * 0.25):int(pw * 0.75)]
+            else:
+                band = crop
+            if cls == "person" and getattr(band, "size", 0) and skin_fraction(band) > 0.6:
+                attrs = {"upper_color": "bare skin"}   # shirtless: report it, not a made-up shirt colour
+            else:
+                col, cconf = dominant_color_name_conf(band, ignore_skin=(cls == "person")) if getattr(band, "size", 0) else ("unknown", 0.0)
+                attrs = {"upper_color": col} if (col != "unknown" and cconf >= 0.5) else {}
             if cls == "vehicle":
                 hit = self.make.classify(crop)   # confidence-gated brand; None if unsure
                 if hit:
@@ -1306,13 +1313,23 @@ class Backend:
             attrs["height_cm"] = cm
             attrs["height"] = "short" if cm < 168 else ("tall" if cm > 182 else "medium")
         if bh >= 24 and bw >= 12:  # skip tiny/far crops where colour is unreliable
-            crop = img[y1:y2, x1:x2]
-            if cls == "person":  # upper body carries the discriminative clothing colour
-                crop = crop[: max(1, crop.shape[0] // 2)]
+            if cls == "person":
+                # Torso ROI only: skip the head (top ~18%) and trim the arms / background people at
+                # the sides (keep the centre 50%), so the shirt drives the colour rather than face,
+                # hair, skin and whatever is standing behind them.
+                roi = img[y1 + int(bh * 0.18):y1 + int(bh * 0.55), x1 + int(bw * 0.25):x1 + int(bw * 0.75)]
+            else:
+                roi = img[y1:y2, x1:x2]
             try:
-                color = dominant_color_name(crop, ignore_skin=(cls == "person"))
-                if color and color != "bilinmiyor":
-                    attrs["upper_color"] = color
+                if getattr(roi, "size", 0):
+                    if cls == "person" and skin_fraction(roi) > 0.6:
+                        attrs["upper_color"] = "bare skin"   # shirtless: report it, don't invent a shirt colour
+                    else:
+                        name, conf = dominant_color_name_conf(roi, ignore_skin=(cls == "person"))
+                        # Only assert a colour when the crop is clearly that colour: on a murky/contaminated
+                        # crop the operator would far rather see nothing than a confident wrong guess.
+                        if name != "unknown" and conf >= 0.5:
+                            attrs["upper_color"] = name
             except Exception:  # noqa: BLE001
                 pass
         return attrs

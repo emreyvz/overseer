@@ -81,7 +81,11 @@ class BodyTypeClassifier:
         try:
             import torch
             from transformers import CLIPModel, CLIPProcessor
-            device = self._device or ("cuda" if torch.cuda.is_available() else "cpu")
+            # CPU by default (like the make ViT): this runs only in the throttled background reader,
+            # so its latency is a non-issue, and keeping it off the GPU leaves headroom for depth, the
+            # detector and STT. A full GPU otherwise OOMs this AND cascades (STT then can't load).
+            # Override with OVERSEER_CLIP_DEVICE=cuda when there is spare VRAM.
+            device = self._device or os.environ.get("OVERSEER_CLIP_DEVICE", "cpu")
             model = CLIPModel.from_pretrained(_MODEL_ID).to(device).eval()
             proc = CLIPProcessor.from_pretrained(_MODEL_ID)
             # Precompute the ensembled, normalized text prototype per body type (once).

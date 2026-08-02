@@ -52,13 +52,24 @@ class STT:
                         device, compute = "cuda", "float16"
                 except Exception:  # noqa: BLE001
                     pass
+                log.info("loading offline STT model '{}' on {} (one time)...", _MODEL_NAME, device)
+                try:
+                    self._model = WhisperModel(_MODEL_NAME, device=device, compute_type=compute,
+                                               download_root=_MODELS_DIR)
+                except Exception as gpu_exc:  # noqa: BLE001
+                    # The GPU can be full (depth + detector + CLIP + ReID already resident), so a cuda
+                    # load OOMs. Voice must not die for that: fall back to CPU, which is plenty for a
+                    # short command. Without this the operator silently transcribes nothing.
+                    if device != "cuda":
+                        raise
+                    log.warning("STT cuda load failed ({}); falling back to CPU", str(gpu_exc)[:120])
+                    device, compute = "cpu", "int8"
+                    self._model = WhisperModel(_MODEL_NAME, device=device, compute_type=compute,
+                                               download_root=_MODELS_DIR)
                 self._device = device
                 # A GPU makes a wider beam nearly free, and it sharpens Turkish noticeably; on CPU
                 # stay greedy so a command still returns quickly.
                 self._beam = 5 if device == "cuda" else 1
-                log.info("loading offline STT model '{}' on {} (one time)...", _MODEL_NAME, device)
-                self._model = WhisperModel(_MODEL_NAME, device=device, compute_type=compute,
-                                           download_root=_MODELS_DIR)
                 return True
             except Exception as exc:  # noqa: BLE001
                 log.warning("offline STT unavailable ({}): pip install faster-whisper", str(exc)[:200])
@@ -99,18 +110,24 @@ class STT:
         tmp = None
         try:
             arr = self._wav_to_array(audio)
-            # Fast decode: greedy (beam 1), no cross-segment context, no timestamps. language is
-            # honoured (e.g. 'tr' for Turkish); None auto-detects.
-            opts = dict(language=(lang or None), vad_filter=True, beam_size=self._beam,
-                        condition_on_previous_text=False, without_timestamps=True)
-            if arr is not None:
-                segments, _info = self._model.transcribe(arr, **opts)
-            else:
+            src = arr
+            if arr is None:
                 with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
                     f.write(audio)
                     tmp = f.name
-                segments, _info = self._model.transcribe(tmp, **opts)
-            return " ".join(s.text for s in segments).strip() or None
+                src = tmp
+
+            def _run(vad: bool) -> str:
+                # No cross-segment context, no timestamps; language honoured ('tr' for Turkish).
+                opts = dict(language=(lang or None), vad_filter=vad, beam_size=self._beam,
+                            condition_on_previous_text=False, without_timestamps=True)
+                segments, _info = self._model.transcribe(src, **opts)
+                return " ".join(s.text for s in segments).strip()
+
+            text = _run(True)
+            if not text:   # a short / quiet command can be gated away entirely by VAD -> retry raw
+                text = _run(False)
+            return text or None
         except Exception as exc:  # noqa: BLE001
             log.warning("STT transcribe failed: {}", str(exc)[:200])
             return None
