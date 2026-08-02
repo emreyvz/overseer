@@ -35,7 +35,7 @@ def enhance_region(frame, box, sr=None, scale: float = 4.0) -> str | None:
     crop = frame[y0:y1, x0:x1]
     ch, cw = crop.shape[:2]
     # target resolution — generous so the loupe shows real detail (not a few upscaled blocks)
-    th = int(min(1080, max(ch * scale, 300)))
+    th = int(min(1440, max(ch * scale, 360)))
     tw = max(1, int(cw * (th / ch)))
     # denoise first so upscaling doesn't amplify sensor grain / JPEG blocks
     base = cv2.bilateralFilter(crop, 7, 55, 55) if min(ch, cw) >= 10 else crop
@@ -43,10 +43,23 @@ def enhance_region(frame, box, sr=None, scale: float = 4.0) -> str | None:
     if sr is not None:
         try:
             if sr.available():
-                srimg = sr.enhance(crop)   # learned reconstruction (adds true detail)
-                if srimg is not None:
-                    srimg = cv2.resize(srimg, (tw, th), interpolation=cv2.INTER_LANCZOS4)
-                    up = cv2.addWeighted(up, 0.45, srimg, 0.55, 0)   # lean on SR, keep Lanczos texture
+                # Reconstruct with the learned model up to (or past) the target, THEN area-downscale
+                # to fit. A tiny crop reaches the loupe size through repeated 4x model passes, so the
+                # detail is genuinely reconstructed instead of Lanczos-upscaled from a small SR output
+                # (which is what made the old result look blocky/pixelated).
+                cur = crop
+                for _ in range(2):
+                    if max(cur.shape[:2]) >= th:
+                        break
+                    nxt = sr.enhance(cur)
+                    if nxt is None:
+                        break
+                    cur = nxt
+                if cur is crop:                 # crop already large: one pass for extra detail
+                    cur = sr.enhance(crop) or crop
+                interp = cv2.INTER_AREA if cur.shape[0] > th else cv2.INTER_LANCZOS4
+                srimg = cv2.resize(cur, (tw, th), interpolation=interp)
+                up = cv2.addWeighted(srimg, 0.68, up, 0.32, 0)   # lean on reconstruction, keep natural texture
         except Exception:  # noqa: BLE001
             pass
     # gentle local contrast (reveals faint detail) — kept mild so it never looks stylised

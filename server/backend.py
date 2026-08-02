@@ -196,6 +196,15 @@ class Backend:
         from .live_make import LiveMakeReader
         self.live_make = LiveMakeReader(
             self.make, interval=float(self.config.get("vehicle.make.live_interval", 4.0)))
+        # Zero-shot CLIP body-type (sedan / hatchback / SUV / ...) refines the coarse COCO class.
+        # Same off-thread reader plumbing as the brand: gated, cached per track, quiet if unavailable.
+        from vehicle.bodytype import BodyTypeClassifier
+        self.bodytype = BodyTypeClassifier(
+            min_conf=float(self.config.get("vehicle.bodytype.min_conf", 0.35)),
+            min_margin=float(self.config.get("vehicle.bodytype.min_margin", 0.15)),
+            min_area=int(self.config.get("vehicle.bodytype.min_area", 9000)))
+        self.live_bodytype = LiveMakeReader(
+            self.bodytype, interval=float(self.config.get("vehicle.bodytype.live_interval", 5.0)))
         self._embed_lock = threading.Lock()   # serialize ReID encoder use (harvester vs search)
         self._roster_harvester = None
         self._roster_det = None
@@ -379,7 +388,7 @@ class Backend:
             self.zones.set_zones(self.db.list_zones(source_id))
             self.trajectory.reset(); self.pose.reset(); self.objects.reset(); self.ooi.clear()
             self.speed.reset(); self.threat.reset(); self._last_threat_synth.clear()
-            self.live_make.reset()
+            self.live_make.reset(); self.live_bodytype.reset()
             self.ego.reset(); self._cam_moving = False; self.intent.reset()
             self.alert_engine.reset(); self.alert_engine.set_rules(self.db.list_alert_rules())
 
@@ -1226,12 +1235,15 @@ class Backend:
     def _roster_attrs(self, crop: Any, cls: str) -> dict:
         try:
             band = crop[: max(1, crop.shape[0] // 2)] if cls == "person" else crop
-            col = dominant_color_name(band)
+            col = dominant_color_name(band, ignore_skin=(cls == "person"))
             attrs = {"upper_color": col} if col and col != "unknown" else {}
             if cls == "vehicle":
                 hit = self.make.classify(crop)   # confidence-gated brand; None if unsure
                 if hit:
                     attrs["make"] = hit[0]
+                bt = self.bodytype.classify(crop)   # sedan / hatchback / SUV / ... ; None if unsure
+                if bt:
+                    attrs["bodytype"] = bt[0]
             return attrs
         except Exception:  # noqa: BLE001
             return {}
@@ -1283,14 +1295,22 @@ class Backend:
         bh, bw = y2 - y1, x2 - x1
         attrs: dict[str, Any] = {}
         if cls == "person":  # height only makes sense for people (vehicles use body-type instead)
-            ratio = bh / max(1, frame_h)
-            attrs["height"] = "short" if ratio < 0.33 else ("medium" if ratio < 0.66 else "tall")
+            # Perspective-normalize apparent size by the foot position: a person near the bottom of
+            # the frame (close) spans more pixels than the same person near the horizon (far). Dividing
+            # by the foot fraction keeps same-stature people comparable across depth, instead of the
+            # raw box fraction that read almost everyone as "short". Uncalibrated => approximate cm.
+            fy = min(1.0, y2 / max(1, frame_h))
+            hn = bh / max(1, frame_h)
+            stature = hn / max(0.30, fy)
+            cm = int(round(max(150.0, min(200.0, 120.0 + stature * 130.0))))
+            attrs["height_cm"] = cm
+            attrs["height"] = "short" if cm < 168 else ("tall" if cm > 182 else "medium")
         if bh >= 24 and bw >= 12:  # skip tiny/far crops where colour is unreliable
             crop = img[y1:y2, x1:x2]
             if cls == "person":  # upper body carries the discriminative clothing colour
                 crop = crop[: max(1, crop.shape[0] // 2)]
             try:
-                color = dominant_color_name(crop)
+                color = dominant_color_name(crop, ignore_skin=(cls == "person"))
                 if color and color != "bilinmiyor":
                     attrs["upper_color"] = color
             except Exception:  # noqa: BLE001
@@ -1373,6 +1393,7 @@ class Backend:
                             crop = img[cy1:cy2, cx1:cx2]
                             self.plates.offer(det["id"], crop, now)
                             self.live_make.offer(det["id"], crop, now)   # brand, off-thread
+                            self.live_bodytype.offer(det["id"], crop, now)  # body-type, off-thread
                         plate = self.plates.plate_for(det["id"])
                         if plate:
                             det["plate"] = plate[0]
@@ -1380,6 +1401,9 @@ class Backend:
                         make = self.live_make.make_for(det["id"])
                         if make:
                             det["make"] = make
+                        bodytype = self.live_bodytype.make_for(det["id"])
+                        if bodytype:
+                            det["bodytype"] = bodytype
                         # the camera's own flow AT THIS VEHICLE'S ground point — so a car keeping
                         # pace on a dashcam reads the camera's speed, not "stopped".
                         ego_delta = self.ego.flow_at((x1 + x2) / 2.0, y2)
@@ -1397,6 +1421,7 @@ class Backend:
         vehicle_ids = {d["id"] for d in dets}
         self.plates.prune(vehicle_ids)
         self.live_make.prune(vehicle_ids)
+        self.live_bodytype.prune(vehicle_ids)
         self.speed.prune(now)
         self.intent.prune(now)
         if self._source_id is not None:   # accumulate this camera's DNA / reputation
@@ -1967,6 +1992,7 @@ class Backend:
             self._roster_harvester.stop()
         self.plates.stop()
         self.live_make.stop()
+        self.live_bodytype.stop()
         self.thumbs.stop_all()
         try:
             self._unsub()

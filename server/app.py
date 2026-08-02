@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -917,11 +918,32 @@ async def rec(rec_id: int) -> Any:
     return FileResponse(r.path, media_type=media)
 
 
-@app.get("/api/storage")
-async def api_storage() -> Any:
-    if backend is None:
-        return {}
-    db = backend.db
+def _scan_stats(root: Path) -> tuple[int, int]:
+    """Fast recursive (count, bytes) via os.scandir — the size comes free from the directory
+    enumeration on Windows, so there is no extra stat() syscall per file. Walking hundreds of
+    thousands of snapshots with Path.rglob()+stat() froze the event loop for seconds; this does not."""
+    n = sz = 0
+    stack = [str(root)]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        elif e.is_file(follow_symlinks=False):
+                            n += 1
+                            sz += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    return n, sz
+
+
+def _compute_storage(bk: Backend) -> dict[str, Any]:
+    db = bk.db
     try:
         recent = [
             {"kind": r.kind, "start": r.start_ts * 1000, "end": r.end_ts * 1000,
@@ -930,23 +952,9 @@ async def api_storage() -> Any:
         ]
     except Exception:  # noqa: BLE001
         recent = []
-    # Also count what actually accumulates on disk: alert snapshots + clips. Otherwise the screen
-    # shows 0 even when there is plenty of data (manual recording is not the only source).
-    def _dir_stats(d: Path) -> tuple[int, int]:
-        n = sz = 0
-        if d.exists():
-            for f in d.rglob("*"):
-                if f.is_file():
-                    n += 1
-                    try:
-                        sz += f.stat().st_size
-                    except OSError:
-                        pass
-        return n, sz
-
-    snap_root = backend.data_dir / "snapshots"
-    clip_n, clip_sz = _dir_stats(snap_root / "clips")
-    all_n, all_sz = _dir_stats(snap_root)
+    snap_root = bk.data_dir / "snapshots"
+    clip_n, clip_sz = _scan_stats(snap_root / "clips")
+    all_n, all_sz = _scan_stats(snap_root)
     snap_n, snap_sz = max(0, all_n - clip_n), max(0, all_sz - clip_sz)
     rec_sz = db.total_recordings_size() or 0
     return {
@@ -958,6 +966,24 @@ async def api_storage() -> Any:
         "oldest": (db.oldest_recording_ts() or 0) * 1000,
         "recent": recent,
     }
+
+
+_STORAGE_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+_STORAGE_TTL = 300.0  # snapshots grow slowly; a 5-min cache keeps the endpoint instant
+
+
+@app.get("/api/storage")
+async def api_storage() -> Any:
+    if backend is None:
+        return {}
+    cached = _STORAGE_CACHE["data"]
+    if cached is not None and (time.time() - _STORAGE_CACHE["ts"]) < _STORAGE_TTL:
+        return cached
+    # Compute off the event loop so the (potentially large) filesystem walk never blocks streaming.
+    data = await asyncio.to_thread(_compute_storage, backend)
+    _STORAGE_CACHE["data"] = data
+    _STORAGE_CACHE["ts"] = time.time()
+    return data
 
 
 @app.get("/api/cases")

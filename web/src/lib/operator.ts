@@ -869,8 +869,16 @@ export async function operate(command: string): Promise<Plan> {
   try {
     const plan = (await api.aiOperate(cmd, context)) as Plan
     if (plan?.disabled) { olog('the AI Operator needs a provider configured (settings ⚙)', 'error'); return plan }
-    // A question the planner didn't turn into actions or an answer -> answer it as chat.
+    // A question the planner didn't turn into actions or an answer -> answer it.
     if (!plan?.steps?.length && !plan?.say && !plan?.ask) {
+      // If it is about the scene (not a how-to), LOOK at the active camera and answer from the frame
+      // — so "what is the boat at the dock?" gets a visual answer instead of a dead-end chat reply.
+      const howTo = /\bhow (do|to|can) i\b|how to|nas[ıi]l|nereden|where.*(button|setting|menu|option|tab)|hangi (men[üu]|ekran|sekme)/i.test(cmd)
+      const camId = get(activeCam)
+      if (camId && !howTo) {
+        const r = await api.aiVqa(String(camId), cmd).catch(() => null)
+        if (r?.answer) { olog(r.answer, 'say'); return { say: r.answer } }
+      }
       const { reply, disabled } = await api.aiChat(
         cmd, `${APP_GUIDE}\n\nAnswer the operator concisely. For "how do I…" or "what does X do" give the
 quick steps from the guide above; for anything else answer in 1-2 sentences.`)

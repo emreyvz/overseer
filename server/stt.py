@@ -6,7 +6,9 @@ robust to code-switching). Lazy and never fatal: if faster-whisper or its model 
 feature simply reports "disabled" and the Operator stays usable by typing.
 
 The model auto-downloads on first use (see also match/tools/export_models.py which pre-fetches it).
-Size is configurable with OVERSEER_STT_MODEL (tiny/base/small/medium); "base" is a good balance.
+Size is configurable with OVERSEER_STT_MODEL (tiny/base/small/medium). Default is "small": "base"
+mis-transcribes Turkish badly, and "small" is far more accurate there while still running in well
+under a second per command on a GPU (float16) and acceptably on CPU (int8).
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ from pathlib import Path
 
 from loguru import logger as log
 
-_MODEL_NAME = os.environ.get("OVERSEER_STT_MODEL", "base")
+_MODEL_NAME = os.environ.get("OVERSEER_STT_MODEL", "small")
 _MODELS_DIR = os.environ.get("OVERSEER_STT_DIR", "models/whisper")
 
 
@@ -26,6 +28,8 @@ class STT:
         self._model = None
         self._failed = False
         self._lock = threading.Lock()
+        self._device = "cpu"
+        self._beam = 1
 
     def _ensure(self) -> bool:
         if self._model is not None:
@@ -48,6 +52,10 @@ class STT:
                         device, compute = "cuda", "float16"
                 except Exception:  # noqa: BLE001
                     pass
+                self._device = device
+                # A GPU makes a wider beam nearly free, and it sharpens Turkish noticeably; on CPU
+                # stay greedy so a command still returns quickly.
+                self._beam = 5 if device == "cuda" else 1
                 log.info("loading offline STT model '{}' on {} (one time)...", _MODEL_NAME, device)
                 self._model = WhisperModel(_MODEL_NAME, device=device, compute_type=compute,
                                            download_root=_MODELS_DIR)
@@ -93,7 +101,7 @@ class STT:
             arr = self._wav_to_array(audio)
             # Fast decode: greedy (beam 1), no cross-segment context, no timestamps. language is
             # honoured (e.g. 'tr' for Turkish); None auto-detects.
-            opts = dict(language=(lang or None), vad_filter=True, beam_size=1,
+            opts = dict(language=(lang or None), vad_filter=True, beam_size=self._beam,
                         condition_on_previous_text=False, without_timestamps=True)
             if arr is not None:
                 segments, _info = self._model.transcribe(arr, **opts)

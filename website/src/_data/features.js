@@ -23,7 +23,7 @@ module.exports = {
           detail: "Holds and extrapolates a subject along its last velocity when it passes behind an obstacle, drawn as a distinct predicted ghost." },
         { name: "Live enhance", status: "shipped", tags: ["Super-res"],
           blurb: "Draw a box on any region and get a crisp, photographic close-up.",
-          detail: "Upscales with Lanczos and a learned super-resolution blend, plus edge-preserving denoise and gentle local contrast — a sharp optical zoom, not a cartoonish upscale." },
+          detail: "The learned model reconstructs the region up to the loupe size in multiple passes and is then fitted down cleanly, so detail is genuinely rebuilt instead of block-upscaled, with edge-preserving denoise and gentle local contrast. A sharp optical zoom, not a cartoonish or pixelated upscale." },
       ],
     },
     {
@@ -42,6 +42,9 @@ module.exports = {
         { name: "Metric depth", status: "beta", tags: ["Scale"],
           blurb: "Depth lifted toward real-world units for distance and size readouts.",
           detail: "Normalised disparity is combined with camera FOV and ground-plane priors to approximate metric distance for speed, spacing and object-size estimates. Uncalibrated by default; calibration sharpens it." },
+        { name: "Fine-grained attributes", status: "shipped", tags: ["CLIP", "Zero-shot"],
+          blurb: "Vehicle body type, brand, colour; person clothing colour, stature and behaviour.",
+          detail: "Zero-shot CLIP reads a vehicle's body type (sedan, hatchback, SUV, station wagon, pickup, van, minibus) and a gated ViT reads its brand; people get a perspective-normalised stature estimate and a posture-and-motion behaviour read (sitting, lying, swimming, walking, running, loitering). Clothing colour ignores bare skin so a shirtless subject is not labelled by skin tone. Every attribute is confidence-gated and searchable." },
         { name: "Object tracking", status: "shipped", tags: ["ByteTrack"],
           blurb: "Stable identities across frames, including brief occlusions.",
           detail: "ByteTrack assigns persistent track ids, and a coasting layer holds a last-known box briefly through momentary detection drops so tracklets do not flicker." },

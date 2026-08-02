@@ -511,6 +511,12 @@ class RosterHarvester(threading.Thread):
                 subtype = getattr(d, "label", None)
                 if subtype:
                     attrs = {**(attrs or {}), "subtype": subtype}
+            elif cls == "person":  # estimated stature band + rough cm (perspective-normalized by foot y)
+                fy = min(1.0, y2 / max(1, fh))
+                stature = ((y2 - y1) / max(1, fh)) / max(0.30, fy)
+                cm = int(round(max(150.0, min(200.0, 120.0 + stature * 130.0))))
+                band = "short" if cm < 168 else ("tall" if cm > 182 else "medium")
+                attrs = {**(attrs or {}), "height": band, "height_cm": cm}
             eid = self._roster.observe_reid(cls, crop, emb, time.time(), plate=plate,
                                             attrs=attrs, cam=cam)
             frame_ids.append(eid)

@@ -217,9 +217,10 @@ def _export_face() -> str:
 
 def _export_whisper() -> str:
     """Pre-fetch the offline STT model (faster-whisper / CTranslate2) so the Operator's voice input
-    works on first run without a download. Size via OVERSEER_STT_MODEL (default base ~140 MB)."""
+    works on first run without a download. Size via OVERSEER_STT_MODEL (default small ~480 MB — base
+    mis-transcribes Turkish, small is far better and still sub-second on a GPU)."""
     import os
-    name = os.environ.get("OVERSEER_STT_MODEL", "base")
+    name = os.environ.get("OVERSEER_STT_MODEL", "small")
     dst = MODELS / "whisper"
     if (dst / f"models--Systran--faster-whisper-{name}").exists():
         return f"whisper: already present ({name})"
@@ -232,9 +233,24 @@ def _export_whisper() -> str:
         return f"whisper: SKIPPED - `uv pip install faster-whisper` ({type(exc).__name__})"
 
 
+def _export_clip() -> str:
+    """Pre-fetch the CLIP model used for zero-shot vehicle body-type (sedan / hatchback / SUV / ...).
+    Loaded via transformers (already a core dep for the depth model); weights cache in the HF hub.
+    Model id via OVERSEER_CLIP_MODEL (default openai/clip-vit-base-patch32 ~600 MB)."""
+    import os
+    mid = os.environ.get("OVERSEER_CLIP_MODEL", "openai/clip-vit-base-patch32")
+    try:
+        from transformers import CLIPModel, CLIPProcessor
+        CLIPModel.from_pretrained(mid)
+        CLIPProcessor.from_pretrained(mid)
+        return f"clip: cached '{mid}' (HF hub)"
+    except Exception as exc:  # noqa: BLE001
+        return f"clip: SKIPPED - transformers/model unavailable ({type(exc).__name__})"
+
+
 _STEPS = {"seg": _export_seg, "dinov2": _export_dinov2, "osnet": _export_osnet,
           "veri": _export_veri, "carbrand": _export_carbrand, "easyocr": _export_easyocr,
-          "face": _export_face, "whisper": _export_whisper}
+          "face": _export_face, "whisper": _export_whisper, "clip": _export_clip}
 
 
 def main() -> None:

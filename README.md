@@ -128,6 +128,8 @@ Most models are fully automatic. Two dedicated re-identification models give the
 | YOLO11 detector (`yolo11s.pt`) | Finds people, vehicles, animals, weapons | Automatic (first analysis) |
 | YOLO11-seg (`yolo11n-seg.pt`) | Foreground masks for cleaner matching | Automatic |
 | DINOv2 ViT-S/14 (`dinov2_vits14.torchscript`) | Generic appearance embedding; also the person/vehicle fallback | Automatic (torch.hub) |
+| CLIP ViT-B/32 | Zero-shot vehicle body type (sedan / hatchback / SUV / ...) | Automatic (Hugging Face hub, first vehicle) |
+| Whisper `small` | Offline speech-to-text (Turkish + English) for the AI Operator | Automatic (first voice command) |
 | EasyOCR | Plate reading (ANPR) for vehicle identity | Automatic with `uv sync --extra ai-extras` |
 | OSNet-AIN (`osnet_ain_x1_0.torchscript`) | Dedicated person re-identification | Manual checkpoint, see below |
 | VeRi R50-ibn (`veri_sbs_R50-ibn.torchscript`) | Dedicated vehicle re-identification | Manual checkpoint, see below |

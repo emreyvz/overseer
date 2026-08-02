@@ -27,18 +27,32 @@ def _hue_to_name(deg: float, value: float) -> str:
     return base
 
 
-def dominant_color_name_conf(crop_bgr: np.ndarray) -> tuple[str, float]:
+def dominant_color_name_conf(crop_bgr: np.ndarray, ignore_skin: bool = False) -> tuple[str, float]:
     """Named dominant colour plus a confidence in [0,1]. Confidence reflects how
     concentrated the evidence is: for a neutral result, the fraction of achromatic pixels;
     for a coloured result, how tightly the chromatic pixels cluster around the winning hue.
     A crop of mixed colours (e.g. background bleeding in) yields low confidence, which the
-    caller stores as attr_conf so search can down-weight or filter unreliable attributes."""
+    caller stores as attr_conf so search can down-weight or filter unreliable attributes.
+
+    ``ignore_skin`` (people only): bare skin — a shirtless torso or bare legs above shorts — is
+    NOT clothing, so naming it "brown/orange" would be wrong. When set, skin-toned pixels are
+    dropped before naming, and a crop that is mostly bare skin returns ("unknown", 0.0) rather
+    than inventing a garment colour. Left off for vehicles so a tan/beige car is unaffected."""
     if crop_bgr.size == 0:
         return ("unknown", 0.0)
     hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
     h = hsv[..., 0].reshape(-1)
     s = hsv[..., 1].reshape(-1)
     v = hsv[..., 2].reshape(-1)
+    if ignore_skin:
+        ycc = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2YCrCb).reshape(-1, 3)
+        cr, cb = ycc[:, 1], ycc[:, 2]
+        skin = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)   # robust across skin tones
+        keep = ~skin
+        if float(keep.mean()) < 0.30:        # mostly bare skin -> no reliable clothing colour
+            return ("unknown", 0.0)
+        if keep.any():
+            h, s, v = h[keep], s[keep], v[keep]
     # A wider achromatic band (s<55) + a lower majority threshold, plus an overall-desaturation
     # guard, so greys (which often carry a faint tint or a little coloured background bleed) are
     # named grey/black/white instead of falling through to a saturated hue like "blue".
@@ -60,5 +74,5 @@ def dominant_color_name_conf(crop_bgr: np.ndarray) -> tuple[str, float]:
     return (_hue_to_name(dom * 2.0, float(v[chroma].mean())), concentration)
 
 
-def dominant_color_name(crop_bgr: np.ndarray) -> str:
-    return dominant_color_name_conf(crop_bgr)[0]
+def dominant_color_name(crop_bgr: np.ndarray, ignore_skin: bool = False) -> str:
+    return dominant_color_name_conf(crop_bgr, ignore_skin=ignore_skin)[0]
