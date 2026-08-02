@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
-    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, hydrateAlerts, hydrateModules, type Mode,
+    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, enhanceResult, hydrateAlerts, hydrateModules, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
@@ -127,6 +127,7 @@
     }
     if ($stage !== 'live') return
     if (k === 'escape') {
+      if ($enhanceMode || $enhanceResult) { enhanceMode.set(false); enhanceResult.set(null); return }
       if ($operatorOpen) { operatorOpen.set(false); return }
       if ($alertsScreen) { alertsScreen.set(false); return }
       if ($suggestionsOpen) { suggestionsOpen.set(false); return }

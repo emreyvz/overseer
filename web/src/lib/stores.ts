@@ -198,6 +198,9 @@ export const followState = writable<{ id: string; lost: boolean } | null>(null)
 export const xrayOn = writable(true)       // occlusion x-ray: hold + predict a subject behind cover
 export const enhanceMode = writable(false)                  // live "enhance": box-select clarify tool active
 export const enhanceResult = writable<string | null>(null)  // last enhanced crop (data URL)
+// Switching cameras closes the enhance tool + its result (they belong to the old feed), and also
+// turns off follow-cam (the locked target is gone).
+activeCam.subscribe(() => { enhanceMode.set(false); enhanceResult.set(null); followOn.set(false) })
 export const muted = writable(false)
 export const banner = writable<{ text: string; alarm: boolean } | null>(null)
 export const shuttingDown = writable(false)  // exit animation gate (item 16)

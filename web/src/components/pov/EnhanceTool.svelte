@@ -84,10 +84,10 @@
 {/if}
 
 <style>
-  .ebtn { position: absolute; right: 20px; bottom: 96px; z-index: var(--z-panel); background: rgba(4,7,10,0.7);
-    border: 1px solid var(--ink-dim); color: var(--ink-dim); font: inherit; font-size: 9px; letter-spacing: 0.16em;
-    padding: 6px 11px; cursor: pointer; }
-  .ebtn:hover { color: var(--cyan); border-color: var(--cyan); }
+  .ebtn { position: absolute; right: 20px; bottom: 104px; z-index: var(--z-panel); background: rgba(4,7,10,0.82);
+    border: 1px solid color-mix(in srgb, var(--cyan) 55%, transparent); color: var(--cyan); font: inherit; font-size: 10px;
+    letter-spacing: 0.18em; padding: 7px 13px; cursor: pointer; box-shadow: 0 0 12px rgba(56,208,227,0.15); }
+  .ebtn:hover { background: rgba(56,208,227,0.14); border-color: var(--cyan); }
 
   .ecatch { position: absolute; inset: 0; z-index: var(--z-boot); cursor: crosshair; background: rgba(4,7,10,0.14); }
   .ehint { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); font-size: 10px; letter-spacing: 0.2em;

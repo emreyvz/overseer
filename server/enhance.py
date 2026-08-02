@@ -10,12 +10,13 @@ from __future__ import annotations
 import base64
 
 
-def enhance_region(frame, box, sr=None, scale: float = 3.0) -> str | None:
+def enhance_region(frame, box, sr=None, scale: float = 4.0) -> str | None:
     """Return a `data:image/jpeg;base64,...` close-up of the normalized `box` (x, y, w, h in 0..1)
-    of `frame`, or None. `sr` is an optional SuperResolver (blended subtly)."""
+    of `frame`, or None. `sr` is an optional SuperResolver: when present we lean on it for genuine
+    reconstructed detail (blended with a photographic Lanczos upscale so it stays natural, not
+    cartoonish); without it we denoise + upscale + gently sharpen so it is clarified, not blocky."""
     try:
         import cv2
-        from server.reconstruct import _finalize   # photographic finisher (denoise + CLAHE + unsharp)
     except Exception:  # noqa: BLE001
         return None
     if frame is None or getattr(frame, "size", 0) == 0:
@@ -33,23 +34,35 @@ def enhance_region(frame, box, sr=None, scale: float = 3.0) -> str | None:
         return None
     crop = frame[y0:y1, x0:x1]
     ch, cw = crop.shape[:2]
-    th = int(min(760, max(ch * scale, 180)))          # upscale, capped for a snappy round-trip
+    # target resolution — generous so the loupe shows real detail (not a few upscaled blocks)
+    th = int(min(1080, max(ch * scale, 300)))
     tw = max(1, int(cw * (th / ch)))
-    up = cv2.resize(crop, (tw, th), interpolation=cv2.INTER_LANCZOS4)
+    # denoise first so upscaling doesn't amplify sensor grain / JPEG blocks
+    base = cv2.bilateralFilter(crop, 7, 55, 55) if min(ch, cw) >= 10 else crop
+    up = cv2.resize(base, (tw, th), interpolation=cv2.INTER_LANCZOS4)
     if sr is not None:
         try:
             if sr.available():
-                srimg = sr.enhance(crop)
+                srimg = sr.enhance(crop)   # learned reconstruction (adds true detail)
                 if srimg is not None:
-                    srimg = cv2.resize(srimg, (tw, th), interpolation=cv2.INTER_AREA)
-                    up = cv2.addWeighted(up, 0.7, srimg, 0.3, 0)   # subtle — keep it photographic
+                    srimg = cv2.resize(srimg, (tw, th), interpolation=cv2.INTER_LANCZOS4)
+                    up = cv2.addWeighted(up, 0.45, srimg, 0.55, 0)   # lean on SR, keep Lanczos texture
         except Exception:  # noqa: BLE001
             pass
+    # gentle local contrast (reveals faint detail) — kept mild so it never looks stylised
     try:
-        out = _finalize(up)
+        lab = cv2.cvtColor(up, cv2.COLOR_BGR2LAB)
+        lab[:, :, 0] = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8)).apply(lab[:, :, 0])
+        up = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
     except Exception:  # noqa: BLE001
-        out = up
-    ok, buf = cv2.imencode(".jpg", out, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        pass
+    # gentle unsharp (single scale, low amount) — crisp without ringing/pixel artefacts
+    try:
+        blur = cv2.GaussianBlur(up, (0, 0), 1.4)
+        up = cv2.addWeighted(up, 1.35, blur, -0.35, 0)
+    except Exception:  # noqa: BLE001
+        pass
+    ok, buf = cv2.imencode(".jpg", up, [int(cv2.IMWRITE_JPEG_QUALITY), 94])
     if not ok:
         return None
     return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
