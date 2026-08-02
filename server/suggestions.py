@@ -59,7 +59,7 @@ def zone_suggestions(
     names: dict[int, str],
     existing_rules: set[tuple[str, int | None]],
     *,
-    min_coverage: float = 0.30,
+    min_coverage: float = 0.22,
 ) -> list[dict]:
     """Proactively propose WHERE to draw a watch zone: for each camera whose foot-traffic clearly
     clusters in one area (from the density grid) and that has no zone-behaviour rule yet, suggest a
