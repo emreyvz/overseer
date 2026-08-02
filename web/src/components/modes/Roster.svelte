@@ -78,6 +78,8 @@
     if (init.sort) sort = init.sort as typeof sort
     rosterInit.set(null)
   })
+  // makes seen this session -> autocomplete for the search box (type/filter by brand)
+  let makes = $derived([...new Set(entries.map((e) => e.attrs?.make).filter(Boolean) as string[])].sort())
   let nPeople = $derived(entries.filter((e) => e.cls === 'person').length)
   let nVehicles = $derived(entries.filter((e) => e.cls === 'vehicle').length)
   let nWatched = $derived(entries.filter((e) => e.watched).length)
@@ -122,7 +124,8 @@
     </div>
     <div class="search">
       <span class="mag caps">⌕</span>
-      <input class="q caps" bind:value={query} placeholder="SEARCH ID · PLATE · MAKE · COLOR · CAMERA" spellcheck="false" />
+      <input class="q caps" bind:value={query} list="rostermakes" placeholder="SEARCH ID · PLATE · MAKE · COLOR · CAMERA" spellcheck="false" />
+      <datalist id="rostermakes">{#each makes as m}<option value={m}></option>{/each}</datalist>
       {#if query}<button class="clr" onclick={() => (query = '')} aria-label="clear">×</button>{/if}
     </div>
     <div class="sort caps">
