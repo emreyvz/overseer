@@ -391,6 +391,20 @@ async def api_ai_describe(source_id: str) -> Any:
     return {"description": text}
 
 
+@app.post("/api/ai/vqa/{source_id}")
+async def api_ai_vqa(source_id: str, payload: dict[str, str]) -> Any:
+    """Vision Q&A: answer a free-form question about a camera's current frame using the VLM."""
+    if backend is None:
+        return JSONResponse({"error": "backend down"}, status_code=503)
+    if not backend.ai.feature("vision"):
+        return {"answer": None, "disabled": True}
+    frame = backend._source_frame_by_id(source_id)
+    if frame is None:
+        return {"answer": None}
+    text = await asyncio.to_thread(backend.ai.vqa, frame, str(payload.get("question", "")))
+    return {"answer": text}
+
+
 @app.post("/api/ai/rule")
 async def api_ai_rule(payload: dict[str, Any]) -> Any:
     """Natural language → alert rule (idea 1). With apply=true, creates the rule and

@@ -70,6 +70,10 @@ _OPERATOR_ACTIONS = (
     "super_fuse {subject} — enhance / clarify a subject's photo (super-resolution).\n"
     "last_seen {subject} — answer when a subject was last seen.\n"
     "describe_scene {camera?} — describe what a camera currently sees.\n"
+    "ask_vision {question, camera?} — LOOK at the live frame and answer a VISUAL question about what "
+    "is on screen (colour, an object, what someone is holding, the make of a visible car, what is "
+    "behind someone). Use this for ANY question about what is currently visible, especially details "
+    "we do not store as data.\n"
     "create_case {name} — open a new investigation case.\n"
     "create_alert_rule {text} — create a STANDING alert rule from a natural-language instruction "
     "(e.g. 'alarm on a vehicle at night'); NEVER an immediate one-off alarm.\n"
@@ -363,6 +367,9 @@ class LLMClient:
             "- CONDITIONALS ('if there is a car…'): just chain find_subject then the action on its "
             "result — if nothing is found the later steps simply report that. Do not invent a branch.\n"
             "- QUESTIONS about another camera: chain switch_camera first, then the query action.\n"
+            "- VISUAL questions about what is on screen ('what colour is that car', 'what is in their "
+            "hand', 'what's behind the person'): use ask_vision{question:...}. For another camera, "
+            "chain switch_camera first.\n"
             "- Resolve names against the live context; NEVER invent a camera name. If a needed camera/"
             "target is truly unspecified and unguessable, return {\"ask\":\"...\",\"steps\":[]}.\n"
             "- border is \"alert\" only when creating an alarm/critical rule, else \"nav\".\n"
@@ -463,4 +470,33 @@ class LLMClient:
             return self._post(payload, timeout=60.0)
         except Exception as exc:  # noqa: BLE001
             log.warning("VLM describe failed: %s", str(exc)[:160])
+            return None
+
+    def vqa(self, image_bgr, question: str) -> str | None:
+        """Answer a free-form question about a camera frame with the vision model. The frame is the
+        evidence; if the answer isn't visible, say so honestly. This is how the operator answers
+        'what colour is that car', 'what is in their hand', etc. — things we don't store."""
+        if not self.enabled or not self.vision_model or not (question or "").strip():
+            return None
+        try:
+            import cv2
+            ok, buf = cv2.imencode(".jpg", image_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+            if not ok:
+                return None
+            b64 = base64.b64encode(buf.tobytes()).decode()
+            payload = {
+                "model": self.vision_model, "max_tokens": 320, "temperature": 0.2,
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": (
+                        "You are a surveillance operator's assistant looking at ONE camera frame. Answer "
+                        "the operator's question about THIS image concisely and factually. If it is not "
+                        "visible or cannot be determined from the frame, say so plainly (e.g. \"can't tell "
+                        "from this frame\"). No identities, no speculation beyond what is shown.\n"
+                        "Question: " + question)},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                ]}],
+            }
+            return self._post(payload, timeout=60.0)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("VLM vqa failed: %s", str(exc)[:160])
             return None

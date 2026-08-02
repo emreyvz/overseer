@@ -182,6 +182,15 @@ export const ACTIONS: Record<string, Action> = {
     const r = await api.aiDescribe(String(id)).catch(() => null)
     return r?.description || (r?.disabled ? 'scene description needs a vision model' : 'could not describe the scene')
   },
+  // Look at the live frame and answer a visual question (colour, object, what someone holds…) —
+  // sends a snapshot to the vision model, for anything not in our structured data.
+  ask_vision: async ({ question, camera }) => {
+    const id = findCam(S(camera))?.id ?? get(activeCam)
+    if (!id) return 'no camera to look at'
+    const q = S(question); if (!q) return 'what should I look for in the frame?'
+    const r = await api.aiVqa(String(id), q).catch(() => null)
+    return r?.answer || (r?.disabled ? 'this needs a vision model configured (settings ⚙)' : 'could not read the frame')
+  },
 
   create_case: async ({ name }) => {
     const c = await api.addCase(S(name, 'CASE')).catch(() => null)
@@ -254,7 +263,10 @@ export const ACTIONS: Record<string, Action> = {
     const col = S(color).toLowerCase()
     let cand = rows.filter((r) => !want || want === 'any' || r.cls === want)
     if (cam) cand = cand.filter((r) => (r.cam ?? '').toLowerCase().includes(cam) || (r.first_cam ?? '').toLowerCase().includes(cam))
-    if (col) cand = cand.filter((r) => (r.attrs?.upper_color ?? '').toLowerCase() === col || (r.attrs?.subtype ?? '').toLowerCase().includes(col))
+    if (col) cand = cand.filter((r) => {
+      const uc = (r.attrs?.upper_color ?? '').toLowerCase(), lc = (r.attrs?.lower_color ?? '').toLowerCase(), st = (r.attrs?.subtype ?? '').toLowerCase()
+      return uc.includes(col) || col.includes(uc) && !!uc || lc.includes(col) || st.includes(col)
+    })
     cand.sort((a, b) => (b.last_ts ?? 0) - (a.last_ts ?? 0))
     const hit = cand[0]
     if (!hit) return `no ${want || 'subject'}${cam ? ' on ' + camera : ''} found`
@@ -768,8 +780,9 @@ export function planNavigates(plan: Plan): boolean {
 // ---- executor ------------------------------------------------------------------------------
 // Actions whose return value is an ANSWER to the operator (spoken + shown as a reply), not just a
 // step log. The last such answer in a chain becomes the plan's spoken reply.
-const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene',
-  'last_seen', 'camera_status', 'camera_dna', 'summarize', 'correlate_alerts', 'system_status', 'storage_status',
+const ANSWER_ACTIONS = new Set(['count', 'count_people', 'count_vehicles', 'count_alerts', 'describe_scene', 'ask_vision',
+  'last_seen', 'find_subject', 'watch_subject', 'super_fuse', 'unwatch_subject',
+  'camera_status', 'camera_dna', 'summarize', 'correlate_alerts', 'system_status', 'storage_status',
   'list_cameras', 'offline_cameras', 'busiest_camera', 'latest_alert', 'explain_alert', 'advise_alert',
   'search_events', 'count_subjects', 'list_watched', 'stats', 'help', 'relationships', 'alerts_here',
   'list_cases', 'list_plates', 'list_zones', 'quietest_camera', 'night_cameras', 'flagged_cameras',
@@ -798,8 +811,10 @@ export async function runPlan(plan: Plan): Promise<void> {
         olog(`${step.action} failed: ${e instanceof Error ? e.message : String(e)}`, 'error')
       }
     }
-    if (plan.say) olog(plan.say, 'say')
-    else if (lastAnswer) plan.say = lastAnswer   // so the caller speaks the answer
+    // The ACTUAL outcome (an answer/verify action's result) wins over the LLM's optimistic "Done"
+    // confirmation, so we never say "added to the watchlist" when the subject wasn't found.
+    if (lastAnswer) plan.say = lastAnswer            // already logged in the loop
+    else if (plan.say) olog(plan.say, 'say')
   } finally {
     // let the border linger a beat so a fast chain still registers visually
     setTimeout(() => operatorActive.set(null), 900)
