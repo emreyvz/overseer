@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { modules, toggleModule } from '../../lib/stores'
+  import { modules, toggleModule, xrayOn, narrateOn } from '../../lib/stores'
   import { sfx } from '../../lib/audio'
   import { LEX } from '../../lib/lexicon'
+  const toggleStore = (s: typeof xrayOn) => { sfx('click', { volume: 0.25 }); s.update((v) => !v) }
 
   let groups = $derived.by(() => {
     const map = new Map<string, typeof $modules>()
@@ -24,6 +25,15 @@
       </button>
     {/each}
   {/each}
+  <!-- experiential toggles, driven by their own stores -->
+  <div class="grp caps">VISION</div>
+  <button class="tog cy caps" class:on={$xrayOn} onclick={() => toggleStore(xrayOn)} title="Keep tracking a subject behind cover">
+    <span class="dot"></span><span class="lbl">OCCLUSION X-RAY</span>
+  </button>
+  <div class="grp caps">AUDIO</div>
+  <button class="tog cy caps" class:on={$narrateOn} onclick={() => toggleStore(narrateOn)} title="Describe the scene aloud (needs a vision model)">
+    <span class="dot"></span><span class="lbl">LIVE NARRATION</span>
+  </button>
 </div>
 
 <style>
@@ -36,5 +46,6 @@
   .tog.on { color: var(--ink); }
   .dot { width: 8px; height: 8px; border: 1px solid var(--ink-ghost); flex: 0 0 auto; }
   .tog.on .dot { background: var(--scarlet); border-color: var(--scarlet); }
+  .tog.cy.on .dot { background: var(--cyan); border-color: var(--cyan); }
   .lbl { opacity: 1; }
 </style>

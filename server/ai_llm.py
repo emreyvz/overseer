@@ -364,7 +364,9 @@ class LLMClient:
             "- QUESTIONS about another camera: chain switch_camera first, then the query action.\n"
             "- Resolve names against the live context; NEVER invent a camera name. If a needed camera/"
             "target is truly unspecified and unguessable, return {\"ask\":\"...\",\"steps\":[]}.\n"
-            "- border is \"alert\" only when creating an alarm/critical rule, else \"nav\".\n\n"
+            "- border is \"alert\" only when creating an alarm/critical rule, else \"nav\".\n"
+            "- If the operator asks HOW to do something, WHAT a feature is, or for help (not a command "
+            'to run), return {"steps":[]} with no say — it is answered separately by the app guide.\n\n'
             "EXAMPLES:\n"
             'Req: "go to the street cam, if there is a car add it to the watchlist as \'car\', enhance '
             'its photo, and tell me when it was last seen"\n'

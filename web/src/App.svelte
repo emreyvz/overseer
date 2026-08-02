@@ -108,6 +108,9 @@
     }
     if ($commandOpen) return
     const k = e.key.toLowerCase()
+    // While the Operator is open, keys belong to it (its text/voice input) — never to the global
+    // camera shortcuts. Only Escape acts, to close it.
+    if ($operatorOpen) { if (k === 'escape') operatorOpen.set(false); return }
     if (k === ' ' || k === ':') { e.preventDefault(); commandOpen.set(true); sfx('click'); return }
 
     if (k === 'i') { e.preventDefault(); operatorOpen.set(true); sfx('click'); return }
