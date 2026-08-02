@@ -1,7 +1,7 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.11.0", codename: "Acuity", date: "2026-08-02", tag: "latest",
+    { version: "0.11.1", codename: "Acuity", date: "2026-08-02", tag: "latest",
       changes: [
         { type: "added", text: "Vehicle body type (sedan, hatchback, SUV, station wagon, pickup, van, minibus...) via zero-shot CLIP, shown on cards and filterable in the roster." },
         { type: "added", text: "Estimated person stature (band plus approximate cm), shown on the card and filterable." },
