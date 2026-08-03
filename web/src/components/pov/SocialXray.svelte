@@ -131,7 +131,7 @@
     const placed: { x: number; y: number }[] = []
     for (const l of ls) {
       if (l.op < 0.35) continue
-      if (placed.every((p) => Math.hypot(p.x - l.mx, p.y - l.my) > 44)) { l.lab = true; placed.push({ x: l.mx, y: l.my }) }
+      if (placed.every((p) => Math.hypot(p.x - l.mx, p.y - l.my) > 62)) { l.lab = true; placed.push({ x: l.mx, y: l.my }) }
     }
     cones = cs
     links = ls.slice(0, 14)
@@ -161,8 +161,8 @@
   .cone { fill: #37cfe0; }
   .cone.alarm { fill: var(--scarlet); }
   .link { stroke-width: 1.6; stroke-dasharray: 5 4; }
-  .ltxt { font-family: var(--font-mono, monospace); font-size: 9px; letter-spacing: 0.12em; text-anchor: middle;
-    paint-order: stroke; stroke: #05070a; stroke-width: 2.4px; }
+  .ltxt { font-family: var(--font-mono, monospace); font-size: 8px; font-weight: 400; letter-spacing: 0.1em; text-anchor: middle;
+    paint-order: stroke; stroke: #05070a; stroke-width: 1.4px; }
   .engaged { stroke: var(--scarlet, #e10600); fill: var(--scarlet, #e10600); }
   .engaged.link { stroke-dasharray: none; }
   .watch { stroke: #f0a63c; fill: #f0a63c; }

@@ -638,6 +638,14 @@ async def api_spatial(sid: str, grid: int = 320) -> Any:
     return await asyncio.to_thread(backend.spatial_scene, sid, grid)
 
 
+@app.get("/api/spatial/reel/{sid}")
+async def api_spatial_reel(sid: str, n: int = 24, grid: int = 256) -> Any:
+    """HoloReel: capture N distinct frames rapidly, reconstruct 3D for each -> {"frames": [...]}."""
+    if backend is None:
+        return {"frames": [], "reason": "backend_down"}
+    return await asyncio.to_thread(backend.spatial_reel, sid, n, grid)
+
+
 # -- long-term identity: subjects / dossiers / reconstruction (features 5/6/7) --------------
 @app.get("/api/subjects")
 async def api_subjects(cls: str | None = None, limit: int = 200, order: str = "last_seen") -> Any:
