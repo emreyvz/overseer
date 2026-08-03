@@ -1,7 +1,16 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.7", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+    { version: "0.12.8", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+      changes: [
+        { type: "fixed", text: "HoloReel would sometimes freeze on a single frame (like a plain recapture) when the live capture ring was not advancing. It now falls back to reading a consecutive burst straight from the source, so the reel is always a real moving clip, and a CAPTURING indicator shows while it grabs the frames." },
+        { type: "fixed", text: "The AI operator no longer answers 'could not read frame' for visual questions (e.g. a vehicle's brand): frame grab now prefers the live capture frame (always present) instead of the slower analysis frame that was often empty between passes." },
+        { type: "fixed", text: "Person height estimate was pinned near 200 cm for almost everyone; recalibrated so a normally framed adult reads around 170 cm." },
+        { type: "improved", text: "Live narration is far richer: instead of just a head count it describes subjects by clothing colour, height, intent (loitering / hurrying / waiting), who is facing the camera, groupings, and calls out people or vehicles entering and leaving. It varies each time and works with no vision model configured." },
+        { type: "improved", text: "Speech-to-text upgraded to large-v3-turbo, a big accuracy jump for Turkish and English, at low VRAM." },
+        { type: "added", text: "An ENHANCE button now sits at the bottom-left with the scene tools (it was keyboard-only), and 'Look closer' is renamed 'Scan point' so it no longer reads like a zoom control." },
+      ] },
+    { version: "0.12.7", codename: "Fourth Dimension", date: "2026-08-03", tag: "",
       changes: [
         { type: "fixed", text: "HoloReel looked frozen (a single 3D frame) even though the frames were distinct: all of them were grabbed in a tight loop and landed inside a sub-second window, so almost no motion happened across the reel. Capture and reconstruction are now interleaved, and a minimum per-frame stride spreads the frames across about three seconds of real time, so the replay actually flows. Confirmed by an offline timing harness: the reel window went from ~0.9s to ~3.3s of real motion." },
       ] },

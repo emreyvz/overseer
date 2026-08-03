@@ -53,6 +53,7 @@
   const REEL_N = 28                            // frames captured, spread over a few seconds of real motion
   let reel = $state(false)
   let reelRec = $state(false)                  // capturing / preparing meshes
+  let reelCapturing = $state(false)            // phase 1: backend grabbing frames over a few seconds
   let reelPlaying = $state(false)
   let reelIdx = $state(0)
   let reelCount = $state(0)                     // number of prepared frames
@@ -942,12 +943,13 @@
   async function startReel() {
     if (reel) return
     if (autoTimer) { clearInterval(autoTimer); autoTimer = null; auto = false }
-    reel = true; reelRec = true; reelPlaying = false; reelIdx = 0; reelBuilt = 0; reelCount = 0
+    reel = true; reelRec = true; reelCapturing = true; reelPlaying = false; reelIdx = 0; reelBuilt = 0; reelCount = 0
     clearReelMeshes()
     if (mesh) mesh.visible = false           // hide the static scene mesh; the reel replaces it
     sfx('sonar')
     let res: Awaited<ReturnType<typeof api.spatialReel>> | null = null
     try { res = await api.spatialReel(cam, REEL_N, 256) } catch { exitReel(); return }
+    reelCapturing = false
     if (!reel) return
     const scenes = (res?.frames ?? []) as Scene[]
     if (!scenes.length) { exitReel(); return }
@@ -981,7 +983,7 @@
     reelShowMesh(reelIdx)
   }
   function exitReel() {
-    reel = false; reelRec = false; reelPlaying = false
+    reel = false; reelRec = false; reelCapturing = false; reelPlaying = false
     if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
     clearReelMeshes()
     sfx('click'); loadScene(false)
@@ -1065,7 +1067,9 @@
     </div>
     {#if reel}
       <div class="reelbar caps">
-        {#if reelRec}
+        {#if reelCapturing}
+          <span class="rlrec">◆ CAPTURING SCENE · {REEL_N} FRAMES OVER A FEW SECONDS…</span>
+        {:else if reelRec}
           <span class="rlrec">◆ BUILDING 3D REEL · {reelBuilt}/{REEL_N}</span>
         {:else}
           <button class="cplay" onclick={reelToggle} aria-label={reelPlaying ? 'pause' : 'play'}>{reelPlaying ? '❚❚' : '▶'}</button>

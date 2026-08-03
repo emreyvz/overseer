@@ -111,7 +111,10 @@ def _make_handler(db: Database) -> type[BaseHTTPRequestHandler]:
                 "# HELP overseer_event_type_total Events by type since local midnight.",
                 "# TYPE overseer_event_type_total gauge",
             ]
-            for etype, count in sorted(db.event_type_counts(today, now).items()):
+            # Upper bound is exclusive (ts < end), and on Windows time.time() can be coarse (~15 ms),
+            # so an event created in the same tick as the scrape would be dropped. Extend the end a
+            # second past now so a just-recorded event is always counted (a scrape "as of now").
+            for etype, count in sorted(db.event_type_counts(today, now + 1.0).items()):
                 lines.append(f'overseer_event_type_total{{type="{etype}"}} {count}')
             self._send_text("\n".join(lines) + "\n")
 
