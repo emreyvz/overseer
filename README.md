@@ -21,11 +21,11 @@ Every camera is a live node on a world map. Watch anonymised movement flow betwe
 
 See every camera at once. Their placement, their health, and the paths targets take between neighbouring feeds, drawn live as people move.
 
-### Camera management
+### Anomaly and threat reporting
 
-![Camera management](demo/camera_management.png)
+![Anomaly and threat detection and reporting](demo/anomaly_threat_detection_and_reporting.png)
 
-Add and organise sources in seconds. MJPEG, RTSP, RTMP and YouTube live URLs all work out of the box.
+Incidents are ranked by severity and grouped when they repeat. Replay any one of them with an overlay that marks exactly what set it off, next to a written reason for why it matters.
 
 ### Live view and image processing
 
@@ -87,11 +87,11 @@ Set rules for zones and behaviour. Restricted area, loitering, crowding, fall, f
 
 Overseer reads its own record and proposes the coverage you are missing, ranked by impact with the reason written out. Accept a suggestion and the alert rule or watch zone, drawn right on the camera, goes live at once.
 
-### Anomaly and threat reporting
+### Camera management
 
-![Anomaly and threat detection and reporting](demo/anomaly_threat_detection_and_reporting.png)
+![Camera management](demo/camera_management.png)
 
-Incidents are ranked by severity and grouped when they repeat. Replay any one of them with an overlay that marks exactly what set it off, next to a written reason for why it matters.
+Add and organise sources in seconds. MJPEG, RTSP, RTMP and YouTube live URLs all work out of the box.
 
 ### AI Operator
 
