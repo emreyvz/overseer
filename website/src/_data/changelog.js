@@ -1,7 +1,13 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.8", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+    { version: "0.12.9", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+      changes: [
+        { type: "improved", text: "Social X-ray no longer competes with the video for the main thread: its per-frame overlay pass is throttled to about 30fps and an O(n^2) lookup was removed, so the feed stays smooth while it is on, especially with several people on screen." },
+        { type: "fixed", text: "Social X-ray (and the pose-based facing / gait / hand-raise) used to appear only after a multi-second wait because the pose model was loaded lazily on the analysis worker the first time it ran, stalling the pipeline. The pose model is now warmed up off-thread when a camera connects, so cones and links show up promptly." },
+        { type: "added", text: "HoloReel and Social X-ray now have a real demo clip and screenshot in the README and the gallery, and their descriptions were tightened." },
+      ] },
+    { version: "0.12.8", codename: "Fourth Dimension", date: "2026-08-03", tag: "",
       changes: [
         { type: "fixed", text: "HoloReel would sometimes freeze on a single frame (like a plain recapture) when the live capture ring was not advancing. It now falls back to reading a consecutive burst straight from the source, so the reel is always a real moving clip, and a CAPTURING indicator shows while it grabs the frames." },
         { type: "fixed", text: "The AI operator no longer answers 'could not read frame' for visual questions (e.g. a vehicle's brand): frame grab now prefers the live capture frame (always present) instead of the slower analysis frame that was often empty between passes." },

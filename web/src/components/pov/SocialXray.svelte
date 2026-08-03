@@ -12,6 +12,7 @@
   let W = $state(1)
   let H = $state(1)
   let raf = 0
+  let lastT = 0                       // throttle the heavy pass to ~30fps so it never fights the video
 
   const D2R = Math.PI / 180
   const CONE_HALF = 24 * D2R
@@ -40,9 +41,13 @@
     return (fx * vx + fy * vy) / vl
   }
 
-  function frame() {
+  function frame(ts?: number) {
     raf = requestAnimationFrame(frame)
+    const now = ts ?? performance.now()
+    if (now - lastT < 32) return       // ~30fps: this whole pass (O(n^2) + SVG re-diff) runs on the
+    lastT = now                        // main thread next to the video, so halving it keeps both smooth
     const list = get(tracks).filter((t) => t.cls === 'person')
+    const byId = new Map(list.map((t) => [t.id, t]))   // O(1) lookup instead of list.find per person
     const sel = get(selectedDetection)
     const focus = sel && sel.cls === 'person' ? sel.id : null
     const seen = new Set<string>()
@@ -107,7 +112,7 @@
     for (const [id, p] of P) {
       if (!p.facing || p.appear < 0.06) continue
       if (focus && id !== focus) continue        // focused: show ONLY that person's cone + gaze
-      const t = list.find((x) => x.id === id)
+      const t = byId.get(id)
       const len = Math.max((t ? t.h : 0.1) * CONE_LEN * H, 34)
       const ang = Math.atan2(p.fy, p.fx)
       cs.push({
