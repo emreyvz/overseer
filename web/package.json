@@ -1,7 +1,7 @@
 {
   "name": "web",
   "private": true,
-  "version": "0.12.12",
+  "version": "0.12.13",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

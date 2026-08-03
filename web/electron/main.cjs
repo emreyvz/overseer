@@ -33,19 +33,32 @@ function runOnce(cmd, args, opts) {
   })
 }
 
+// Run a long step while ticking an elapsed-seconds counter onto the splash, so a multi-minute
+// one-time download never looks frozen.
+async function runWithHeartbeat(label, cmd, args, opts) {
+  const t0 = Date.now()
+  setStatus(label + '...')
+  const iv = setInterval(() => setStatus(label + ' (' + Math.round((Date.now() - t0) / 1000) + 's, one-time download)...'), 3000)
+  const code = await runOnce(cmd, args, opts)
+  clearInterval(iv)
+  return code
+}
+
 // First launch only: copy the backend to a writable dir, install deps (torch matched to this
-// machine's GPU/CPU) and fetch models. Async, with splash status updates.
+// machine's GPU/CPU) and fetch models. Async, with splash status updates. Throws on a hard
+// failure so the shell shows an error instead of a blank screen.
 async function firstRunSetup(b) {
   const done = path.join(b.run, '.setup-ok')
   if (fs.existsSync(done)) return
-  setStatus('First run: preparing Overseer (this can take a few minutes)...')
+  setStatus('First run: preparing Overseer (this can take several minutes)...')
   fs.mkdirSync(b.run, { recursive: true })
   fs.cpSync(b.src, b.run, { recursive: true })
   const env = { ...process.env, UV_PROJECT_ENVIRONMENT: path.join(b.run, '.venv') }
-  setStatus('Installing the AI runtime (one-time download)...')
-  await runOnce(b.uv, ['sync'], { cwd: b.run, stdio: 'inherit', env })
-  setStatus('Fetching AI models (one-time download)...')
-  await runOnce(b.uv, ['run', 'python', '-m', 'match.tools.export_models'], { cwd: b.run, stdio: 'inherit', env })
+  const syncCode = await runWithHeartbeat('Installing the AI runtime', b.uv, ['sync'], { cwd: b.run, stdio: 'inherit', env })
+  if (syncCode !== 0) throw new Error('installing the AI runtime failed (uv sync exit ' + syncCode + ')')
+  // Models are best-effort: the app runs (at reduced accuracy) if some fail, so a model-fetch
+  // hiccup must not block startup.
+  await runWithHeartbeat('Fetching AI models', b.uv, ['run', 'python', '-m', 'match.tools.export_models'], { cwd: b.run, stdio: 'inherit', env })
   fs.writeFileSync(done, new Date().toISOString())
 }
 
@@ -71,9 +84,10 @@ function ping(url) {
   })
 }
 
-async function waitForServer(url, tries = 90) {
+async function waitForServer(url, tries = 430, onTick) {
   for (let i = 0; i < tries; i++) {
     if (await ping(url)) return true
+    if (onTick && i > 0 && i % 14 === 0) onTick(Math.round((i * 700) / 1000))   // ~ every 10 s
     await new Promise((r) => setTimeout(r, 700))
   }
   return false
@@ -116,18 +130,25 @@ app.whenReady().then(async () => {
   if (!alreadyUp && SPAWN) {
     try {
       if (app.isPackaged) await firstRunSetup(packagedBackend())
-      setStatus('Starting the analysis server...')
+      setStatus('Starting the analysis server (the first launch loads the AI models)...')
       startServer()
     } catch (e) {
-      setStatus('Setup failed: ' + e.message)
+      // Hard setup failure: keep the splash and explain, rather than dropping to a blank screen.
+      setStatus('Setup failed: ' + e.message + '. Press Ctrl+Q, relaunch, and if it persists share the logs in ' + app.getPath('userData') + '.')
+      return
     }
   }
-  const up = alreadyUp || (SPAWN ? await waitForServer(SERVER_URL) : await ping(SERVER_URL))
+  const up = alreadyUp || (SPAWN
+    ? await waitForServer(SERVER_URL, 430, (s) => setStatus('Starting the analysis server... (' + s + 's) the first launch loads the AI models, this can take a couple of minutes.'))
+    : await ping(SERVER_URL))
   if (up) {
     win.loadURL(SERVER_URL)
+  } else if (!SPAWN) {
+    win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))   // dev / no-server mode only
   } else {
-    // no backend: load the local build (UI shows NO SIGNAL, or append ?sim=1)
-    win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
+    // Do NOT load dist over file:// here: the SPA uses absolute asset paths and would render a
+    // blank grey screen. Keep the splash up and tell the operator what to do.
+    setStatus('The analysis server did not come up in time. Press Ctrl+Q, relaunch once more, and if it keeps happening share the logs in ' + app.getPath('userData') + '.')
   }
 })
 
