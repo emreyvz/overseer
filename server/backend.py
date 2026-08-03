@@ -223,6 +223,7 @@ class Backend:
         self.pose_kp = PoseKP()   # keypoint pose behaviours (hand-raise) + gait skeletons (feature 5)
         self._pose_ctr = 0
         self._facing: dict[str, tuple[float, float]] = {}   # det_id -> (heading_deg, ts), from the pose pass
+        self._appearance_cache: dict[str, tuple[dict, int]] = {}   # det_id -> (attrs, pose_ctr); colour is stable per subject
         self.gait_tracker = None
         if bool(self.config.get("gait.enabled", True)) and self.subject_store is not None:
             try:
@@ -611,6 +612,7 @@ class Backend:
                     watch_cooldown=float(self.config.get("roster.watch_cooldown", 45.0)),
                     interval=float(self.config.get("roster.interval", 4.0)),
                     pov_active_fn=lambda: self._source_id is not None,   # back off while viewing live
+                    active_id_fn=lambda: self._source_id,   # while focused, only harvest THAT camera
                 )
                 self._apply_detection_filters()  # gate the harvester's YOLO to enabled classes too
                 self._roster_harvester.start()
@@ -1366,6 +1368,13 @@ class Backend:
         """Encode the newest raw frame to JPEG at a steady 30 fps, off the capture and analysis threads.
         DEADLINE-paced: the loop absorbs its own ~8 ms encode into the frame interval (a naive
         sleep(1/30)+encode ran at only ~22 fps), so the display source is genuinely 30 fps."""
+        # Run this thread ABOVE_NORMAL so its (GIL-releasing) imencode wins the CPU over the analysis
+        # / harvester threads under load; that is what keeps the feed smooth instead of frame-by-frame.
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), 1)
+        except Exception:  # noqa: BLE001 - no-op off Windows
+            pass
         target = 1.0 / 30.0
         nxt = time.perf_counter()
         while self._disp_run:
@@ -1472,7 +1481,17 @@ class Backend:
                     "severity": "critical" if weapon else "info",
                     "klass": "WEAPON" if weapon else _CLS_KLASS.get(cls, "TRACKED"),
                 }
-                attrs = self._appearance(img, int(x1), int(y1), int(x2), int(y2), cls, h)
+                # Appearance (dominant colour + skin fraction + height) is stable per subject, but the
+                # numpy/k-means work ran for EVERY detection EVERY frame, holding the GIL and helping
+                # starve the display encoder. Cache per track and refresh only every ~10 frames.
+                _ac = self._appearance_cache.get(det["id"])
+                if _ac is not None and (self._pose_ctr - _ac[1]) < 10:
+                    attrs = _ac[0]
+                else:
+                    attrs = self._appearance(img, int(x1), int(y1), int(x2), int(y2), cls, h)
+                    if len(self._appearance_cache) > 800:
+                        self._appearance_cache.clear()   # bound growth over a long session
+                    self._appearance_cache[det["id"]] = (attrs, self._pose_ctr)
                 if attrs:
                     det["attrs"] = attrs
                 # behavioural intent (why) — estimated from motion, for people
