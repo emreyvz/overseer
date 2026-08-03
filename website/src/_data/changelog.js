@@ -1,7 +1,13 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.9", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+    { version: "0.12.10", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+      changes: [
+        { type: "fixed", text: "Live video stutter, attacked at the real root cause: in one process nothing capped the OpenCV and torch thread pools, so a single analysis op grabbed every CPU core and starved the 30fps display encoder in bursts. Both pools are now capped to cores-2, the display-encoder thread runs at a raised priority, and per-detection colour analysis is cached per track instead of recomputed every frame." },
+        { type: "improved", text: "While you are watching one camera live, the background roster harvest of the OTHER cameras is now paused entirely (only the focused camera keeps enrolling), removing the periodic GPU/GIL spikes from their detection and re-ID. It resumes when you leave the feed." },
+        { type: "changed", text: "The README now leads with the AI Operator (voice and text control) instead of the older assistant, with a real screenshot; the HoloReel clip spans the full width; and the Vehicle/Person profile and smart-suggestion descriptions were tightened." },
+      ] },
+    { version: "0.12.9", codename: "Fourth Dimension", date: "2026-08-03", tag: "",
       changes: [
         { type: "improved", text: "Social X-ray no longer competes with the video for the main thread: its per-frame overlay pass is throttled to about 30fps and an O(n^2) lookup was removed, so the feed stays smooth while it is on, especially with several people on screen." },
         { type: "fixed", text: "Social X-ray (and the pose-based facing / gait / hand-raise) used to appear only after a multi-second wait because the pose model was loaded lazily on the analysis worker the first time it ran, stalling the pipeline. The pose model is now warmed up off-thread when a camera connects, so cones and links show up promptly." },

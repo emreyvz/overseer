@@ -43,7 +43,7 @@ Lock onto any detection for a live target card with its class, attributes and pr
 
 ![Vehicle or person profile](demo/vehicle_or_person_profile.png)
 
-Open any person or vehicle into a full profile. Where and when they were seen across every camera, on a live map. Flag them, find them across every feed, or replay their whole journey. A relationship map links each subject to the people and vehicles they keep showing up with. One click reconstructs a sharper, super-resolved photo of the subject from its many sightings, so a blurry face or plate becomes clearer.
+Open any person or vehicle into a full profile: everywhere they were seen on a live map, with a relationship map of who they keep showing up with. Flag them, replay their journey, or reconstruct a sharper photo from their many sightings.
 
 ### 3D scene reconstruction
 
@@ -53,7 +53,7 @@ Lift a single camera frame into a navigable 3D scene you can orbit to read depth
 
 ### HoloReel
 
-![HoloReel](demo/holoreel.gif)
+<img src="demo/holoreel.gif" alt="HoloReel" width="100%" />
 
 Capture a few seconds of the scene in 3D and replay it like a video you can fly through. Every frame is precomputed, so it plays back smoothly while you orbit and pause on any moment.
 
@@ -85,7 +85,7 @@ Set rules for zones and behaviour. Restricted area, loitering, crowding, fall, f
 
 ![Smart alert and zone suggestions](demo/smart_alert_zone_suggestion.png)
 
-Overseer reads its own record and proposes the coverage you are missing, ranked by impact with the reason written out. A behaviour a camera keeps seeing with no rule yet becomes a one-click alert. And where foot traffic clusters, it works out where a watch zone belongs and draws it right on the camera: visible, editable by dragging its corners, and explained. Accept, and the zone and its rule go live at once, so you never have to guess where to look.
+Overseer reads its own record and proposes the coverage you are missing, ranked by impact with the reason written out. Accept a suggestion and the alert rule or watch zone, drawn right on the camera, goes live at once.
 
 ### Anomaly and threat reporting
 
@@ -93,11 +93,11 @@ Overseer reads its own record and proposes the coverage you are missing, ranked 
 
 Incidents are ranked by severity and grouped when they repeat. Replay any one of them with an overlay that marks exactly what set it off, next to a written reason for why it matters.
 
-### AI assistant
+### AI Operator
 
-![AI assistant](demo/llm_assistant.png)
+![AI Operator](demo/operator.png)
 
-An optional assistant that works with any OpenAI compatible provider. It runs natural language search, ties related alerts into one incident, writes shift summaries, suggests the next action, and describes a scene on request. Every function has its own switch, and overseer runs perfectly well with no AI configured at all.
+Run the whole app by voice or plain language: switch cameras, search, set alert rules, open the roster, or ask what is on screen. Works with any OpenAI compatible provider in English or Turkish, with a switch for every function and nothing required to run without AI.
 
 ## Getting started
 

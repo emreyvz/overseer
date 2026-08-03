@@ -96,10 +96,33 @@ async def _heartbeat() -> None:
             backend.reap_thumbs()
 
 
+def _tune_thread_pools() -> None:
+    """Leave the 30fps display / capture / stream threads room to run. OpenCV and torch otherwise
+    each fan a single op (resize / imencode / NMS / optical flow) across EVERY core, which in this
+    one-process app starves the display-encoder thread in bursts and makes the live feed play frame
+    by frame. Cap both to cores-2 so at least two cores are always free for the display path."""
+    import os
+    n = max(1, (os.cpu_count() or 4) - 2)
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(var, str(n))
+    try:
+        import cv2
+        cv2.setNumThreads(n)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import torch
+        torch.set_num_threads(n)
+    except Exception:  # noqa: BLE001
+        pass
+    log.info("CPU thread pools capped to %d (cores-2) so the display path is not starved", n)
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     global backend
     setup_logging(Path("logs"), "INFO")
+    _tune_thread_pools()
     backend = Backend()
     backend.bind(asyncio.get_running_loop(), broadcast)
     asyncio.create_task(_heartbeat())

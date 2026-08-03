@@ -44,7 +44,15 @@
 
   const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case' }
 
-  onMount(() => { startZoneEngine(); startAnomalyEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts(); hydrateModules() } })
+  onMount(() => { startZoneEngine(); startAnomalyEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts(); hydrateModules() }
+    if (SIM && location.search.includes('shot=')) {   // dev-only screenshot hook (SIM + ?shot=; inert in prod), see scripts/shot_capture.cjs
+      aiStatus.set({ enabled: true, provider: 'glm', base: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-4.6', vision_model: 'glm-4.6v', vision: true, features: {} } as any)
+      const shot = new URLSearchParams(location.search).get('shot')
+      if (shot === 'grid') { pickerView.set('grid'); stage.set('select') }
+      if (shot === 'live') { stage.set('live'); mode.set('pov'); activeCam.set('1') }
+      operatorOpen.set(true)
+    }
+  })
 
   function onBegin() { startAmbience(); triggerGlitch(240); stage.set('select') }
 

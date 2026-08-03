@@ -429,9 +429,11 @@ class RosterHarvester(threading.Thread):
                  profile_fn: Callable[[object, float, list, list], None] | None = None,
                  watch_cooldown: float = 45.0,
                  interval: float = 4.0,
-                 pov_active_fn: Callable[[], bool] | None = None) -> None:
+                 pov_active_fn: Callable[[], bool] | None = None,
+                 active_id_fn: Callable[[], Any] | None = None) -> None:
         super().__init__(daemon=True, name="RosterHarvester")
         self._pov_active_fn = pov_active_fn
+        self._active_id_fn = active_id_fn
         self._roster = roster
         self._sources_fn = sources_fn
         self._frame_fn = frame_fn
@@ -563,6 +565,23 @@ class RosterHarvester(threading.Thread):
                 continue
             source = sources[self._i % len(sources)]
             self._i += 1
+            # While a camera is being watched live, do NOT harvest the OTHER cameras at all: their
+            # separate YOLO + ReID (plus periodic full-res decodes) are the biggest background GPU/GIL
+            # spikes and the main reason the focused feed stutters. Only keep enrolling the focused
+            # camera (its frame is free from the live analysis). Passive harvest resumes on disconnect.
+            focused = False
+            try:
+                focused = self._pov_active_fn is not None and self._pov_active_fn()
+            except Exception:  # noqa: BLE001
+                focused = False
+            if focused and self._active_id_fn is not None:
+                try:
+                    active_id = self._active_id_fn()
+                except Exception:  # noqa: BLE001
+                    active_id = None
+                if active_id is not None and str(getattr(source, "id", None)) != str(active_id):
+                    self._stopped.wait(0.3)   # skip this passive camera; check again shortly
+                    continue
             try:
                 self._scan(source)
             except Exception:  # noqa: BLE001 - never let one bad frame kill the harvester

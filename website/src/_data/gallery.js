@@ -31,7 +31,7 @@ module.exports = {
         { label: "Camera management", caption: "Add, discover and organise sources", img: "/assets/img/shots/g-cams.webp" },
         { label: "Alert creation", caption: "Build zones and alert rules", img: "/assets/img/shots/g-alert.webp" },
         { label: "Forensic search", caption: "Find a subject across the record", img: "/assets/img/shots/g-forensic.webp" },
-        { label: "AI assistant", caption: "Natural-language queries over events", img: "/assets/img/shots/g-assistant.webp" },
+        { label: "AI Operator", caption: "Run the whole app by voice or plain language", img: "/assets/img/shots/operator.webp" },
         { label: "Landing", caption: "The operator entry screen", img: "/assets/img/shots/g-boot.webp" },
       ] },
   ],
