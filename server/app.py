@@ -639,8 +639,8 @@ async def api_spatial(sid: str, grid: int = 320) -> Any:
 
 
 @app.get("/api/spatial/reel/{sid}")
-async def api_spatial_reel(sid: str, n: int = 24, grid: int = 256) -> Any:
-    """HoloReel: capture N distinct frames rapidly, reconstruct 3D for each -> {"frames": [...]}."""
+async def api_spatial_reel(sid: str, n: int = 28, grid: int = 256) -> Any:
+    """HoloReel: capture N distinct frames spread over a few seconds, reconstruct 3D for each -> {"frames": [...]}."""
     if backend is None:
         return {"frames": [], "reason": "backend_down"}
     return await asyncio.to_thread(backend.spatial_reel, sid, n, grid)

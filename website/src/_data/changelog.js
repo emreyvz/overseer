@@ -1,7 +1,11 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.6", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+    { version: "0.12.7", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+      changes: [
+        { type: "fixed", text: "HoloReel looked frozen (a single 3D frame) even though the frames were distinct: all of them were grabbed in a tight loop and landed inside a sub-second window, so almost no motion happened across the reel. Capture and reconstruction are now interleaved, and a minimum per-frame stride spreads the frames across about three seconds of real time, so the replay actually flows. Confirmed by an offline timing harness: the reel window went from ~0.9s to ~3.3s of real motion." },
+      ] },
+    { version: "0.12.6", codename: "Fourth Dimension", date: "2026-08-03", tag: "",
       changes: [
         { type: "improved", text: "HoloReel now captures genuinely different consecutive frames: the backend waits for each new raw frame before grabbing the next, so a burst is a real short clip instead of the same moment repeated. Every frame is reconstructed and precomputed up front, then playback is just a visibility switch, so it flows like a video with no per-frame freeze while you fly through it." },
         { type: "improved", text: "Social X-ray connection labels are lighter and spaced further apart, so the text on the lines no longer reads as bold or overlaps." },

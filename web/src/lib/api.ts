@@ -90,7 +90,7 @@ export const api = {
   relationships: () => get<SocialGraph>(`/api/relationships`),
   cameraDna: () => get<{ cameras: CameraDna[] }>(`/api/cameras/dna`),
   spatial: (sid: string, grid = 320) => get<{ scene: SpatialScene | null; reason?: string }>(`/api/spatial/${sid}?grid=${grid}`),
-  spatialReel: (sid: string, n = 24, grid = 256) => get<{ frames: SpatialScene[]; reason?: string }>(`/api/spatial/reel/${sid}?n=${n}&grid=${grid}`),
+  spatialReel: (sid: string, n = 28, grid = 256) => get<{ frames: SpatialScene[]; reason?: string }>(`/api/spatial/reel/${sid}?n=${n}&grid=${grid}`),
   subjects: (cls?: string, limit = 200) => get<Subject[]>(`/api/subjects?limit=${limit}${cls ? '&cls=' + cls : ''}`),
   subjectDossier: (id: number) => get<{ dossier: Dossier | null }>(`/api/subjects/${id}/dossier`),
   subjectReconstruct: (id: number) => get<Reconstruction>(`/api/subjects/${id}/reconstruct`),
