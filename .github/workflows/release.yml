@@ -78,12 +78,16 @@ jobs:
           # On macOS build both architectures from the one (arm64) runner.
           ARCH=""
           if [ "$RUNNER_OS" = "macOS" ]; then ARCH="--mac --arm64 --x64"; fi
-          # With a Developer ID cert -> turn on hardened runtime (required to notarize; the
-          # entitlements at build/entitlements.mac.plist are then auto-detected). Without one ->
-          # ad-hoc sign with hardened runtime OFF, so the app still runs the bundled Python after
-          # the user clears quarantine (xattr -cr). arm64 needs a signature to run at all.
+          # GitHub sets an UNDEFINED secret to an empty string, and electron-builder mistakes an
+          # empty CSC_LINK for "a certificate was provided" and dies ("not a file"). Unset the empty
+          # ones so it cleanly ad-hoc signs; keep them only when a real Developer ID cert is present.
+          if [ -z "${CSC_LINK:-}" ]; then unset CSC_LINK CSC_KEY_PASSWORD; fi
+          if [ -z "${APPLE_ID:-}" ]; then unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; fi
+          # With a Developer ID cert -> hardened runtime on (required to notarize; entitlements at
+          # build/entitlements.mac.plist auto-detected). Without -> ad-hoc, hardened runtime off so
+          # the app still runs the bundled Python after quarantine is cleared (xattr -cr).
           EXTRA=""
-          if [ -n "$CSC_LINK" ]; then
+          if [ -n "${CSC_LINK:-}" ]; then
             EXTRA="-c.mac.hardenedRuntime=true"
           else
             export CSC_IDENTITY_AUTO_DISCOVERY=false
