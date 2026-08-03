@@ -125,6 +125,18 @@ chmod +x overseer.sh
 
 The first run installs the Python toolchain on its own, pulls the dependencies, and fetches the vision models, so give it a few minutes. If Node.js is installed it builds and opens the full desktop app. If it is not, it opens in your browser at `http://127.0.0.1:8787` instead. Either way you get the whole thing.
 
+### Prebuilt desktop app
+
+You can also grab a one-click installer from the [latest release](https://github.com/emreyvz/overseer/releases/latest): `Setup.exe` (Windows), a `.dmg` (macOS, `arm64` for Apple Silicon or `x64` for Intel), or `.AppImage` / `.deb` (Linux).
+
+The macOS build is not yet notarized by Apple, so the first time you open it macOS shows *"'Overseer' is damaged and can't be opened."* That is Gatekeeper blocking any un-notarized download, not a real problem with the app. Move it to Applications, then clear the quarantine flag once from Terminal:
+
+```bash
+xattr -cr /Applications/Overseer.app
+```
+
+After that it opens normally. Windows and Linux need no such step.
+
 ### Vision models
 
 On the first launch `overseer.cmd` / `overseer.sh` downloads the vision models for you. If a download is skipped or fails the app still runs, just at reduced accuracy, and it says so on each result, so a failed model fetch never crashes anything. You can re-run the fetch at any time:

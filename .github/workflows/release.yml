@@ -2,12 +2,14 @@ name: Build & publish desktop apps
 
 # Builds the Overseer desktop app (Electron) for Windows, macOS and Linux, then a single release
 # job publishes the installers to the GitHub Release for a pushed v* tag. The matrix jobs only
-# BUILD (no per-job publish) so they never race to create the release, and macOS builds cleanly
-# unsigned. The installer is thin: on first launch the app sets up the Python backend (uv sync)
-# and downloads the AI models, matched to the machine. See web/electron/main.cjs.
+# BUILD (no per-job publish) so they never race to create the release. The installer is thin: on
+# first launch the app sets up the Python backend (uv sync) and downloads the AI models, matched
+# to the machine. See web/electron/main.cjs.
 #
-# Builds are unsigned for now (users see a Gatekeeper / SmartScreen warning). To sign later, add
-# a certificate via the CSC_LINK / CSC_KEY_PASSWORD secrets and drop CSC_IDENTITY_AUTO_DISCOVERY.
+# macOS signing: the app is always ad-hoc signed (with hardened-runtime entitlements so it can run
+# the bundled Python once quarantine is cleared). For NOTARIZED, warning-free downloads (needs an
+# Apple Developer ID), add the repo secrets MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD, APPLE_ID,
+# APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID; the package step then signs + notarizes.
 
 on:
   push:
@@ -59,15 +61,26 @@ jobs:
           if [ -n "$uvbin" ]; then cp "$uvbin" web/resources/bin/ 2>/dev/null || cp "${uvbin}.exe" web/resources/bin/ 2>/dev/null || true; fi
           ls -la web/resources/bin || true
 
-      - name: Package (electron-builder, unsigned, no publish)
+      - name: Package (electron-builder, no publish)
         working-directory: web
         shell: bash
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"   # unsigned builds
+          # macOS: set these repo secrets to get NOTARIZED, warning-free builds (an Apple Developer
+          # ID is required). Without them the mac app is ad-hoc signed and, because it is not
+          # notarized, macOS marks the downloaded app "damaged" until quarantine is cleared with
+          # `xattr -cr /Applications/Overseer.app` (see the release notes / README).
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           # On macOS build both architectures from the one (arm64) runner.
           ARCH=""
           if [ "$RUNNER_OS" = "macOS" ]; then ARCH="--mac --arm64 --x64"; fi
+          # No Developer ID cert provided -> ad-hoc sign (arm64 needs a signature to run at all)
+          # rather than trying to discover a certificate that is not there.
+          if [ -z "$CSC_LINK" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             npx electron-builder --publish never $ARCH -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
           else
