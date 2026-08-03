@@ -1,7 +1,11 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.12", codename: "Fourth Dimension", date: "2026-08-04", tag: "latest",
+    { version: "0.12.13", codename: "Fourth Dimension", date: "2026-08-04", tag: "latest",
+      changes: [
+        { type: "fixed", text: "First launch could sit on a blank grey screen (mostly on macOS): the shell waited only about a minute for the backend, but the very first run downloads the AI runtime and loads the models, which takes several minutes; on timeout it fell back to a page that renders blank. It now waits several minutes with a live status counter on the splash, reports a setup failure in plain words instead of hiding it, and never drops to a blank page." },
+      ] },
+    { version: "0.12.12", codename: "Fourth Dimension", date: "2026-08-04", tag: "",
       changes: [
         { type: "fixed", text: "macOS \"'Overseer' is damaged and can't be opened\": this is Gatekeeper blocking any un-notarized download, not a corrupt file. Clear the quarantine once with `xattr -cr /Applications/Overseer.app` and it opens. The ad-hoc signed build now runs the bundled Python cleanly after that; Windows and Linux are unaffected." },
         { type: "added", text: "The release pipeline is now notarization-ready: add an Apple Developer ID via repo secrets (MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID) and tagged builds are signed and notarized automatically, so macOS opens them with no warning at all." },
