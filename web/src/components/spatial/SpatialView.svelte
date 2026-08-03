@@ -50,7 +50,7 @@
   // HoloReel: capture a few seconds of successive 3D reconstructions, then replay them like a video
   // you can fly through. Each frame is a full /api/spatial scene rebuilt on the fly as it plays.
   type Scene = NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>
-  const REEL_N = 24                            // frames captured in one rapid burst
+  const REEL_N = 28                            // frames captured, spread over a few seconds of real motion
   let reel = $state(false)
   let reelRec = $state(false)                  // capturing / preparing meshes
   let reelPlaying = $state(false)

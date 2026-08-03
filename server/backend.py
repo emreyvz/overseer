@@ -1808,34 +1808,41 @@ class Backend:
             scene["tex_image"] = _b64.b64encode(texjpg.tobytes()).decode("ascii")
         return scene
 
-    def spatial_reel(self, sid: str, n: int = 24, grid_w: int = 256) -> dict:
-        """HoloReel capture: grab N DISTINCT raw frames as fast as the camera delivers (so the motion
-        between them is small = smooth), THEN reconstruct 3D for each. Returns {"frames": [scene,...]}."""
+    def spatial_reel(self, sid: str, n: int = 28, grid_w: int = 256) -> dict:
+        """HoloReel capture: grab N DISTINCT raw frames SPREAD over a few seconds of real time, and
+        reconstruct 3D for each. Returns {"frames": [scene, ...]}.
+
+        Grab and reconstruct are INTERLEAVED on purpose: the depth inference between grabs (~0.1 s)
+        plus a minimum per-frame stride spaces the frames across `spatial.reel_span_s` seconds, so the
+        replay shows real motion. (Grabbing all N first, with nothing between, crammed them into under
+        a second, so the reel looked frozen even though every frame differed.)"""
         if not self.config.get("spatial.enabled", True):
             return {"frames": [], "reason": "disabled"}
         src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
         if src is None or self._depth is None:
             return {"frames": [], "reason": "no_source"}
-        n = max(2, min(int(n), 40))
-        # Phase 1: rapidly grab N distinct capture frames (wait for a NEW seq each time).
-        raws: list = []
+        n = max(2, min(int(n), 48))
+        span = float(self.config.get("spatial.reel_span_s", 3.0))   # real-time window the reel spans
+        stride = span / max(1, n - 1)                                # minimum seconds between grabbed frames
+        frames: list = []
         last_seq = -1
-        while len(raws) < n:
-            waited = 0
-            while self._raw_seq == last_seq and waited < 40:
+        next_due = time.time()
+        for _ in range(n):
+            now = time.time()
+            if now < next_due:               # pace so successive grabs stay >= stride apart
+                time.sleep(next_due - now)
+            waited = 0                        # then make sure the grabbed frame is a genuinely NEW capture
+            while self._raw_seq == last_seq and waited < 60:
                 time.sleep(0.008); waited += 1
             last_seq = self._raw_seq
+            next_due = time.time() + stride
             f = self._latest_raw
             if f is None:
                 f = self._source_frame(src)
             if f is None:
                 break
-            raws.append(f.copy())
-        # Phase 2: reconstruct 3D for each grabbed frame.
-        frames: list = []
-        for f in raws:
             try:
-                sc = self._reel_scene_from_frame(f, src.name, sid, grid_w)
+                sc = self._reel_scene_from_frame(f.copy(), src.name, sid, grid_w)
             except Exception:  # noqa: BLE001
                 sc = None
             if sc is not None:
