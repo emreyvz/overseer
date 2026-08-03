@@ -44,22 +44,28 @@ async function runWithHeartbeat(label, cmd, args, opts) {
   return code
 }
 
-// First launch only: copy the backend to a writable dir, install deps (torch matched to this
-// machine's GPU/CPU) and fetch models. Async, with splash status updates. Throws on a hard
-// failure so the shell shows an error instead of a blank screen.
+// Copy the backend to a writable dir, install deps (torch matched to this machine) and fetch
+// models. Runs on the first launch AND on every app UPDATE, so a dependency/config fix actually
+// applies and a venv left broken by an earlier failed setup self-heals (no manual reset needed).
+// Async, with splash status updates. Throws on a hard failure so the shell shows an error.
 async function firstRunSetup(b) {
-  const done = path.join(b.run, '.setup-ok')
-  if (fs.existsSync(done)) return
+  const env = { ...process.env, UV_PROJECT_ENVIRONMENT: path.join(b.run, '.venv') }
+  const verFile = path.join(b.run, '.app-version')
+  const current = app.getVersion()
+  const prev = fs.existsSync(verFile) ? fs.readFileSync(verFile, 'utf8').trim() : ''
+  if (prev === current) return   // this version is already set up
   setStatus('First run: preparing Overseer (this can take several minutes)...')
   fs.mkdirSync(b.run, { recursive: true })
-  fs.cpSync(b.src, b.run, { recursive: true })
-  const env = { ...process.env, UV_PROJECT_ENVIRONMENT: path.join(b.run, '.venv') }
+  fs.cpSync(b.src, b.run, { recursive: true })   // (re)stage source; .venv/data/models live here too but are not in b.src, so preserved
   const syncCode = await runWithHeartbeat('Installing the AI runtime', b.uv, ['sync'], { cwd: b.run, stdio: 'inherit', env })
   if (syncCode !== 0) throw new Error('installing the AI runtime failed (uv sync exit ' + syncCode + ')')
-  // Models are best-effort: the app runs (at reduced accuracy) if some fail, so a model-fetch
-  // hiccup must not block startup.
-  await runWithHeartbeat('Fetching AI models', b.uv, ['run', 'python', '-m', 'match.tools.export_models'], { cwd: b.run, stdio: 'inherit', env })
-  fs.writeFileSync(done, new Date().toISOString())
+  const modelsDone = path.join(b.run, '.models-ok')
+  if (!fs.existsSync(modelsDone)) {
+    // Models are best-effort: the app runs (at reduced accuracy) if some fail, so this must not block.
+    await runWithHeartbeat('Fetching AI models', b.uv, ['run', 'python', '-m', 'match.tools.export_models'], { cwd: b.run, stdio: 'inherit', env })
+    fs.writeFileSync(modelsDone, new Date().toISOString())
+  }
+  fs.writeFileSync(verFile, current)
 }
 
 function startServer() {
