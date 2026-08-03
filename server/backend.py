@@ -1370,11 +1370,8 @@ class Backend:
         sleep(1/30)+encode ran at only ~22 fps), so the display source is genuinely 30 fps."""
         # Run this thread ABOVE_NORMAL so its (GIL-releasing) imencode wins the CPU over the analysis
         # / harvester threads under load; that is what keeps the feed smooth instead of frame-by-frame.
-        try:
-            import ctypes
-            ctypes.windll.kernel32.SetThreadPriority(ctypes.windll.kernel32.GetCurrentThread(), 1)
-        except Exception:  # noqa: BLE001 - no-op off Windows
-            pass
+        from core.thread_priority import set_current_thread_priority, ABOVE_NORMAL
+        set_current_thread_priority(ABOVE_NORMAL)
         target = 1.0 / 30.0
         nxt = time.perf_counter()
         while self._disp_run:

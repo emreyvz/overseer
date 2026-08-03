@@ -141,6 +141,8 @@ class AnalysisWorker(threading.Thread):
         self.source_id: int | None = None
 
     def run(self) -> None:
+        from core.thread_priority import set_current_thread_priority, BELOW_NORMAL
+        set_current_thread_priority(BELOW_NORMAL)   # yield CPU/GIL to the 30fps display path under load
         while not self._stop_event.is_set():
             frame = self._buffer.get(timeout=0.5)
             now = time.time()

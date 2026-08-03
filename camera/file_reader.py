@@ -43,6 +43,8 @@ class FileLoopReader(threading.Thread):
         return fps if 1.0 <= fps <= 120.0 else 25.0
 
     def run(self) -> None:
+        from core.thread_priority import set_current_thread_priority, ABOVE_NORMAL
+        set_current_thread_priority(ABOVE_NORMAL)   # display source: keep frames arriving at camera rate
         seq = 0
         while not self._stopped.is_set():
             self._status("connecting")

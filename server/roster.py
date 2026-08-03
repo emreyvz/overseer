@@ -554,6 +554,8 @@ class RosterHarvester(threading.Thread):
                 pass
 
     def run(self) -> None:
+        from core.thread_priority import set_current_thread_priority, LOWEST
+        set_current_thread_priority(LOWEST)   # background enrichment: never contend with the live feed
         while not self._stopped.is_set():
             sources = []
             try:
