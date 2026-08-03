@@ -53,13 +53,15 @@ Lift a single camera frame into a navigable 3D scene you can orbit to read depth
 
 ### HoloReel
 
-![HoloReel](demo/holoreel.png)
+![HoloReel](demo/holoreel.gif)
 
-Capture a few seconds of the scene in 3D and replay it like a video you can fly through. HoloReel grabs a rapid burst of distinct frames, reconstructs each one in 3D, and plays them back with a scrub bar. Every frame is precomputed, so playback stays smooth and you can orbit and move through the moment the whole time, pausing on anything.
+Capture a few seconds of the scene in 3D and replay it like a video you can fly through. Every frame is precomputed, so it plays back smoothly while you orbit and pause on any moment.
 
 ### Social X-ray
 
-Read the invisible social layer of a scene from a single camera. Each person shows an attention cone in the direction they are looking, worked out from their pose so it holds even when they stand still. People who are genuinely interacting are linked and labelled as engaged, watching or approaching, and unrelated bystanders are never joined. Click a person to see only their connections.
+![Social X-ray](demo/social_xray.png)
+
+See the hidden social layer of a single camera: each person gets an attention cone showing where they are looking, and people who are interacting are linked as engaged, watching or approaching. Click a person to see only their connections.
 
 ### Forensic search
 

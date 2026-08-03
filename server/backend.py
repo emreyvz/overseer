@@ -406,6 +406,9 @@ class Backend:
             self._latest_raw_jpeg = None; self._latest_raw = None
             self._buffer.on_put = self._tap_frame   # full-rate display, independent of the analysis loop
             self._start_display_encoder()
+            # Warm the pose model off-thread so the first pose pass (facing / Social X-ray / gait /
+            # hand-raise) does not stall the analysis worker for seconds on its lazy first load.
+            threading.Thread(target=self.pose_kp.warmup, name="PoseWarm", daemon=True).start()
             self._health = HealthMonitor(freeze_timeout=float(self.config.get("camera.freeze_timeout", 10.0)))
             self._plugins = PluginManager()
             self._motion_det = MotionDetector(self.config)

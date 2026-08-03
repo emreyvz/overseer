@@ -18,3 +18,4 @@ config/youtube_cookies.txt
 
 # Vendored DUSt3R clone (multi-view 3D) — cloned via scripts, not committed
 third_party/
+demo/holoreel_3d_video_recocounstriction.mp4

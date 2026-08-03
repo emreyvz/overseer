@@ -10,10 +10,12 @@ module.exports = {
     { id: "depth-3d", title: "Depth & 3D",
       items: [
         { label: "Scene reconstruction", caption: "A frame lifted into a 3D point cloud", img: "/assets/img/shots/spatial.webp" },
+        { label: "HoloReel", caption: "A few seconds of the scene captured and replayed in 3D", img: "/assets/img/shots/holoreel.webp" },
         { label: "Reconstruction sweep", caption: "Depth estimated and lifted, live", img: "/assets/img/shots/recon-poster.webp" },
       ] },
     { id: "spatial", title: "Spatial & Analytics",
       items: [
+        { label: "Social x-ray", caption: "Attention cones and who is interacting with whom", img: "/assets/img/shots/social-xray.webp" },
         { label: "Tactical god-view", caption: "Top-down radar with depth-locked contacts", img: "/assets/img/shots/dock.webp" },
         { label: "Density heatmap", caption: "Crowd density over a live feed", img: "/assets/img/shots/density.webp" },
         { label: "Threat report", caption: "Correlated anomaly and threat detection", img: "/assets/img/shots/g-threat.webp" },

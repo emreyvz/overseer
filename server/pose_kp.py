@@ -35,6 +35,16 @@ class PoseKP:
             log.warning("pose-keypoint unavailable: %s", exc)
             return False
 
+    def warmup(self) -> None:
+        """Load the model and run one throwaway inference so the FIRST real pose pass (which runs
+        inline on the analysis worker) does not block the pipeline for seconds while it downloads +
+        initialises. This is what made Social X-ray / facing appear only after a long delay."""
+        if self._ensure():
+            try:
+                self.detect_pose(np.zeros((320, 320, 3), np.uint8))
+            except Exception:  # noqa: BLE001
+                pass
+
     def detect_pose(self, frame: np.ndarray) -> list[dict]:
         """Raw per-person skeletons for gait/soft-biometrics (feature 5):
         [{bbox:(x1,y1,x2,y2) px, kpts:(17,2), conf:(17,)}]. One inference; caller derives behaviours."""
