@@ -1,7 +1,7 @@
 {
   "name": "web",
   "private": true,
-  "version": "0.12.11",
+  "version": "0.12.12",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -50,7 +50,11 @@
         "zip"
       ],
       "category": "public.app-category.utilities",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.plist"
     },
     "linux": {
       "target": [

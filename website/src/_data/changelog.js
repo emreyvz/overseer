@@ -1,7 +1,12 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.11", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+    { version: "0.12.12", codename: "Fourth Dimension", date: "2026-08-04", tag: "latest",
+      changes: [
+        { type: "fixed", text: "macOS \"'Overseer' is damaged and can't be opened\": the app is now code-signed (ad-hoc) with hardened-runtime entitlements, so once you clear the download quarantine with `xattr -cr /Applications/Overseer.app` it launches and runs the bundled Python properly (before, the missing entitlements could block it even after that). This is a Gatekeeper block on any un-notarized download, not a corrupt file; Windows and Linux are unaffected." },
+        { type: "added", text: "The release pipeline is now notarization-ready: add an Apple Developer ID via repo secrets (MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID) and tagged builds are signed and notarized automatically, so macOS opens them with no warning at all." },
+      ] },
+    { version: "0.12.11", codename: "Fourth Dimension", date: "2026-08-03", tag: "",
       changes: [
         { type: "improved", text: "Another step on video smoothness: the whole display path (the camera reader and the 30fps encoder) now runs at a raised OS thread priority, while the background analysis, roster-harvest and vehicle classifiers run at a lowered one. So under load the operating system hands the CPU to the live feed first. This complements the thread-pool caps from the previous release." },
       ] },
