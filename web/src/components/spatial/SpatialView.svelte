@@ -50,12 +50,15 @@
   // HoloReel: capture a few seconds of successive 3D reconstructions, then replay them like a video
   // you can fly through. Each frame is a full /api/spatial scene rebuilt on the fly as it plays.
   type Scene = NonNullable<Awaited<ReturnType<typeof api.spatial>>['scene']>
-  const REEL_N = 20                            // frames to capture (~6-10 s at the backend's build rate)
+  const REEL_N = 24                            // frames captured in one rapid burst
   let reel = $state(false)
-  let reelRec = $state(false)
+  let reelRec = $state(false)                  // capturing / preparing meshes
   let reelPlaying = $state(false)
   let reelIdx = $state(0)
-  let reelFrames = $state<Scene[]>([])
+  let reelCount = $state(0)                     // number of prepared frames
+  let reelBuilt = $state(0)                     // progress during the prepare phase
+  let reelMeshes: THREE.Mesh[] = []            // precomputed meshes; playback just toggles visibility
+  let reelTimer: ReturnType<typeof setInterval> | null = null
 
   // Back-projection / depth-to-Z tuning (settled by visual iteration across cameras).
   const ZNEAR = 1.0, ZFAR = 9.0, GAMMA = 1.6
@@ -908,47 +911,79 @@
     else { if (autoTimer) { clearInterval(autoTimer); autoTimer = null } prevDisp = null }
   }
 
-  // ---- HoloReel: record a short 3D reel, then replay it as a fly-through video -----------------
-  let reelBuilding = false
-  async function reelShow(i: number): Promise<boolean> {
-    if (reelBuilding || !reelFrames[i]) return false
-    reelBuilding = true
-    try { await buildCloud(reelFrames[i]); return true } catch { return false } finally { reelBuilding = false }
+  // ---- HoloReel: capture a burst of DISTINCT frames, precompute every mesh, replay by toggling
+  // visibility so it flows like a video (no per-frame rebuild freeze) ----------------------------
+  async function buildReelMesh(d: Scene): Promise<THREE.Mesh | null> {
+    const { w, h, fov, image, depth } = d
+    const fx = (0.5 * w) / Math.tan((fov * Math.PI) / 180 / 2), cx = w / 2, cy = h / 2
+    const fg = await decodeLayer(image, depth, w, h)
+    const keep = cleanMask(fg.disp, w, h)
+    const fgDisp = bilateralDisp(despike(fillDepth(fg.disp, keep, w, h), keep, w, h), fg.rgba, keep, w, h, 3, 0.09, 0.04, 2)
+    let tex: THREE.Texture | null = null
+    if (d.tex_image) {
+      const timg = new Image(); timg.src = 'data:image/jpeg;base64,' + d.tex_image
+      try { await timg.decode() } catch { /* vertex-colour fallback */ }
+      tex = new THREE.Texture(timg); tex.colorSpace = THREE.SRGBColorSpace
+      tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter; tex.needsUpdate = true
+    }
+    return layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, 1e9, 0,
+      { solid: false, bgdisp: null, maxT: 0.5, flattenCoef: null, tex, keep, dispJump: Infinity, zrange: Infinity })
   }
+  function clearReelMeshes() {
+    for (const m of reelMeshes) {
+      if (scene) scene.remove(m)
+      m.geometry?.dispose()
+      const mat = m.material as THREE.MeshBasicMaterial
+      mat?.map?.dispose(); (mat as THREE.Material)?.dispose()
+    }
+    reelMeshes = []; reelCount = 0
+  }
+  function reelShowMesh(i: number) { for (let k = 0; k < reelMeshes.length; k++) reelMeshes[k].visible = k === i }
   async function startReel() {
     if (reel) return
-    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; auto = false }   // the reel owns the scene
-    reel = true; reelRec = true; reelPlaying = false; reelFrames = []; reelIdx = 0
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; auto = false }
+    reel = true; reelRec = true; reelPlaying = false; reelIdx = 0; reelBuilt = 0; reelCount = 0
+    clearReelMeshes()
+    if (mesh) mesh.visible = false           // hide the static scene mesh; the reel replaces it
     sfx('sonar')
-    // Capture back-to-back at a lighter grid so the frames are as CLOSE together in time as the
-    // backend can build them (that is what makes the replay read like video rather than jumping).
-    for (let i = 0; i < REEL_N && reel; i++) {
+    let res: Awaited<ReturnType<typeof api.spatialReel>> | null = null
+    try { res = await api.spatialReel(cam, REEL_N, 256) } catch { exitReel(); return }
+    if (!reel) return
+    const scenes = (res?.frames ?? []) as Scene[]
+    if (!scenes.length) { exitReel(); return }
+    for (let i = 0; i < scenes.length && reel; i++) {   // PRECOMPUTE every mesh (the prepare phase)
       try {
-        const r = await api.spatial(cam, 256)
-        if (r?.scene) reelFrames = [...reelFrames, r.scene]
+        const m = await buildReelMesh(scenes[i])
+        if (m && scene) { m.visible = false; scene.add(m); reelMeshes.push(m) }
       } catch { /* skip a frame */ }
+      reelBuilt = i + 1; reelCount = reelMeshes.length
     }
     if (!reel) return
     reelRec = false; reelIdx = 0
-    if (reelFrames.length) { await reelShow(0); reelPlaying = true; reelPlayLoop() } else exitReel()
+    if (reelMeshes.length) { reelShowMesh(0); reelPlaying = true; startReelTimer() } else exitReel()
   }
-  async function reelPlayLoop() {
-    while (reelPlaying && reel && reelFrames.length) {
-      const t0 = performance.now()
-      const ok = await reelShow(reelIdx)                 // build + await; advance ONLY when it built
-      if (ok) reelIdx = (reelIdx + 1) % reelFrames.length
-      const rem = 150 - (performance.now() - t0)          // pace toward ~6 fps, builds permitting
-      if (rem > 0) await new Promise((res) => setTimeout(res, rem))
-    }
+  function startReelTimer() {
+    if (reelTimer) clearInterval(reelTimer)
+    reelTimer = setInterval(() => {          // pure visibility toggle -> buttery, no rebuild
+      if (!reelMeshes.length) return
+      reelIdx = (reelIdx + 1) % reelMeshes.length
+      reelShowMesh(reelIdx)
+    }, 55)
   }
   function reelToggle() {
     reelPlaying = !reelPlaying; sfx('click', { volume: 0.25 })
-    if (reelPlaying) reelPlayLoop()
+    if (reelPlaying) startReelTimer()
+    else if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
   }
-  function reelOnSeek() { reelPlaying = false; reelShow(reelIdx) }
+  function reelOnSeek() {
+    reelPlaying = false
+    if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
+    reelShowMesh(reelIdx)
+  }
   function exitReel() {
     reel = false; reelRec = false; reelPlaying = false
-    reelFrames = []
+    if (reelTimer) { clearInterval(reelTimer); reelTimer = null }
+    clearReelMeshes()
     sfx('click'); loadScene(false)
   }
 
@@ -964,7 +999,8 @@
   onDestroy(() => {
     window.removeEventListener('keydown', onkey, true)
     if (autoTimer) clearInterval(autoTimer)
-    reel = false; reelPlaying = false
+    if (reelTimer) clearInterval(reelTimer)
+    reel = false; reelPlaying = false; clearReelMeshes()
     if (raf) cancelAnimationFrame(raf)
     ro?.disconnect()
     if (renderer) { renderer.domElement.removeEventListener('pointerdown', onPointerDown); renderer.domElement.removeEventListener('pointerup', onPointerUp) }
@@ -1030,12 +1066,12 @@
     {#if reel}
       <div class="reelbar caps">
         {#if reelRec}
-          <span class="rlrec">● CAPTURING 3D REEL · {reelFrames.length}/{REEL_N}</span>
+          <span class="rlrec">◆ BUILDING 3D REEL · {reelBuilt}/{REEL_N}</span>
         {:else}
           <button class="cplay" onclick={reelToggle} aria-label={reelPlaying ? 'pause' : 'play'}>{reelPlaying ? '❚❚' : '▶'}</button>
-          <input class="cscrub" type="range" min="0" max={Math.max(0, reelFrames.length - 1)} step="1" bind:value={reelIdx} oninput={reelOnSeek} />
-          <span class="ctime">{reelFrames.length ? reelIdx + 1 : 0}/{reelFrames.length}</span>
-          <span class="cspan">◆ 3D REEL · DRAG TO ORBIT WHILE IT PLAYS</span>
+          <input class="cscrub" type="range" min="0" max={Math.max(0, reelCount - 1)} step="1" bind:value={reelIdx} oninput={reelOnSeek} />
+          <span class="ctime">{reelCount ? reelIdx + 1 : 0}/{reelCount}</span>
+          <span class="cspan">◆ 3D REEL · DRAG TO ORBIT WHILE IT PLAYS · HOLOREEL TO EXIT</span>
         {/if}
       </div>
     {:else if measure}

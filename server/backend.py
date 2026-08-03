@@ -1782,6 +1782,66 @@ class Backend:
             scene["tex_image"] = _b64.b64encode(texjpg.tobytes()).decode("ascii")
         return {"scene": scene}
 
+    def _reel_scene_from_frame(self, frame: Any, cam_name: str, sid: str, grid_w: int) -> dict | None:
+        """A LIGHT spatial scene from one specific frame, for HoloReel: depth + grid + texture only
+        (no temporal fusion, no background completion, no entity markers), so building 24 of them in a
+        row is fast enough to feel like a captured clip."""
+        h0, w0 = frame.shape[:2]
+        work_w = int(self.config.get("spatial.input_width", 640))
+        work = cv2.resize(frame, (work_w, int(work_w * h0 / w0)), interpolation=cv2.INTER_AREA) if w0 > work_w else frame
+        disp = self._depth.estimate(work)
+        if disp is None:
+            return None
+        grid_w = max(120, min(int(grid_w), 480))
+        gh = max(1, int(grid_w * work.shape[0] / work.shape[1]))
+        rgb_grid = cv2.resize(work, (grid_w, gh), interpolation=cv2.INTER_AREA)
+        disp_grid = cv2.resize(disp, (grid_w, gh), interpolation=cv2.INTER_AREA)
+        disp01, _dmin, _dmax = spatial.normalize_disparity(disp_grid)
+        scene = spatial.encode_scene(
+            rgb_grid, disp01, [], fov=float(self.config.get("spatial.fov_deg", 60.0)),
+            cam=cam_name, sid=str(sid), ts=time.time() * 1000.0, bg_rgb=None, bg_disp01=None)
+        import base64 as _b64
+        tw = min(w0, int(self.config.get("spatial.texture_width", 1280)))
+        texframe = frame if w0 <= tw else cv2.resize(frame, (tw, int(tw * h0 / w0)), interpolation=cv2.INTER_AREA)
+        ok_t, texjpg = cv2.imencode(".jpg", texframe, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        if ok_t:
+            scene["tex_image"] = _b64.b64encode(texjpg.tobytes()).decode("ascii")
+        return scene
+
+    def spatial_reel(self, sid: str, n: int = 24, grid_w: int = 256) -> dict:
+        """HoloReel capture: grab N DISTINCT raw frames as fast as the camera delivers (so the motion
+        between them is small = smooth), THEN reconstruct 3D for each. Returns {"frames": [scene,...]}."""
+        if not self.config.get("spatial.enabled", True):
+            return {"frames": [], "reason": "disabled"}
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None or self._depth is None:
+            return {"frames": [], "reason": "no_source"}
+        n = max(2, min(int(n), 40))
+        # Phase 1: rapidly grab N distinct capture frames (wait for a NEW seq each time).
+        raws: list = []
+        last_seq = -1
+        while len(raws) < n:
+            waited = 0
+            while self._raw_seq == last_seq and waited < 40:
+                time.sleep(0.008); waited += 1
+            last_seq = self._raw_seq
+            f = self._latest_raw
+            if f is None:
+                f = self._source_frame(src)
+            if f is None:
+                break
+            raws.append(f.copy())
+        # Phase 2: reconstruct 3D for each grabbed frame.
+        frames: list = []
+        for f in raws:
+            try:
+                sc = self._reel_scene_from_frame(f, src.name, sid, grid_w)
+            except Exception:  # noqa: BLE001
+                sc = None
+            if sc is not None:
+                frames.append(sc)
+        return {"frames": frames}
+
     def _spatial_entities(self, frame: Any, disp: Any, dmin: float,
                           dmax: float) -> tuple[list[dict], list[tuple[float, float, float, float]]]:
         """Detected people/vehicles/objects in `frame`: (entity markers, normalized boxes). Each
