@@ -19,7 +19,10 @@ from pathlib import Path
 
 from loguru import logger as log
 
-_MODEL_NAME = os.environ.get("OVERSEER_STT_MODEL", "small")
+# large-v3-turbo: near large-v3 accuracy (a big jump over 'small' for Turkish AND English) but
+# ~2-4x faster with far lower VRAM, so it fits alongside the vision models on the GPU. Downloaded
+# on first use into _MODELS_DIR (or pre-fetched by match.tools.export_models --only whisper).
+_MODEL_NAME = os.environ.get("OVERSEER_STT_MODEL", "large-v3-turbo")
 _MODELS_DIR = os.environ.get("OVERSEER_STT_DIR", "models/whisper")
 
 
@@ -49,7 +52,9 @@ class STT:
                 try:
                     import torch
                     if torch.cuda.is_available():
-                        device, compute = "cuda", "float16"
+                        # int8_float16 (not plain float16): halves the large model's VRAM so it
+                        # coexists with depth+detector+CLIP+ReID without OOMing, at ~the same accuracy.
+                        device, compute = "cuda", "int8_float16"
                 except Exception:  # noqa: BLE001
                     pass
                 log.info("loading offline STT model '{}' on {} (one time)...", _MODEL_NAME, device)

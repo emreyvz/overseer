@@ -217,12 +217,15 @@ def _export_face() -> str:
 
 def _export_whisper() -> str:
     """Pre-fetch the offline STT model (faster-whisper / CTranslate2) so the Operator's voice input
-    works on first run without a download. Size via OVERSEER_STT_MODEL (default small ~480 MB — base
-    mis-transcribes Turkish, small is far better and still sub-second on a GPU)."""
+    works on first run without a download. Size via OVERSEER_STT_MODEL (default large-v3-turbo — a
+    big Turkish/English accuracy jump over 'small', still fast and modest VRAM)."""
     import os
-    name = os.environ.get("OVERSEER_STT_MODEL", "small")
+    name = os.environ.get("OVERSEER_STT_MODEL", "large-v3-turbo")
     dst = MODELS / "whisper"
-    if (dst / f"models--Systran--faster-whisper-{name}").exists():
+    # HF cache dir is models--{org}--faster-whisper-{name}; turbo lives under mobiuslabsgmbh, the
+    # rest under Systran. Check both so the 'already present' short-circuit actually fires.
+    org = "mobiuslabsgmbh" if name in ("large-v3-turbo", "turbo") else "Systran"
+    if (dst / f"models--{org}--faster-whisper-{name}").exists():
         return f"whisper: already present ({name})"
     try:
         from faster_whisper import WhisperModel

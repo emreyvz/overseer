@@ -1324,7 +1324,9 @@ class Backend:
             fy = min(1.0, y2 / max(1, frame_h))
             hn = bh / max(1, frame_h)
             stature = hn / max(0.30, fy)
-            cm = int(round(max(150.0, min(200.0, 120.0 + stature * 130.0))))
+            # Gain recalibrated (was *130, which saturated almost everyone at the 200 cap): a
+            # normally-framed adult (stature ~0.75-0.85) now lands ~168-175 cm instead of 200.
+            cm = int(round(max(150.0, min(205.0, 120.0 + stature * 62.0))))
             attrs["height_cm"] = cm
             attrs["height"] = "short" if cm < 168 else ("tall" if cm > 182 else "medium")
         if bh >= 24 and bw >= 12:  # skip tiny/far crops where colour is unreliable
@@ -1808,14 +1810,55 @@ class Backend:
             scene["tex_image"] = _b64.b64encode(texjpg.tobytes()).decode("ascii")
         return scene
 
+    def _reel_raw_frames(self, src: Any, n: int, span: float) -> list:
+        """The N raw frames a HoloReel is built from, SPREAD over ~`span` seconds so the replay
+        shows real motion. Prefers the live capture ring (what the operator is watching); if that
+        is not advancing (no live capture for this source) it reads a consecutive burst straight
+        from the source and sub-samples it, so the reel still MOVES instead of freezing on one frame."""
+        stride = span / max(1, n - 1)
+        # Is the live capture ring actually advancing for this source right now?
+        live = str(src.id) == str(self._source_id) and self._latest_raw is not None
+        if live:
+            seq0 = self._raw_seq
+            t_end = time.time() + 0.35
+            while self._raw_seq == seq0 and time.time() < t_end:
+                time.sleep(0.01)
+            live = self._raw_seq != seq0
+        if live:
+            raws: list = []
+            last_seq = -1
+            next_due = time.time()
+            for _ in range(n):
+                now = time.time()
+                if now < next_due:                    # pace so successive grabs stay >= stride apart
+                    time.sleep(next_due - now)
+                waited = 0                            # then wait for a genuinely NEW capture (distinct frame)
+                while self._raw_seq == last_seq and waited < 60:
+                    time.sleep(0.008); waited += 1
+                last_seq = self._raw_seq
+                next_due = time.time() + stride
+                f = self._latest_raw
+                if f is None:
+                    break
+                raws.append(f.copy())
+            if len(raws) >= 2:
+                return raws
+        # Fallback: live ring is stalled. Read 3x consecutive frames off the source and sub-sample
+        # to N spanning the window, so the reel is a real moving clip (a different moment, but moving).
+        over = self._grab_burst(src, n * 3)
+        if len(over) >= 2:
+            idx = sorted({round(i * (len(over) - 1) / (n - 1)) for i in range(n)})
+            return [over[j].copy() for j in idx]
+        f = self._source_frame(src)                    # last resort: whatever single frame exists
+        return [f.copy()] if f is not None else []
+
     def spatial_reel(self, sid: str, n: int = 28, grid_w: int = 256) -> dict:
         """HoloReel capture: grab N DISTINCT raw frames SPREAD over a few seconds of real time, and
         reconstruct 3D for each. Returns {"frames": [scene, ...]}.
 
-        Grab and reconstruct are INTERLEAVED on purpose: the depth inference between grabs (~0.1 s)
-        plus a minimum per-frame stride spaces the frames across `spatial.reel_span_s` seconds, so the
-        replay shows real motion. (Grabbing all N first, with nothing between, crammed them into under
-        a second, so the reel looked frozen even though every frame differed.)"""
+        The frames are spaced across `spatial.reel_span_s` seconds (via `_reel_raw_frames`) so the
+        replay shows real motion. (Grabbing all N back to back crammed them into under a second, so
+        the reel looked frozen even though every frame differed.)"""
         if not self.config.get("spatial.enabled", True):
             return {"frames": [], "reason": "disabled"}
         src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
@@ -1823,26 +1866,11 @@ class Backend:
             return {"frames": [], "reason": "no_source"}
         n = max(2, min(int(n), 48))
         span = float(self.config.get("spatial.reel_span_s", 3.0))   # real-time window the reel spans
-        stride = span / max(1, n - 1)                                # minimum seconds between grabbed frames
+        raws = self._reel_raw_frames(src, n, span)
         frames: list = []
-        last_seq = -1
-        next_due = time.time()
-        for _ in range(n):
-            now = time.time()
-            if now < next_due:               # pace so successive grabs stay >= stride apart
-                time.sleep(next_due - now)
-            waited = 0                        # then make sure the grabbed frame is a genuinely NEW capture
-            while self._raw_seq == last_seq and waited < 60:
-                time.sleep(0.008); waited += 1
-            last_seq = self._raw_seq
-            next_due = time.time() + stride
-            f = self._latest_raw
-            if f is None:
-                f = self._source_frame(src)
-            if f is None:
-                break
+        for f in raws:
             try:
-                sc = self._reel_scene_from_frame(f.copy(), src.name, sid, grid_w)
+                sc = self._reel_scene_from_frame(f, src.name, sid, grid_w)
             except Exception:  # noqa: BLE001
                 sc = None
             if sc is not None:
@@ -1907,10 +1935,16 @@ class Backend:
         return self._source_frame(src) if src is not None else None
 
     def _source_frame(self, s: Any) -> Any:
-        """Latest BGR frame for a source — the analysed frame if it's the active
-        camera, else the warm thumbnail relay (decoded)."""
-        if s.id == self._source_id and self._latest_img is not None:
-            return self._latest_img
+        """Latest BGR frame for a source. For the active camera, prefer the newest RAW capture
+        frame (`_latest_raw`, ~30 fps, always present while the feed plays) over the analysed frame
+        (`_latest_img`, only ~3 fps and often None between analysis passes) — the analysed frame
+        being None is why VQA / 'look closer' used to answer 'could not read frame'. Otherwise fall
+        back to the warm thumbnail relay (decoded)."""
+        if str(s.id) == str(self._source_id):
+            if self._latest_raw is not None:
+                return self._latest_raw
+            if self._latest_img is not None:
+                return self._latest_img
         jpeg = self.thumbs.get_jpeg(s.id, s.url)
         if jpeg:
             return cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)

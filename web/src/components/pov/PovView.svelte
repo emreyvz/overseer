@@ -150,7 +150,7 @@
   {/each}
   {#if live && !failed}
     <button class="inspectbtn caps" class:on={inspectOn} onclick={() => { inspectOn = !inspectOn; hits = []; sfx('click', { volume: 0.3 }) }}>
-      ⌖ LOOK CLOSER{inspectOn ? ' · ON' : ''}
+      ⌖ SCAN POINT{inspectOn ? ' · ON' : ''}
     </button>
     <button class="spatialbtn caps" onclick={() => { if ($activeCam) { spatialOpen.set($activeCam); sfx('click', { volume: 0.3 }) } }}>
       ⛶ 3D SPATIAL
