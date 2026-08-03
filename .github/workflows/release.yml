@@ -88,7 +88,9 @@ jobs:
           # the app still runs the bundled Python after quarantine is cleared (xattr -cr).
           EXTRA=""
           if [ -n "${CSC_LINK:-}" ]; then
-            EXTRA="-c.mac.hardenedRuntime=true"
+            # Developer ID present -> hardened runtime + notarize (uses APPLE_ID /
+            # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID). macOS then opens it with no warning.
+            EXTRA="-c.mac.hardenedRuntime=true -c.mac.notarize=true"
           else
             export CSC_IDENTITY_AUTO_DISCOVERY=false
           fi
