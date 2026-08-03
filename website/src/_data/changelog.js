@@ -1,7 +1,12 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.13", codename: "Fourth Dimension", date: "2026-08-04", tag: "latest",
+    { version: "0.12.14", codename: "Fourth Dimension", date: "2026-08-04", tag: "latest",
+      changes: [
+        { type: "fixed", text: "The macOS app could not start its backend (endless \"starting the analysis server\", then a timeout). Cause: the project pinned PyTorch to the CUDA build, which has no macOS wheels, so the one-time dependency install silently failed on Macs. PyTorch now installs the CUDA build only on Windows/Linux and the regular Apple-Silicon/CPU build on macOS." },
+        { type: "improved", text: "The desktop setup is now self-healing: it re-runs on the first launch AND on every app update, so a dependency fix like this applies automatically and a half-finished previous setup repairs itself, with no need to delete anything by hand." },
+      ] },
+    { version: "0.12.13", codename: "Fourth Dimension", date: "2026-08-04", tag: "",
       changes: [
         { type: "fixed", text: "First launch could sit on a blank grey screen (mostly on macOS): the shell waited only about a minute for the backend, but the very first run downloads the AI runtime and loads the models, which takes several minutes; on timeout it fell back to a page that renders blank. It now waits several minutes with a live status counter on the splash, reports a setup failure in plain words instead of hiding it, and never drops to a blank page." },
       ] },

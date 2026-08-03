@@ -45,9 +45,12 @@ dev = [
     "ruff>=0.6",
 ]
 
+# CUDA wheels only on Windows / Linux; the cu124 index has NO macOS wheels, so on macOS torch
+# resolves from the default PyPI index (CPU + Apple-Silicon MPS builds). Without the marker,
+# `uv sync` cannot install torch on a Mac and the backend fails to start.
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu124" }]
-torchvision = [{ index = "pytorch-cu124" }]
+torch = [{ index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }]
+torchvision = [{ index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }]
 
 [[tool.uv.index]]
 name = "pytorch-cu124"
