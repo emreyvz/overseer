@@ -47,6 +47,8 @@ class StreamReader(threading.Thread):
                 logger.exception("status callback failed")
 
     def run(self) -> None:
+        from core.thread_priority import set_current_thread_priority, ABOVE_NORMAL
+        set_current_thread_priority(ABOVE_NORMAL)   # display source: keep frames arriving at camera rate
         delay = self._min_delay
         first_attempt = True
         while not self._stop_event.is_set():

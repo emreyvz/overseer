@@ -68,6 +68,8 @@ class LiveMakeReader:
         return True
 
     def _run(self) -> None:
+        from core.thread_priority import set_current_thread_priority, BELOW_NORMAL
+        set_current_thread_priority(BELOW_NORMAL)   # CPU classifier; keep off the live feed's cores
         while not self._stop.is_set():
             with self._cv:
                 while not self._queue and not self._stop.is_set():

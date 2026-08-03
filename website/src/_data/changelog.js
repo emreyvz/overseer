@@ -1,7 +1,11 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.10", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+    { version: "0.12.11", codename: "Fourth Dimension", date: "2026-08-03", tag: "latest",
+      changes: [
+        { type: "improved", text: "Another step on video smoothness: the whole display path (the camera reader and the 30fps encoder) now runs at a raised OS thread priority, while the background analysis, roster-harvest and vehicle classifiers run at a lowered one. So under load the operating system hands the CPU to the live feed first. This complements the thread-pool caps from the previous release." },
+      ] },
+    { version: "0.12.10", codename: "Fourth Dimension", date: "2026-08-03", tag: "",
       changes: [
         { type: "fixed", text: "Live video stutter, attacked at the real root cause: in one process nothing capped the OpenCV and torch thread pools, so a single analysis op grabbed every CPU core and starved the 30fps display encoder in bursts. Both pools are now capped to cores-2, the display-encoder thread runs at a raised priority, and per-detection colour analysis is cached per track instead of recomputed every frame." },
         { type: "improved", text: "While you are watching one camera live, the background roster harvest of the OTHER cameras is now paused entirely (only the focused camera keeps enrolling), removing the periodic GPU/GIL spikes from their detection and re-ID. It resumes when you leave the feed." },
