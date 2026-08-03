@@ -3,7 +3,7 @@ module.exports = {
   releases: [
     { version: "0.12.12", codename: "Fourth Dimension", date: "2026-08-04", tag: "latest",
       changes: [
-        { type: "fixed", text: "macOS \"'Overseer' is damaged and can't be opened\": the app is now code-signed (ad-hoc) with hardened-runtime entitlements, so once you clear the download quarantine with `xattr -cr /Applications/Overseer.app` it launches and runs the bundled Python properly (before, the missing entitlements could block it even after that). This is a Gatekeeper block on any un-notarized download, not a corrupt file; Windows and Linux are unaffected." },
+        { type: "fixed", text: "macOS \"'Overseer' is damaged and can't be opened\": this is Gatekeeper blocking any un-notarized download, not a corrupt file. Clear the quarantine once with `xattr -cr /Applications/Overseer.app` and it opens. The ad-hoc signed build now runs the bundled Python cleanly after that; Windows and Linux are unaffected." },
         { type: "added", text: "The release pipeline is now notarization-ready: add an Apple Developer ID via repo secrets (MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID) and tagged builds are signed and notarized automatically, so macOS opens them with no warning at all." },
       ] },
     { version: "0.12.11", codename: "Fourth Dimension", date: "2026-08-03", tag: "",

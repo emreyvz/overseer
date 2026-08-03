@@ -78,14 +78,19 @@ jobs:
           # On macOS build both architectures from the one (arm64) runner.
           ARCH=""
           if [ "$RUNNER_OS" = "macOS" ]; then ARCH="--mac --arm64 --x64"; fi
-          # No Developer ID cert provided -> ad-hoc sign (arm64 needs a signature to run at all)
-          # rather than trying to discover a certificate that is not there.
-          if [ -z "$CSC_LINK" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            npx electron-builder --publish never $ARCH -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
+          # With a Developer ID cert -> turn on hardened runtime (required to notarize; the
+          # entitlements at build/entitlements.mac.plist are then auto-detected). Without one ->
+          # ad-hoc sign with hardened runtime OFF, so the app still runs the bundled Python after
+          # the user clears quarantine (xattr -cr). arm64 needs a signature to run at all.
+          EXTRA=""
+          if [ -n "$CSC_LINK" ]; then
+            EXTRA="-c.mac.hardenedRuntime=true"
           else
-            npx electron-builder --publish never $ARCH
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
           fi
+          VER=""
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then VER="-c.extraMetadata.version=${GITHUB_REF_NAME#v}"; fi
+          npx electron-builder --publish never $ARCH $EXTRA $VER
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
