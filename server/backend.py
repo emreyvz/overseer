@@ -87,7 +87,7 @@ class Backend:
             int(self.config.get("alerts.crowd_min", 8)),
             float(self.config.get("alerts.cooldown_seconds", 60.0)),
         )
-        # On a fresh install, seed one public demo camera so the map isn't empty.
+        # On a fresh install, seed the public demo cameras so the map isn't empty.
         self.db.seed_default_source()
         self.alert_engine = AlertEngine(EventSummarizer(), self._source_name)
         self.alert_engine.set_rules(self.db.list_alert_rules())
