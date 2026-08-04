@@ -1,6 +1,6 @@
 ---
 title: License
-order: 12
+order: 13
 intro: "Overseer is released under the MIT License."
 ---
 

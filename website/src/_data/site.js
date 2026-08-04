@@ -19,9 +19,9 @@ module.exports = {
   ogImage: "/assets/img/og.svg",
   themeColor: "#0e1114",
   release: {
-    version: "0.9.0",
-    codename: "Spatial Foresight",
-    date: "2026-07-31",
+    version: "0.12.15",
+    codename: "Fourth Dimension",
+    date: "2026-08-04",
   },
   // Headline stats surfaced on the home page (placeholders, easy to update).
   stats: [

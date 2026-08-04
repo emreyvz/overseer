@@ -1,6 +1,6 @@
 ---
 title: Examples
-order: 9
+order: 10
 intro: "Copy-paste workflows for the most common tasks. Full walkthroughs live on the Examples page."
 ---
 

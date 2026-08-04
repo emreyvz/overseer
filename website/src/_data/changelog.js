@@ -1,7 +1,13 @@
 // Version history (newest first). Each release renders as an expandable entry.
 module.exports = {
   releases: [
-    { version: "0.12.14", codename: "Fourth Dimension", date: "2026-08-04", tag: "latest",
+    { version: "0.12.15", codename: "Fourth Dimension", date: "2026-08-04", tag: "latest",
+      changes: [
+        { type: "added", text: "A fresh install now opens with four live public demo cameras spread across the map instead of a single one: Street in Stavanger, Airport at Prescott in Arizona, Hotel in Sofia and Dock on Cape Cod. Each is placed near where the camera actually is, so the map, the camera switcher and the multi-camera views all have something real to show on the first run. Your own camera list is never touched." },
+        { type: "changed", text: "The macOS installer is no longer published. Without Apple notarization, Gatekeeper greets every downloaded build with \"'Overseer' is damaged and can't be opened\", which looks like a broken file rather than the policy block it is. Mac users now build the app locally in one command, where that block does not apply at all; macOS remains fully supported, only the prebuilt download is gone. Windows and Linux installers are unchanged." },
+        { type: "added", text: "A new Building the Desktop App documentation page covers packaging the installer yourself on Windows, macOS and Linux, from prerequisites through to what each platform produces and the signing caveats." },
+      ] },
+    { version: "0.12.14", codename: "Fourth Dimension", date: "2026-08-04", tag: "",
       changes: [
         { type: "fixed", text: "The macOS app could not start its backend (endless \"starting the analysis server\", then a timeout). Cause: the project pinned PyTorch to the CUDA build, which has no macOS wheels, so the one-time dependency install silently failed on Macs. PyTorch now installs the CUDA build only on Windows/Linux and the regular Apple-Silicon/CPU build on macOS." },
         { type: "improved", text: "The desktop setup is now self-healing: it re-runs on the first launch AND on every app update, so a dependency fix like this applies automatically and a half-finished previous setup repairs itself, with no need to delete anything by hand." },
