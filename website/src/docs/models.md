@@ -1,6 +1,6 @@
 ---
 title: Models
-order: 7
+order: 8
 intro: "Overseer composes a focused catalogue of models. This is the short version; the full spec sheets live on the Models page."
 ---
 

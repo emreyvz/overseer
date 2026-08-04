@@ -1,15 +1,18 @@
 name: Build & publish desktop apps
 
-# Builds the Overseer desktop app (Electron) for Windows, macOS and Linux, then a single release
-# job publishes the installers to the GitHub Release for a pushed v* tag. The matrix jobs only
+# Builds the Overseer desktop app (Electron) for Windows and Linux, then a single release job
+# publishes the installers to the GitHub Release for a pushed v* tag. The matrix jobs only
 # BUILD (no per-job publish) so they never race to create the release. The installer is thin: on
 # first launch the app sets up the Python backend (uv sync) and downloads the AI models, matched
 # to the machine. See web/electron/main.cjs.
 #
-# macOS signing: the app is always ad-hoc signed (with hardened-runtime entitlements so it can run
-# the bundled Python once quarantine is cleared). For NOTARIZED, warning-free downloads (needs an
-# Apple Developer ID), add the repo secrets MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD, APPLE_ID,
-# APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID; the package step then signs + notarizes.
+# No macOS installer is published. Without Apple notarization (a paid Developer ID) Gatekeeper
+# tells everyone who downloads a .dmg that the app "is damaged", which reads as a broken download
+# rather than a policy block, so Mac users build it themselves instead: see
+# website/src/docs/building.md. Everything the app does is supported on macOS and the `mac` target
+# in web/package.json is kept so a local `electron-builder --mac` still works; only the prebuilt
+# download is gone. If a Developer ID is ever bought, restore the macos-latest matrix entry and the
+# signing/notarization env from git history (they were removed in v0.12.15).
 
 on:
   push:
@@ -24,9 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest builds BOTH arm64 (Apple Silicon) and x64 (Intel) in one job (see the
-        # package step), avoiding the scarce/deprecated macos-13 Intel runners.
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -64,39 +65,10 @@ jobs:
       - name: Package (electron-builder, no publish)
         working-directory: web
         shell: bash
-        env:
-          # macOS: set these repo secrets to get NOTARIZED, warning-free builds (an Apple Developer
-          # ID is required). Without them the mac app is ad-hoc signed and, because it is not
-          # notarized, macOS marks the downloaded app "damaged" until quarantine is cleared with
-          # `xattr -cr /Applications/Overseer.app` (see the release notes / README).
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # On macOS build both architectures from the one (arm64) runner.
-          ARCH=""
-          if [ "$RUNNER_OS" = "macOS" ]; then ARCH="--mac --arm64 --x64"; fi
-          # GitHub sets an UNDEFINED secret to an empty string, and electron-builder mistakes an
-          # empty CSC_LINK for "a certificate was provided" and dies ("not a file"). Unset the empty
-          # ones so it cleanly ad-hoc signs; keep them only when a real Developer ID cert is present.
-          if [ -z "${CSC_LINK:-}" ]; then unset CSC_LINK CSC_KEY_PASSWORD; fi
-          if [ -z "${APPLE_ID:-}" ]; then unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; fi
-          # With a Developer ID cert -> hardened runtime on (required to notarize; entitlements at
-          # build/entitlements.mac.plist auto-detected). Without -> ad-hoc, hardened runtime off so
-          # the app still runs the bundled Python after quarantine is cleared (xattr -cr).
-          EXTRA=""
-          if [ -n "${CSC_LINK:-}" ]; then
-            # Developer ID present -> hardened runtime + notarize (uses APPLE_ID /
-            # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID). macOS then opens it with no warning.
-            EXTRA="-c.mac.hardenedRuntime=true -c.mac.notarize=true"
-          else
-            export CSC_IDENTITY_AUTO_DISCOVERY=false
-          fi
           VER=""
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then VER="-c.extraMetadata.version=${GITHUB_REF_NAME#v}"; fi
-          npx electron-builder --publish never $ARCH $EXTRA $VER
+          npx electron-builder --publish never $VER
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
@@ -104,8 +76,6 @@ jobs:
           name: installers-${{ matrix.os }}
           path: |
             web/release/*.exe
-            web/release/*.dmg
-            web/release/*.zip
             web/release/*.AppImage
             web/release/*.deb
           if-no-files-found: ignore

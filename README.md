@@ -127,15 +127,9 @@ The first run installs the Python toolchain on its own, pulls the dependencies, 
 
 ### Prebuilt desktop app
 
-You can also grab a one-click installer from the [latest release](https://github.com/emreyvz/overseer/releases/latest): `Setup.exe` (Windows), a `.dmg` (macOS, `arm64` for Apple Silicon or `x64` for Intel), or `.AppImage` / `.deb` (Linux).
+You can also grab a one-click installer from the [latest release](https://github.com/emreyvz/overseer/releases/latest): `Setup.exe` (Windows) or `.AppImage` / `.deb` (Linux). Both install and open with no extra steps.
 
-The macOS build is not yet notarized by Apple, so the first time you open it macOS shows *"'Overseer' is damaged and can't be opened."* That is Gatekeeper blocking any un-notarized download, not a real problem with the app. Move it to Applications, then clear the quarantine flag once from Terminal:
-
-```bash
-xattr -cr /Applications/Overseer.app
-```
-
-After that it opens normally. Windows and Linux need no such step.
+There is deliberately no macOS download. Apple's Gatekeeper tells anyone who opens an un-notarized `.dmg` that the app *"is damaged and can't be opened"*, which looks like a broken file rather than the policy block it actually is, and clearing it takes a Terminal command. Rather than ship something that greets Mac users with a false error, Overseer asks them to build it locally, where that block does not apply at all. It takes one command and produces the same desktop app: see [Building from source](https://emreyvz.github.io/overseer/docs/building/). Everything the app does is fully supported on macOS, including Apple Silicon.
 
 ### Vision models
 

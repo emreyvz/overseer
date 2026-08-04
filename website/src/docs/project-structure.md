@@ -1,6 +1,6 @@
 ---
 title: Project Structure
-order: 6
+order: 7
 intro: "A map of the repository so you know where things live."
 ---
 

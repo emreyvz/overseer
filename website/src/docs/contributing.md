@@ -1,6 +1,6 @@
 ---
 title: Contributing
-order: 11
+order: 12
 intro: "Overseer is developed in the open. Bug reports, features and documentation are all welcome."
 ---
 

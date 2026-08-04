@@ -1,6 +1,6 @@
 ---
 title: FAQ
-order: 10
+order: 11
 intro: "Quick answers. The full, grouped FAQ lives on its own page."
 ---
 

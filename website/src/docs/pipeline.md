@@ -1,6 +1,6 @@
 ---
 title: Pipeline
-order: 8
+order: 9
 intro: "How a frame becomes structured intelligence, in thirteen stages. This is the summary; the full breakdown is on the Pipeline page."
 ---
 

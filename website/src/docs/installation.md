@@ -25,6 +25,12 @@ overseer.cmd
 
 If Node.js is installed you get the desktop app; otherwise Overseer opens in your browser at `http://127.0.0.1:8787`. The first run downloads model weights into `models/`; after that it can run fully offline.
 
+## Prebuilt installer
+
+If you would rather not clone anything, the [latest release](https://github.com/emreyvz/overseer/releases/latest) carries a one-click installer for Windows (`Setup.exe`) and for Linux (`.AppImage` or `.deb`). It is a thin installer: the AI runtime is fetched on the first launch, matched to your hardware, so allow it a few minutes before the window comes up.
+
+There is no macOS download. Apple's Gatekeeper marks any un-notarized app *"damaged and can't be opened"*, which looks like a corrupt file rather than the policy block it really is, and notarization needs a paid Developer ID. So on a Mac you either run from source with `./overseer.sh` above, which is unaffected, or [build the installer yourself]({{ '/docs/building/' | url }}) in one command, where the block never applies.
+
 ## Manual setup (optional)
 
 Prefer to do it yourself:
