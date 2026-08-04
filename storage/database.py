@@ -11,6 +11,16 @@ from pathlib import Path
 from alerts.model import Alert, AlertRule
 from events.types import Event
 
+# Public demo cameras seeded on a fresh install: (name, url, latitude, longitude).
+# Placed near where each stream actually is, so the map opens with pins on four
+# continents' worth of scenery instead of a single dot.
+DEMO_SOURCES: tuple[tuple[str, str, float, float], ...] = (
+    ("Street", "http://renzo.dyndns.tv/mjpg/video.mjpg", 58.030084, 5.892758),          # Stavanger, NO
+    ("Airport", "http://199.104.253.4/mjpg/video.mjpg", 34.654500, -112.419600),        # Prescott, AZ, US
+    ("Hotel", "http://85.196.146.82:3337/axis-cgi/mjpg/video.cgi", 42.682600, 23.322300),  # Sofia, BG
+    ("Dock", "http://eyc.synology.me:10001/mjpg/video.mjpg", 41.648900, -70.481200),    # Mashpee, MA, US
+)
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1167,18 +1177,33 @@ class Database:
         self.set_setting("alert_rules_seeded", "1")
 
     def seed_default_source(self) -> None:
-        """On a brand-new database, add one public demo camera so a fresh install
-        shows a camera on the map and can be connected right away. Runs once."""
-        if self.get_setting("default_source_seeded") is not None:
-            return
+        """On a brand-new database, add the public demo cameras so a fresh install
+        shows cameras spread over the map and can connect right away. Runs once.
+
+        A second pass tops up installs seeded back when there was only one demo
+        camera, but only while every source still present is a demo one, so an
+        operator's own camera list is never touched.
+        """
+        first_run = self.get_setting("default_source_seeded") is None
         self.set_setting("default_source_seeded", "1")
         with self._lock:
-            existing = self._conn.execute("SELECT COUNT(*) FROM sources").fetchone()[0]
-        if existing:
-            return  # the operator already has cameras; leave them alone
-        url = "http://renzo.dyndns.tv/mjpg/video.mjpg"   # public demo webcam
-        sid = self.add_source("Street", url)
-        self.update_source(sid, "Street", url, 58.03008453369141, 5.892758789062498)
+            rows = self._conn.execute("SELECT url FROM sources").fetchall()
+        have = {r[0] for r in rows}
+        if first_run:
+            if have:
+                return  # the operator already has cameras; leave them alone
+        else:
+            if self.get_setting("demo_sources_v2_seeded") is not None:
+                return
+            if not have.issubset({c[1] for c in DEMO_SOURCES}):
+                # cameras the operator added themselves; don't top up around them
+                self.set_setting("demo_sources_v2_seeded", "1")
+                return
+        for name, url, lat, lng in DEMO_SOURCES:
+            if url in have:
+                continue
+            self.update_source(self.add_source(name, url), name, url, lat, lng)
+        self.set_setting("demo_sources_v2_seeded", "1")
 
     # -- alerts --------------------------------------------------------------
     def add_alert(self, alert: Alert) -> int:
