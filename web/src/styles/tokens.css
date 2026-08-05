@@ -21,6 +21,14 @@
   --cyan: #38d0e3;          /* map data-paths ONLY */
   --cyan-dim: #1b6e78;
 
+  /* Two semantic hues that were already used inline across the app (suggestions queue,
+     zone editor) — promoted to tokens so they stop being magic numbers. Neither is an
+     alarm colour: scarlet remains the ONLY alarm. */
+  --amber: #e8a13a;         /* degraded / uncertain / warning-not-alarm */
+  --amber-dim: rgba(232, 161, 58, 0.16);
+  --jade: #2fbf8f;          /* learned-normal, baselines, "as expected" */
+  --jade-dim: rgba(47, 191, 143, 0.16);
+
   /* — Typography — */
   --font-mono: "JetBrains Mono", "Space Mono", ui-monospace, monospace;
   --font-type: "Space Mono", "JetBrains Mono", monospace;

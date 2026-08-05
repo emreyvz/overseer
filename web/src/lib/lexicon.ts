@@ -65,6 +65,12 @@ export const MODULES = [
   { key: 'tactical', label: 'TACTICAL', group: 'VISUAL' },
   { key: 'ghosts', label: 'FORESIGHT', group: 'VISUAL' },
   { key: 'social', label: 'SOCIAL X-RAY', group: 'VISUAL' },
+  // PERCEPTION: the four engines that model the place itself rather than the objects in it.
+  // NOTE `unseen`, not `fog` — the `fog` key above is weather fog under ENVIRONMENT.
+  { key: 'dream', label: 'DREAMSTATE', group: 'PERCEPTION' },
+  { key: 'unseen', label: 'FOG OF WAR', group: 'PERCEPTION' },
+  { key: 'grain', label: 'GRAIN', group: 'PERCEPTION' },
+  { key: 'listen', label: 'EARDRUM', group: 'PERCEPTION' },
 ] as const
 
 export const clock = (d = new Date()): string =>

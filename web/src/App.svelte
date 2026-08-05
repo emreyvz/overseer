@@ -2,7 +2,8 @@
   import { onMount } from 'svelte'
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
-    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, enhanceResult, hydrateAlerts, hydrateModules, toggleModule, type Mode,
+    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, enhanceResult, hydrateAlerts, hydrateModules, toggleModule,
+    dreamConsole, coverageScreen, grainScreen, eardrumDrawer, listenPlacing, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
@@ -42,7 +43,7 @@
   // the 3D engine only loads when the operator actually opens the spatial view.
   const SpatialView = () => import('./components/spatial/SpatialView.svelte')
 
-  const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case' }
+  const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case', b: 'bedrock' }
 
   onMount(() => { startZoneEngine(); startAnomalyEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts(); hydrateModules() }
     if (SIM && location.search.includes('shot=')) {   // dev-only screenshot hook (SIM + ?shot=; inert in prod), see scripts/shot_capture.cjs
@@ -136,6 +137,12 @@
     if ($stage !== 'live') return
     if (k === 'escape') {
       if ($enhanceMode || $enhanceResult) { enhanceMode.set(false); enhanceResult.set(null); return }
+      // PERCEPTION screens close before the older panels (they are the top-most layer).
+      if ($dreamConsole !== null) { dreamConsole.set(null); return }
+      if ($coverageScreen) { coverageScreen.set(false); return }
+      if ($grainScreen) { grainScreen.set(false); return }
+      if ($listenPlacing) { listenPlacing.set(false); return }
+      if ($eardrumDrawer) { eardrumDrawer.set(false); return }
       if ($operatorOpen) { operatorOpen.set(false); return }
       if ($alertsScreen) { alertsScreen.set(false); return }
       if ($suggestionsOpen) { suggestionsOpen.set(false); return }
@@ -163,6 +170,17 @@
     if (k === 'e' && $mode === 'pov') { enhanceMode.update((v) => !v); sfx('click'); return }
     if (k === 'f' && $mode === 'pov') { if ($selectedDetection) { followOn.update((v) => !v); sfx('click') } else { flashBanner('SELECT A TARGET TO FOLLOW', true, 1400) } return }
     if (k === 's' && $mode === 'pov') { toggleModule('social'); sfx('click'); return }   // S -> Social X-ray
+    // ── PERCEPTION suite: bare key toggles the live overlay, SHIFT opens its screen ──────────
+    if (k === 'm') { if (e.shiftKey) dreamConsole.set('live'); else toggleModule('dream'); sfx('click'); return }
+    if (k === 'u') { if (e.shiftKey) coverageScreen.set(true); else toggleModule('unseen'); sfx('click'); return }
+    if (k === 'h') { if (e.shiftKey) grainScreen.set(true); else toggleModule('grain'); sfx('click'); return }
+    // L enters probe placement (the overlay component turns the module on itself, so leaving
+    // placement does not switch listening off); SHIFT+L is the analysis drawer.
+    if (k === 'l') {
+      if (e.shiftKey) eardrumDrawer.update((v) => !v)
+      else if ($mode === 'pov') listenPlacing.update((v) => !v)
+      sfx('click'); return
+    }
     if (/^[1-9]$/.test(k)) { switchCam(Number(k)); return }
     if (k in MODE_KEYS) { toMode(MODE_KEYS[k]); return }
   }

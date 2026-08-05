@@ -210,6 +210,188 @@ CREATE TABLE IF NOT EXISTS case_events (
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_case_events_case ON case_events(case_id);
+
+-- ── PERCEPTION SUITE ──────────────────────────────────────────────────────────────────────
+-- DREAMSTATE: the learned expectation field (statistics only, never imagery) and the
+-- divergences it fired. `stats` is a packed float32 P2 quantile-estimator state per feature,
+-- so the store is constant-size per (camera, time bucket, cell) no matter how long it runs.
+CREATE TABLE IF NOT EXISTS dream_state (
+    source_id INTEGER NOT NULL,
+    bucket INTEGER NOT NULL,
+    cell INTEGER NOT NULL,
+    stats BLOB NOT NULL,
+    n INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (source_id, bucket, cell)
+);
+CREATE TABLE IF NOT EXISTS dream_divergence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    ts REAL NOT NULL,
+    peak_sigma REAL NOT NULL,
+    area_sigma_s REAL NOT NULL DEFAULT 0,
+    blob TEXT NOT NULL DEFAULT '[]',
+    cells TEXT NOT NULL DEFAULT '[]',
+    snapshot_path TEXT,
+    verdict TEXT,
+    verdict_ts REAL,
+    triage TEXT,
+    tier TEXT NOT NULL DEFAULT 'A'
+);
+CREATE INDEX IF NOT EXISTS idx_dream_div_ts ON dream_divergence(source_id, ts DESC);
+CREATE TABLE IF NOT EXISTS dream_pulse (
+    source_id INTEGER NOT NULL,
+    minute_ts REAL NOT NULL,
+    peak REAL NOT NULL,
+    mean REAL NOT NULL,
+    PRIMARY KEY (source_id, minute_ts)
+);
+CREATE TABLE IF NOT EXISTS dream_mute (
+    source_id INTEGER NOT NULL,
+    cell INTEGER NOT NULL,
+    from_hour INTEGER NOT NULL DEFAULT 0,
+    to_hour INTEGER NOT NULL DEFAULT 24,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (source_id, cell)
+);
+
+-- FOG OF WAR: per-cell observability accumulation and the blind spots derived from it.
+-- n_die / n_born are the EMPIRICAL channel: where tracks actually end and begin away from the
+-- frame border is the operational definition of a blind spot.
+CREATE TABLE IF NOT EXISTS coverage_cells (
+    source_id INTEGER NOT NULL,
+    cell INTEGER NOT NULL,
+    n_enter INTEGER NOT NULL DEFAULT 0,
+    n_die INTEGER NOT NULL DEFAULT 0,
+    n_born INTEGER NOT NULL DEFAULT 0,
+    occ_persist REAL NOT NULL DEFAULT 0,
+    occ_samples INTEGER NOT NULL DEFAULT 0,
+    quality REAL,
+    px_per_m REAL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (source_id, cell)
+);
+CREATE TABLE IF NOT EXISTS blind_spots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    polygon TEXT NOT NULL,
+    area_m2 REAL,
+    persistent INTEGER NOT NULL DEFAULT 0,
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    events INTEGER NOT NULL DEFAULT 0,
+    channels TEXT NOT NULL DEFAULT '{}',
+    dismissed INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_blind_source ON blind_spots(source_id, persistent DESC, last_seen DESC);
+
+-- GRAIN: the learned per-cell movement distributions, and every scored track.
+-- `path` is the resampled trajectory, kept so the WHY card can retrieve precedents by shape.
+CREATE TABLE IF NOT EXISTS grain_cell (
+    source_id INTEGER NOT NULL,
+    cell INTEGER NOT NULL,
+    bucket INTEGER NOT NULL,
+    density INTEGER NOT NULL,
+    cls TEXT NOT NULL DEFAULT 'person',
+    n INTEGER NOT NULL DEFAULT 0,
+    heading BLOB,
+    speed BLOB,
+    trans BLOB,
+    dwell BLOB,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (source_id, cell, bucket, density, cls)
+);
+CREATE TABLE IF NOT EXISTS grain_track (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    det_id TEXT NOT NULL,
+    cls TEXT NOT NULL DEFAULT 'person',
+    start_ts REAL NOT NULL,
+    end_ts REAL NOT NULL,
+    percentile REAL NOT NULL,
+    score REAL NOT NULL DEFAULT 0,
+    factors TEXT NOT NULL DEFAULT '{}',
+    why TEXT,
+    path BLOB NOT NULL,
+    state TEXT NOT NULL DEFAULT 'unjudged',
+    verdict TEXT,
+    verdict_ts REAL,
+    snapshot_path TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_grain_track ON grain_track(source_id, start_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_grain_pct ON grain_track(percentile);
+
+-- EARDRUM: listening probes, their frozen baseline spectrum, and a per-minute trend row.
+CREATE TABLE IF NOT EXISTS probes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    roi TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'probe',
+    axis TEXT,
+    texture REAL NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_probes_source ON probes(source_id);
+CREATE TABLE IF NOT EXISTS probe_baseline (
+    probe_id INTEGER PRIMARY KEY REFERENCES probes(id) ON DELETE CASCADE,
+    psd BLOB NOT NULL,
+    freqs BLOB NOT NULL,
+    peaks TEXT NOT NULL DEFAULT '[]',
+    floor REAL NOT NULL DEFAULT 0,
+    band TEXT NOT NULL DEFAULT 'structural',
+    ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS probe_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    probe_id INTEGER NOT NULL REFERENCES probes(id) ON DELETE CASCADE,
+    ts REAL NOT NULL,
+    rms REAL NOT NULL,
+    snr REAL NOT NULL DEFAULT 0,
+    peaks TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_probe_hist ON probe_history(probe_id, ts DESC);
+
+-- BEDROCK: a bitemporal fact store PROJECTED from the tables above — never the source of
+-- truth, always derived. valid_from/valid_to = when it was true in the world.
+-- tx_from/tx_to = when we came to believe it. A correction closes tx and inserts; nothing is
+-- ever deleted, which is what makes "as believed on <date>" answerable.
+CREATE TABLE IF NOT EXISTS bd_entity (
+    uid INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    label TEXT,
+    snapshot_path TEXT,
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    UNIQUE (kind, ref)
+);
+CREATE INDEX IF NOT EXISTS idx_bd_entity_kind ON bd_entity(kind, last_seen DESC);
+CREATE TABLE IF NOT EXISTS bd_fact (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subj INTEGER NOT NULL REFERENCES bd_entity(uid) ON DELETE CASCADE,
+    pred TEXT NOT NULL,
+    obj INTEGER REFERENCES bd_entity(uid) ON DELETE SET NULL,
+    val TEXT,
+    num REAL,
+    valid_from REAL NOT NULL,
+    valid_to REAL,
+    tx_from REAL NOT NULL,
+    tx_to REAL,
+    conf REAL NOT NULL DEFAULT 1.0,
+    src_kind TEXT NOT NULL DEFAULT 'detector',
+    src_ref TEXT,
+    model_id TEXT,
+    snapshot_path TEXT,
+    superseded_by INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_bd_pred ON bd_fact(pred, valid_from DESC);
+CREATE INDEX IF NOT EXISTS idx_bd_subj ON bd_fact(subj, valid_from DESC);
+CREATE INDEX IF NOT EXISTS idx_bd_obj ON bd_fact(obj, valid_from DESC);
+CREATE INDEX IF NOT EXISTS idx_bd_valid ON bd_fact(valid_from DESC);
 """
 
 
@@ -359,6 +541,33 @@ class Database:
                       self._conn.execute("PRAGMA table_info(alerts)").fetchall()}
         if "clip_path" not in alert_cols:  # persist the alert's video clip so history can replay it
             self._conn.execute("ALTER TABLE alerts ADD COLUMN clip_path TEXT")
+
+    # -- generic locked access ------------------------------------------------
+    # The perception engines (dreamstate / coverage / grain / eardrum / bedrock) each own a
+    # handful of tables and a lot of bespoke SQL. Rather than growing this class by another
+    # forty near-identical wrappers, they compose over these two helpers — which still take the
+    # same lock and honour the same WAL/commit discipline as every method above.
+    def query(self, sql: str, params: "tuple | list" = ()) -> list[tuple]:
+        """Run a SELECT under the connection lock and return plain tuples."""
+        with self._lock:
+            return list(self._conn.execute(sql, params).fetchall())
+
+    def execute(self, sql: str, params: "tuple | list" = (), *, commit: bool = True) -> int:
+        """Run one write statement. Returns lastrowid (0 when the statement inserts nothing)."""
+        with self._lock:
+            cur = self._conn.execute(sql, params)
+            if commit:
+                self._conn.commit()
+            return int(cur.lastrowid or 0)
+
+    def execute_many(self, sql: str, rows: "list[tuple]", *, commit: bool = True) -> None:
+        """Batch write — used by the fact projector and the field-statistics flushers."""
+        if not rows:
+            return
+        with self._lock:
+            self._conn.executemany(sql, rows)
+            if commit:
+                self._conn.commit()
 
     # -- sources -------------------------------------------------------------
     def add_source(self, name: str, url: str) -> int:
