@@ -703,6 +703,49 @@ async def api_coverage_report(sid: str) -> Any:
     return await asyncio.to_thread(backend.coverage_report, sid)
 
 
+# -- GRAIN: the behavioural grain of the place (movement only, never appearance) ------------
+@app.get("/api/grain/{sid}")
+async def api_grain(sid: str, bucket: int | None = None, cls: str = "person") -> Any:
+    """The learned movement field for one time bucket: per-cell heading roses, speeds and how
+    strongly the place prefers a direction."""
+    if backend is None:
+        return {"status": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.grain_field, sid, bucket, cls)
+
+
+@app.get("/api/grain/{sid}/tracks")
+async def api_grain_tracks(sid: str, limit: int = 100, unusual: int = 0) -> Any:
+    if backend is None:
+        return {"tracks": []}
+    return await asyncio.to_thread(backend.grain_ledger, sid, limit, bool(unusual))
+
+
+@app.get("/api/grain/track/{track_id}/precedents")
+async def api_grain_precedents(track_id: int, n: int = 6) -> Any:
+    """The closest historical trajectories by shape. "The last three times someone did this it
+    was the courier" is worth more to an operator than a confidence number."""
+    if backend is None:
+        return {"precedents": []}
+    return await asyncio.to_thread(backend.grain_precedents, track_id, n)
+
+
+@app.post("/api/grain/track/{track_id}/verdict")
+async def api_grain_verdict(track_id: int, payload: dict | None = None) -> Any:
+    if backend is None:
+        return {"ok": False}
+    verdict = (payload or {}).get("verdict")
+    return await asyncio.to_thread(backend.grain_verdict, track_id, verdict)
+
+
+@app.post("/api/grain/{sid}/mute")
+async def api_grain_mute(sid: str, payload: dict | None = None) -> Any:
+    """Paint cells out of scoring (the doorway where staff always loiter)."""
+    if backend is None:
+        return {"muted": []}
+    cells = [int(c) for c in ((payload or {}).get("cells") or [])]
+    return await asyncio.to_thread(backend.grain_mute, sid, cells)
+
+
 # -- long-term identity: subjects / dossiers / reconstruction (features 5/6/7) --------------
 @app.get("/api/subjects")
 async def api_subjects(cls: str | None = None, limit: int = 200, order: str = "last_seen") -> Any:

@@ -733,7 +733,7 @@ def _remedies(kind: str, name: str, area: float | None) -> list[dict]:
             {"text": "REVIEW THE EXPOSURE: THIS REGION IS CLIPPING", "recovers_m2": None},
         ]
     return [
-        {"text": f"TRACKS KEEP ENDING AT {name} — LOOK FOR AN OCCLUDER OR A LIGHTING EDGE",
+        {"text": f"TRACKS KEEP ENDING AT {name}: LOOK FOR AN OCCLUDER OR A LIGHTING EDGE",
          "recovers_m2": area},
         {"text": f"REPOSITION TO COVER {a} OF LOST GROUND", "recovers_m2": area},
     ]

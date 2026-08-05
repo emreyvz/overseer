@@ -50,6 +50,7 @@ from zones.monitor import ZoneMonitor
 from . import spatial, suggestions
 from .clipenc import encode_clip
 from .coverage import CoverageField
+from .grain import GrainEngine
 from .media import MediaLibrary
 from .ooi import OOIManager
 from .pose_kp import PoseKP
@@ -292,6 +293,11 @@ class Backend:
         self.coverage = CoverageField(self.db, self.config)
         self._depth_cache: tuple[str, Any, float] | None = None   # (sid, disp01, ts)
         self._last_loss_check = 0.0
+
+        # GRAIN — the behavioural grain of the place. Movement only, never appearance. Wired to
+        # FOG OF WAR so a track that ends inside a known shadow is not scored as a
+        # disappearance: without that link both features generate noise.
+        self.grain = GrainEngine(self.db, self.config, occluded=self._grain_occluded)
 
         self._loop: Any = None
         self._broadcast: Broadcaster | None = None
@@ -1572,6 +1578,10 @@ class Backend:
         # FOG OF WAR — the empirical channel. Where tracks are born and where they die, away
         # from the frame border, is the only honest measure of where this camera fails.
         self._observe_coverage(dets, now)
+        # GRAIN — score each subject's MOVEMENT against what this place normally does, and
+        # attach it to the detection so the live gauge has something to show. Two dict writes
+        # and four log-density evaluations per track: it rides on the existing pass.
+        self._observe_grain(dets, now)
         # Throttle the detections emit (~15 Hz) so it can never saturate the single event loop and
         # starve /stream. Boxes are interpolated client-side, so a lower cadence is invisible.
         if _enc_now - self._last_det_push > 0.066:
@@ -1770,6 +1780,93 @@ class Backend:
                     }})
         except Exception:   # never let an observability channel break the analysis pass
             log.debug("coverage observe failed", exc_info=True)
+
+    # ---- GRAIN --------------------------------------------------------------------------
+    def _grain_occluded(self, source_id: int, nx: float, ny: float) -> bool:
+        """Is this ground point inside a known FOG OF WAR shadow? Consulted before a track's
+        ending is treated as a disappearance."""
+        try:
+            for sh in (self.coverage._shadows.get(int(source_id)) or []):
+                p = sh.get("polygon") or []
+                if len(p) >= 4 and p[0][0] <= nx <= p[1][0] and p[0][1] <= ny <= p[2][1]:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _observe_grain(self, dets: list[dict], now: float) -> None:
+        if self._source_id is None or not self.config.get("grain.enabled", True):
+            return
+        try:
+            people = [d for d in dets if d.get("cls") in ("person", "vehicle")
+                      and not d.get("coasting")]
+            density = len(people)
+            for d in people:
+                b = d.get("bbox")
+                if not b:
+                    continue
+                nx = float(b[0]) + float(b[2]) / 2.0
+                ny = min(0.999, float(b[1]) + float(b[3]))
+                aspect = float(b[2]) / max(1e-6, float(b[3]))
+                # NOTE: only geometry is passed. Colour, height, plate, make and every other
+                # appearance attribute on `d` is deliberately left behind — see server/grain.py.
+                self.grain.observe(self._source_id, str(d["id"]), str(d["cls"]), nx, ny, now,
+                                   aspect=aspect, density=density)
+                c = self.grain.peek(str(d["id"]), now)
+                if c is not None:
+                    d["conformity"] = c
+            for row in self.grain.sweep(now):
+                self._emit({"t": "grain", "d": row})
+                if row.get("state") == "unusual":
+                    self._grain_alert(row)
+        except Exception:
+            log.debug("grain observe failed", exc_info=True)
+
+    def _grain_alert(self, row: dict) -> None:
+        """Raise an alert only for the genuinely rare, and say WHY in the summary rather than
+        asserting that something is wrong."""
+        thr = float(self.config.get("grain.alert_percentile", 0.1))
+        if float(row.get("percentile", 100.0)) > thr:
+            return
+        cam = self._source_name(self._source_id)
+        why = row.get("why") or "moved in a way this place rarely sees"
+        self._emit({"t": "alert", "d": {
+            "ts": time.time() * 1000, "severity": "warning", "type": "UNUSUAL BEHAVIOUR",
+            "summary": f"{row.get('det_id')} {why[0].lower()}{why[1:]} "
+                       f"({row.get('percentile', 0):.1f}th percentile for this camera)",
+            "cam": cam, "ack": False,
+            "snapshot": self._alert_snapshot(), "clip": self._save_clip(),
+        }})
+
+    def grain_field(self, sid: str, bucket: int | None = None, cls: str = "person") -> dict:
+        if not self.config.get("grain.enabled", True):
+            return {"status": None, "reason": "disabled"}
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"status": None, "reason": "no_source"}
+        try:
+            return {"status": self.grain.field(int(src.id), src.name, bucket, cls)}
+        except Exception:
+            log.exception("grain field failed")
+            return {"status": None, "reason": "failed"}
+
+    def grain_ledger(self, sid: str, limit: int = 100, unusual_only: bool = False) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"tracks": []}
+        return {"tracks": self.grain.ledger(int(src.id), limit, unusual_only)}
+
+    def grain_precedents(self, track_id: int, n: int = 6) -> dict:
+        return {"precedents": self.grain.precedents(int(track_id), int(n))}
+
+    def grain_verdict(self, track_id: int, verdict: str | None) -> dict:
+        return self.grain.verdict(int(track_id), verdict)
+
+    def grain_mute(self, sid: str, cells: list[int]) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"muted": []}
+        return {"muted": self.grain.mute(int(src.id), cells)}
 
     def _coverage_depth(self, sid: str, frame: Any) -> Any:
         """The depth grid for the coverage build, reusing the spatial view's if it is fresh.

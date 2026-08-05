@@ -7,9 +7,11 @@
   import { sfx } from '../../lib/audio'
   import type { Detection } from '../../lib/types'
   import { initFeedGL, type FeedGL } from '../../lib/hud/feedgl'
+  import ConformityGauge from './ConformityGauge.svelte'
   import DetectionLayer from './DetectionLayer.svelte'
   import FogOverlay from './FogOverlay.svelte'
   import GhostLayer from './GhostLayer.svelte'
+  import GrainField from './GrainField.svelte'
   import SocialXray from './SocialXray.svelte'
   import TacticalMap from './TacticalMap.svelte'
   import MatchHighlight from './MatchHighlight.svelte'
@@ -33,6 +35,7 @@
   // PERCEPTION overlays: they model the place, so they ride inside the zoom wrapper with the
   // detections (the fog belongs to the ground, not to the screen).
   let unseenOn = $derived(!!$modules.find((m) => m.key === 'unseen')?.on)
+  let grainOn = $derived(!!$modules.find((m) => m.key === 'grain')?.on)
   let showOverlays = $derived((live && !failed) || SIM)
 
   // 3D fly-between: the old feed zooms out and banks away in perspective while the
@@ -118,8 +121,10 @@
     {/if}
 
     <div class="grid-overlay"></div>
+    {#if grainOn && showOverlays}<GrainField />{/if}
     {#if unseenOn && showOverlays}<FogOverlay />{/if}
     <DetectionLayer />
+    {#if grainOn && showOverlays}<ConformityGauge />{/if}
     {#if ghostsOn && showOverlays}<GhostLayer />{/if}
     {#if socialOn && showOverlays}<SocialXray />{/if}
     <MatchHighlight />

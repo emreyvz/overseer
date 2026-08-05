@@ -11,6 +11,7 @@
   import { startZoneEngine } from './lib/zones'
   import { startAnomalyEngine } from './lib/anomaly'
   import { startFogEngine } from './lib/fog'
+  import { startGrainEngine } from './lib/grain'
   import { refreshAiStatus, aiStatus } from './lib/ai'
   import { LEX } from './lib/lexicon'
   import type { Camera } from './lib/types'
@@ -41,13 +42,14 @@
   import AlertsBoard from './components/AlertsBoard.svelte'
   import SmartSuggestions from './components/suggestions/SmartSuggestions.svelte'
   import CoverageScreen from './components/coverage/CoverageScreen.svelte'
+  import GrainScreen from './components/grain/GrainScreen.svelte'
   // SpatialView pulls in three.js (~450 kB) — lazy-load it so the main bundle stays lean and
   // the 3D engine only loads when the operator actually opens the spatial view.
   const SpatialView = () => import('./components/spatial/SpatialView.svelte')
 
   const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case', b: 'bedrock' }
 
-  onMount(() => { startZoneEngine(); startAnomalyEngine(); startFogEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts(); hydrateModules() }
+  onMount(() => { startZoneEngine(); startAnomalyEngine(); startFogEngine(); startGrainEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts(); hydrateModules() }
     if (SIM && location.search.includes('shot=')) {   // dev-only screenshot hook (SIM + ?shot=; inert in prod), see scripts/shot_capture.cjs
       aiStatus.set({ enabled: true, provider: 'glm', base: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-4.6', vision_model: 'glm-4.6v', vision: true, features: {} } as any)
       const shot = new URLSearchParams(location.search).get('shot')
@@ -237,6 +239,7 @@
 {#if $alertsScreen}<AlertsBoard onclose={() => alertsScreen.set(false)} />{/if}
 {#if $suggestionsOpen}<SmartSuggestions onclose={() => suggestionsOpen.set(false)} />{/if}
 {#if $coverageScreen}<CoverageScreen onclose={() => coverageScreen.set(false)} />{/if}
+{#if $grainScreen}<GrainScreen onclose={() => grainScreen.set(false)} />{/if}
 <OperatorBorder />
 {#if $spatialOpen}
   {#await SpatialView() then M}

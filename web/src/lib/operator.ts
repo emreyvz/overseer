@@ -10,7 +10,8 @@ import {
   suggestionsOpen, spatialOpen, walkthroughAuto, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
   rosterInit, modules, toggleModule, detections, alerts, timeline, timelineOpen, petRegistry,
   povZoom, muted, frame, system, narrateOn, followOn, xrayOn, enhanceMode, selectedDetection,
-  flashBanner, triggerGlitch, coverage, coverageScreen, blindSpots, type Mode,
+  flashBanner, triggerGlitch, coverage, coverageScreen, blindSpots, grainScreen, grainStatus,
+  type Mode,
 } from './stores'
 import { setFogTask } from './fog'
 import type { DoriTask } from './types'
@@ -690,6 +691,40 @@ export const ACTIONS: Record<string, Action> = {
              value: spots.length }
   },
 
+  // ── GRAIN ─────────────────────────────────────────────────────────────────────────────────
+  grain: ({ on }) => {
+    const want = on !== false
+    if (want) { stage.set('live'); mode.set('pov') }
+    const m = get(modules).find((x) => x.key === 'grain')
+    if (m && m.on !== want) toggleModule('grain')
+    return want
+      ? 'grain on — showing the learned current of this place, and how ordinary each subject is'
+      : 'grain off'
+  },
+  who_is_odd: () => {
+    const odd = get(detections).filter((d) => d.conformity?.state === 'unusual')
+    if (!odd.length) {
+      const st = get(grainStatus)
+      if (st && !st.mature) {
+        return { say: `still learning this place — ${Math.round(st.maturity * 100)} percent of the way there`, value: 0 }
+      }
+      return { say: 'nobody in view is moving unusually for this place', value: 0 }
+    }
+    const worst = odd.reduce((a, b) => ((a.conformity!.p <= b.conformity!.p) ? a : b))
+    selectedDetection.set(worst)
+    return {
+      say: `${odd.length} subject${odd.length === 1 ? '' : 's'} moving unusually; ${worst.id} is at the ${worst.conformity!.p.toFixed(1)} percentile — ${worst.conformity!.why}`,
+      value: odd.length,
+    }
+  },
+  grain_model: () => {
+    stage.set('live'); grainScreen.set(true)
+    const st = get(grainStatus)
+    return st
+      ? { say: `learned from ${st.tracks} tracks over ${st.days} days`, value: st.tracks }
+      : 'opening the grain model'
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -831,6 +866,10 @@ export function routeCommand(raw: string): Plan | null {
   if (/(blind ?spot|kör nokta|göremediğ|what.*(can.?t|cannot).*see|neyi göremiyor)/i.test(low)) return { steps: [{ action: 'blind_spots' }], border: 'nav' }
   if (/(coverage|kapsama|kaç.*yüzde.*gör|how much.*see)/i.test(low)) return { steps: [{ action: 'coverage_report' }], border: 'nav' }
   if (/(fog of war|savaş sisi|sis(i)? (aç|kapat)|unseen)/i.test(low)) return { steps: [{ action: 'fog_of_war', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  // GRAIN — "who is behaving oddly", "normal nedir burada"
+  if (/(who.*(odd|unusual|strange|weird|out of place)|kim.*(tuhaf|garip|anormal|sıra ?dışı))/i.test(low)) return { steps: [{ action: 'who_is_odd' }], border: 'nav' }
+  if (/(grain model|learned (normal|pattern)|öğrenilen|normal nedir|akış deseni)/i.test(low)) return { steps: [{ action: 'grain_model' }], border: 'nav' }
+  if (/(grain|doku|davranış deseni|behaviou?ral (grain|field))/i.test(low)) return { steps: [{ action: 'grain', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
   if (/(walkthrough|walk.?through|chronoscape|zaman yolcul|3d.*(gez|dolaş|walk|yürü)|içinde (gez|dolaş))/i.test(low)) return { steps: [{ action: 'walkthrough', args: {} }], border: 'nav' }
   if (/(enhance|netleştir|yakınlaş.*netleş|clarify|zoom.*enhance|büyüt.*netleş)/i.test(low)) return { steps: [{ action: 'enhance', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }

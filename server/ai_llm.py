@@ -147,6 +147,12 @@ _OPERATOR_ACTIONS = (
     "coverage_task {task} — set the standard coverage is measured against: detect | observe | "
     "recognise | identify (EN 62676-4 DORI). 'can I read a face at the gate' -> identify.\n"
     "blind_spots {} — list the persistent blind spots and open the one that matters most.\n"
+    "grain {on} — GRAIN overlay: draw the learned movement current of this place and give every "
+    "subject a conformity ring showing how ordinary their MOVEMENT is here.\n"
+    "who_is_odd {} — who in view is moving unusually for this place, and why. Use this for "
+    "'is anyone acting strange', NOT for appearance questions (GRAIN never sees appearance).\n"
+    "grain_model {} — open the learned behavioural model: the flow field, per-cell histograms "
+    "and the ledger of scored tracks.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 
