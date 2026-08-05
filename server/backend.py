@@ -50,6 +50,7 @@ from zones.monitor import ZoneMonitor
 from . import spatial, suggestions
 from .clipenc import encode_clip
 from .coverage import CoverageField
+from .dreamstate import DreamEngine
 from .grain import GrainEngine
 from .media import MediaLibrary
 from .ooi import OOIManager
@@ -298,6 +299,12 @@ class Backend:
         # FOG OF WAR so a track that ends inside a known shadow is not scored as a
         # disappearance: without that link both features generate noise.
         self.grain = GrainEngine(self.db, self.config, occluded=self._grain_occluded)
+
+        # DREAMSTATE — what this place normally looks like at this hour, and where reality
+        # departs from it. Feeds off the background plate maintained just above, so the most
+        # informative channel costs nothing extra.
+        self.dream = DreamEngine(self.db, self.config)
+        self._last_dream_status = 0.0
 
         self._loop: Any = None
         self._broadcast: Broadcaster | None = None
@@ -1582,6 +1589,8 @@ class Backend:
         # attach it to the detection so the live gauge has something to show. Two dict writes
         # and four log-density evaluations per track: it rides on the existing pass.
         self._observe_grain(dets, now)
+        # DREAMSTATE — is this frame consistent with what this place normally does at this hour?
+        self._observe_dream(img, dets, now)
         # Throttle the detections emit (~15 Hz) so it can never saturate the single event loop and
         # starve /stream. Boxes are interpolated client-side, so a lower cadence is invisible.
         if _enc_now - self._last_det_push > 0.066:
@@ -1755,6 +1764,137 @@ class Backend:
                 "klass": "WEAPON" if d.category == "weapon" else _CLS_KLASS.get(cls, "TRACKED"),
             })
         return out
+
+    # ---- DREAMSTATE ---------------------------------------------------
+    def _observe_dream(self, img: Any, dets: list[dict], now: float) -> None:
+        if self._source_id is None or not self.config.get("dream.enabled", True):
+            return
+        try:
+            plate = (self._bg_plate if (self._bg_plate is not None
+                                        and str(self._bg_plate_sid) == str(self._source_id)
+                                        and self._bg_plate_n >= 40) else None)
+            div = self.dream.observe(self._source_id, img, plate, dets, now)
+            # push the live status at a low rate so the veil and the ribbon have a field to draw
+            if now - self._last_dream_status > 1.0:
+                self._last_dream_status = now
+                self._emit({"t": "dream", "d": self.dream.status(
+                    self._source_id, self._source_name(self._source_id))})
+            if div is None:
+                return
+            # GRAIN coupling. A divergence with a concurrent low-percentile subject means a
+            # PERSON did something; without one it means the SCENE changed. Two bits of triage
+            # the operator would otherwise have to do by eye.
+            odd = any((d.get("conformity") or {}).get("state") == "unusual" for d in dets)
+            triage = "subject" if odd else "scene"
+            snapshot = self._alert_snapshot(img)
+            div_id = self.dream.record(div, snapshot, triage)
+            payload = {
+                "id": div_id, "cam": self._source_name(self._source_id), "ts": div["ts"],
+                "peak_sigma": div["peak_sigma"], "area_sigma_s": div["area_sigma_s"],
+                "blob": div["blob"], "cells": div["cells"], "snapshot": snapshot,
+                "verdict": None, "tier": div["tier"], "triage": triage,
+            }
+            self._emit({"t": "divergence", "d": payload})
+            if float(div["peak_sigma"]) >= float(self.config.get("dream.alert_sigma", 7.0)):
+                self._emit({"t": "alert", "d": {
+                    "ts": now * 1000, "severity": "warning", "type": "DIVERGENCE",
+                    # deliberately not "threat": the model has no semantics and must not pretend to
+                    "summary": (f"Something here does not match what this place normally looks "
+                                f"like at this hour ({div['peak_sigma']:.1f} sigma, "
+                                f"{'subject behaviour' if odd else 'scene change'})"),
+                    "cam": self._source_name(self._source_id), "ack": False,
+                    "snapshot": snapshot, "clip": self._save_clip(),
+                }})
+        except Exception:
+            log.debug("dream observe failed", exc_info=True)
+
+    def dream_plate(self, sid: str) -> bytes | None:
+        """The learned background plate as a JPEG: literally what this camera expects to be
+        there once everything that moves has averaged out. It is what the console shows on the
+        DREAM side of the wipe, and it costs nothing because the plate is already maintained."""
+        if (self._bg_plate is None or str(self._bg_plate_sid) != str(sid)
+                or self._bg_plate_n < 30):
+            return None
+        ok, buf = cv2.imencode(".jpg", self._bg_plate.astype(np.uint8),
+                               [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+        return buf.tobytes() if ok else None
+
+    def dream_status(self, sid: str) -> dict:
+        if not self.config.get("dream.enabled", True):
+            return {"status": None, "reason": "disabled"}
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"status": None, "reason": "no_source"}
+        return {"status": self.dream.status(int(src.id), src.name)}
+
+    def dream_pulse(self, sid: str, hours: int = 24) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        return {"pulse": self.dream.pulse(int(src.id), hours) if src else []}
+
+    def dream_divergences(self, sid: str | None = None, limit: int = 100) -> dict:
+        rid = None
+        if sid is not None:
+            src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+            rid = int(src.id) if src else None
+        rows = self.dream.divergences(rid, limit)
+        names = {str(s.id): s.name for s in self.db.list_sources()}
+        for r in rows:
+            r["cam"] = names.get(str(r["cam"]), r["cam"])
+            if r.get("snapshot"):
+                r["snapshot"] = self._subj_url(r["snapshot"])
+        return {"divergences": rows}
+
+    def dream_verdict(self, div_id: int, verdict: str | None) -> dict:
+        return self.dream.verdict(int(div_id), verdict)
+
+    def dream_mute(self, sid: str, cells: list[int], from_hour: int = 0,
+                   to_hour: int = 24) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"muted": []}
+        return {"muted": self.dream.mute(int(src.id), cells, from_hour, to_hour)}
+
+    def dream_threshold(self, sid: str, sigma: float) -> dict:
+        """Sensitivity is a per-install decision the operator tunes with live feedback, so it
+        persists in the settings table rather than the config file."""
+        val = max(3.0, min(8.0, float(sigma)))
+        self.dream.threshold = val
+        try:
+            self.db.set_setting("dream.sigma_threshold", str(val))
+        except Exception:
+            pass
+        return {"threshold": val}
+
+    def dream_reset(self, sid: str, mode: str = "relearn") -> dict:
+        """Re-register against a stored reference, or forget the camera entirely.
+
+        A moved camera makes every learned statistic wrong. Saying so and offering both repairs
+        is better than silently reporting nonsense.
+        """
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"ok": False}
+        if mode == "reregister":
+            # ECC alignment against the current background plate. If the view really has moved,
+            # the correlation will not recover and the honest answer is to relearn.
+            cc = 0.0
+            try:
+                if self._bg_plate is not None and self._latest_raw is not None:
+                    a = cv2.cvtColor(self._bg_plate.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+                    b = cv2.cvtColor(self._latest_raw, cv2.COLOR_BGR2GRAY)
+                    if a.shape == b.shape:
+                        warp = np.eye(2, 3, dtype=np.float32)
+                        cc, _warp = cv2.findTransformECC(
+                            a, b, warp, cv2.MOTION_TRANSLATION,
+                            (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-4), None, 5)
+            except Exception:
+                cc = 0.0
+            if cc >= 0.85:
+                self.dream.stale[int(src.id)] = False
+                return {"ok": True, "cc": round(float(cc), 3)}
+            return {"ok": False, "cc": round(float(cc), 3)}
+        self.dream.reset(int(src.id))
+        return {"ok": True}
 
     # ---- FOG OF WAR ---------------------------------------------------
     def _observe_coverage(self, dets: list[dict], now: float) -> None:

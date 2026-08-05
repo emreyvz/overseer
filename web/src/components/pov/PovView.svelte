@@ -9,6 +9,8 @@
   import { initFeedGL, type FeedGL } from '../../lib/hud/feedgl'
   import ConformityGauge from './ConformityGauge.svelte'
   import DetectionLayer from './DetectionLayer.svelte'
+  import DreamRibbon from './DreamRibbon.svelte'
+  import DreamVeil from './DreamVeil.svelte'
   import FogOverlay from './FogOverlay.svelte'
   import GhostLayer from './GhostLayer.svelte'
   import GrainField from './GrainField.svelte'
@@ -36,6 +38,7 @@
   // detections (the fog belongs to the ground, not to the screen).
   let unseenOn = $derived(!!$modules.find((m) => m.key === 'unseen')?.on)
   let grainOn = $derived(!!$modules.find((m) => m.key === 'grain')?.on)
+  let dreamOn = $derived(!!$modules.find((m) => m.key === 'dream')?.on)
   let showOverlays = $derived((live && !failed) || SIM)
 
   // 3D fly-between: the old feed zooms out and banks away in perspective while the
@@ -125,11 +128,13 @@
     {#if unseenOn && showOverlays}<FogOverlay />{/if}
     <DetectionLayer />
     {#if grainOn && showOverlays}<ConformityGauge />{/if}
+    {#if dreamOn && showOverlays}<DreamVeil />{/if}
     {#if ghostsOn && showOverlays}<GhostLayer />{/if}
     {#if socialOn && showOverlays}<SocialXray />{/if}
     <MatchHighlight />
   </div>
 
+  {#if dreamOn && showOverlays}<DreamRibbon />{/if}
   {#if tacticalOn && showOverlays}<TacticalMap />{/if}
 
   {#if connecting}

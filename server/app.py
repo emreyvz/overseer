@@ -669,6 +669,78 @@ async def api_spatial_reel(sid: str, n: int = 28, grid: int = 256) -> Any:
     return await asyncio.to_thread(backend.spatial_reel, sid, n, grid)
 
 
+# -- DREAMSTATE: what this place normally looks like, and where reality departs from it ------
+@app.get("/api/dream/divergences")
+async def api_dream_divergences(sid: str | None = None, limit: int = 100) -> Any:
+    """Fired divergences, newest first. Declared BEFORE /api/dream/{sid} so the literal path
+    wins the route match."""
+    if backend is None:
+        return {"divergences": []}
+    return await asyncio.to_thread(backend.dream_divergences, sid, limit)
+
+
+@app.post("/api/dream/divergence/{div_id}/verdict")
+async def api_dream_verdict(div_id: int, payload: dict | None = None) -> Any:
+    if backend is None:
+        return {"ok": False}
+    return await asyncio.to_thread(backend.dream_verdict, div_id, (payload or {}).get("verdict"))
+
+
+@app.get("/api/dream/{sid}")
+async def api_dream(sid: str) -> Any:
+    """Live expectation state: per-cell sigma, per-bucket maturity, muted cells."""
+    if backend is None:
+        return {"status": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.dream_status, sid)
+
+
+@app.get("/api/dream/{sid}/plate")
+async def api_dream_plate(sid: str) -> Response:
+    """The learned background plate: what this camera expects to be there. 204 until warm."""
+    if backend is None:
+        return Response(status_code=503)
+    data = await asyncio.to_thread(backend.dream_plate, sid)
+    if not data:
+        return Response(status_code=204)
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/dream/{sid}/pulse")
+async def api_dream_pulse(sid: str, hours: int = 24) -> Any:
+    if backend is None:
+        return {"pulse": []}
+    return await asyncio.to_thread(backend.dream_pulse, sid, hours)
+
+
+@app.post("/api/dream/{sid}/mute")
+async def api_dream_mute(sid: str, payload: dict | None = None) -> Any:
+    """Silence the flag that flaps and the tree that sways."""
+    if backend is None:
+        return {"muted": []}
+    p = payload or {}
+    cells = [int(c) for c in (p.get("cells") or [])]
+    return await asyncio.to_thread(backend.dream_mute, sid, cells,
+                                   int(p.get("from_hour", 0)), int(p.get("to_hour", 24)))
+
+
+@app.post("/api/dream/{sid}/threshold")
+async def api_dream_threshold(sid: str, payload: dict | None = None) -> Any:
+    if backend is None:
+        return {"threshold": 5.0}
+    return await asyncio.to_thread(backend.dream_threshold, sid,
+                                   float((payload or {}).get("sigma", 5.0)))
+
+
+@app.post("/api/dream/{sid}/reset")
+async def api_dream_reset(sid: str, payload: dict | None = None) -> Any:
+    """`reregister` tries to realign against the stored plate; `relearn` forgets the camera."""
+    if backend is None:
+        return {"ok": False}
+    return await asyncio.to_thread(backend.dream_reset, sid,
+                                   str((payload or {}).get("mode", "relearn")))
+
+
 # -- FOG OF WAR: the observability field and its complement ---------------------------------
 @app.get("/api/coverage/{sid}")
 async def api_coverage(sid: str, task: str | None = None, height: float | None = None) -> Any:

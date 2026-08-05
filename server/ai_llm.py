@@ -153,6 +153,14 @@ _OPERATOR_ACTIONS = (
     "'is anyone acting strange', NOT for appearance questions (GRAIN never sees appearance).\n"
     "grain_model {} — open the learned behavioural model: the flow field, per-cell histograms "
     "and the ledger of scored tracks.\n"
+    "dreamstate {on} — DREAMSTATE overlay: mark anything in the frame that does not match what "
+    "this place normally looks like at this hour. It reports DIVERGENCE, never a threat: it has "
+    "no idea WHAT happened, only that something departed from the learned scene.\n"
+    "anything_odd {} — has anything diverged recently, how large, and was it a scene change or "
+    "a subject behaving unusually. Use for 'is anything off/wrong', 'her sey normal mi'.\n"
+    "dream_console {} — open the dream-versus-world comparator.\n"
+    "dream_sensitivity {sigma} — set the divergence threshold, 3 (jumpy) to 8 (only the "
+    "blatant). Default 5.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 

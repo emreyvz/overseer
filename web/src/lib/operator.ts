@@ -11,7 +11,7 @@ import {
   rosterInit, modules, toggleModule, detections, alerts, timeline, timelineOpen, petRegistry,
   povZoom, muted, frame, system, narrateOn, followOn, xrayOn, enhanceMode, selectedDetection,
   flashBanner, triggerGlitch, coverage, coverageScreen, blindSpots, grainScreen, grainStatus,
-  type Mode,
+  divergences, dreamConsole, dreamStatus, type Mode,
 } from './stores'
 import { setFogTask } from './fog'
 import type { DoriTask } from './types'
@@ -725,6 +725,38 @@ export const ACTIONS: Record<string, Action> = {
       : 'opening the grain model'
   },
 
+  // ── DREAMSTATE ────────────────────────────────────────────────────────────────────────────
+  dreamstate: ({ on }) => {
+    const want = on !== false
+    if (want) { stage.set('live'); mode.set('pov') }
+    const m = get(modules).find((x) => x.key === 'dream')
+    if (m && m.on !== want) toggleModule('dream')
+    return want
+      ? 'dreamstate on — I will mark anything that does not match what this place normally looks like at this hour'
+      : 'dreamstate off'
+  },
+  anything_odd: () => {
+    const st = get(dreamStatus)
+    const recent = get(divergences).filter((d) => Date.now() - d.ts < 3600_000)
+    if (st && st.maturity < 1) {
+      return { say: `still learning this hour — ${Math.round(st.maturity * 100)} percent of the way there, so I am not reporting yet`, value: 0 }
+    }
+    if (!recent.length) return { say: 'nothing has diverged in the last hour; the scene is behaving', value: 0 }
+    const worst = recent.reduce((a, b) => (a.peak_sigma >= b.peak_sigma ? a : b))
+    dreamConsole.set(worst.id)
+    return {
+      say: `${recent.length} divergence${recent.length === 1 ? '' : 's'} in the last hour; the largest is ${worst.peak_sigma.toFixed(1)} sigma and looks like a ${worst.triage === 'subject' ? 'subject behaviour' : 'scene change'}`,
+      value: recent.length,
+    }
+  },
+  dream_console: () => { stage.set('live'); dreamConsole.set('live'); return 'opening the dreamstate console' },
+  dream_sensitivity: async ({ sigma }) => {
+    const v = Math.max(3, Math.min(8, Number(sigma) || 5))
+    const cam = get(activeCam)
+    if (cam && !SIM) await api.dreamThreshold(cam, v).catch(() => undefined)
+    return `divergence threshold set to ${v.toFixed(1)} sigma`
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -870,6 +902,9 @@ export function routeCommand(raw: string): Plan | null {
   if (/(who.*(odd|unusual|strange|weird|out of place)|kim.*(tuhaf|garip|anormal|sıra ?dışı))/i.test(low)) return { steps: [{ action: 'who_is_odd' }], border: 'nav' }
   if (/(grain model|learned (normal|pattern)|öğrenilen|normal nedir|akış deseni)/i.test(low)) return { steps: [{ action: 'grain_model' }], border: 'nav' }
   if (/(grain|doku|davranış deseni|behaviou?ral (grain|field))/i.test(low)) return { steps: [{ action: 'grain', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  // DREAMSTATE — "is anything off", "her şey normal mi"
+  if (/(anything (odd|off|unusual|wrong)|her ?şey normal|bir ?şey var mı|divergence|sapma)/i.test(low)) return { steps: [{ action: 'anything_odd' }], border: 'nav' }
+  if (/(dream ?state|rüya|beklenti modeli|expectation model)/i.test(low)) return { steps: [{ action: 'dreamstate', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
   if (/(walkthrough|walk.?through|chronoscape|zaman yolcul|3d.*(gez|dolaş|walk|yürü)|içinde (gez|dolaş))/i.test(low)) return { steps: [{ action: 'walkthrough', args: {} }], border: 'nav' }
   if (/(enhance|netleştir|yakınlaş.*netleş|clarify|zoom.*enhance|büyüt.*netleş)/i.test(low)) return { steps: [{ action: 'enhance', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }

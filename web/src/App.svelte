@@ -43,6 +43,7 @@
   import SmartSuggestions from './components/suggestions/SmartSuggestions.svelte'
   import CoverageScreen from './components/coverage/CoverageScreen.svelte'
   import GrainScreen from './components/grain/GrainScreen.svelte'
+  import DreamstateConsole from './components/dreamstate/DreamstateConsole.svelte'
   // SpatialView pulls in three.js (~450 kB) — lazy-load it so the main bundle stays lean and
   // the 3D engine only loads when the operator actually opens the spatial view.
   const SpatialView = () => import('./components/spatial/SpatialView.svelte')
@@ -240,6 +241,7 @@
 {#if $suggestionsOpen}<SmartSuggestions onclose={() => suggestionsOpen.set(false)} />{/if}
 {#if $coverageScreen}<CoverageScreen onclose={() => coverageScreen.set(false)} />{/if}
 {#if $grainScreen}<GrainScreen onclose={() => grainScreen.set(false)} />{/if}
+{#if $dreamConsole !== null}<DreamstateConsole open={$dreamConsole} onclose={() => dreamConsole.set(null)} />{/if}
 <OperatorBorder />
 {#if $spatialOpen}
   {#await SpatialView() then M}
