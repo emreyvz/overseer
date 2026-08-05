@@ -180,6 +180,7 @@ export const coverageScreen = writable(false)                        // FOG OF W
 export const grainScreen = writable(false)                           // GRAIN model browser
 export const eardrumDrawer = writable(false)                         // EARDRUM bottom drawer
 export const listenPlacing = writable(false)                         // EARDRUM probe placement mode on the feed
+export const perceptionPanel = writable(false)                       // the way IN: what each engine does + whether it is ready
 export const probes = writable<Probe[]>([])                          // live probe roster for the active camera
 export const probeFrames = writable<Record<string, ProbeFrame>>({})  // newest spectral frame per probe id
 export const divergences = writable<Divergence[]>([])                // DREAMSTATE divergence feed (newest first)

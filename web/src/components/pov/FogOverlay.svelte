@@ -10,16 +10,14 @@
   // hard-throttled 12 fps. Overlays share the main thread with the video decode, and this app
   // has already paid once for an overlay that ran an O(n^2) pass every rAF.
   import { onDestroy, onMount } from 'svelte'
-  import { coverage, coverageScreen, detections } from '../../lib/stores'
+  import { coverage, detections } from '../../lib/stores'
   import type { Coverage, DoriTask } from '../../lib/types'
 
-  const RC = 2 * Math.PI * 26        // ring circumference, matching the suggestions gauge
 
   const TICK_MS = 84                 // ~12 fps: grain only needs to shimmer, not animate
   const TILE = 64
 
   let cv = $state<HTMLCanvasElement>()
-  let hoverBand = $state<DoriTask | null>(null)
 
   let mask: HTMLCanvasElement | null = null
   let pattern: CanvasPattern | null = null
@@ -177,9 +175,6 @@
   }
   const overdue = (l: Loss) => clock > l.expect
 
-  const bandLabel: Record<DoriTask, string> = {
-    identify: 'IDENTIFY', recognise: 'RECOGNISE', observe: 'OBSERVE', detect: 'DETECT',
-  }
 </script>
 
 {#if cov}
@@ -195,45 +190,11 @@
       <!-- DORI ladder: the actual ground ranges, projected -->
       {#each cov.bands as b (b.task)}
         {#if b.y > 0 && b.y < 1}
-          <line class="band" class:on={b.task === cov.task} class:hov={hoverBand === b.task}
+          <line class="band" class:on={b.task === cov.task}
             x1="0" x2="100" y1={b.y * 100} y2={b.y * 100} />
         {/if}
       {/each}
     </svg>
-
-    <!-- band labels sit outside the SVG so they never get stretched by preserveAspectRatio -->
-    {#each cov.bands as b (b.task)}
-      {#if b.y > 0 && b.y < 1}
-        <button class="blabel caps" class:on={b.task === cov.task}
-          style={`top:${b.y * 100}%`}
-          onmouseenter={() => (hoverBand = b.task)}
-          onmouseleave={() => (hoverBand = null)}
-          aria-label={`${bandLabel[b.task]} range`}>
-          {bandLabel[b.task]} ◂ {b.range_m} M
-        </button>
-      {/if}
-    {/each}
-
-    {#if hoverBand}
-      {@const b = cov.bands.find((x) => x.task === hoverBand)}
-      {#if b}
-        <div class="bcap caps" style={`top:calc(${b.y * 100}% + 14px)`}>
-          AT {b.range_m} M A TARGET IS ~{b.px_per_m} PX PER METRE{cov.scale_estimated ? ' · ESTIMATED' : ''}
-        </div>
-      {/if}
-    {/if}
-
-    <!-- coverage readout: the one number this whole overlay exists to produce -->
-    <button class="ring" onclick={() => coverageScreen.set(true)} title="Open the coverage report">
-      <svg viewBox="0 0 60 60">
-        <circle class="rtrack" cx="30" cy="30" r="26" />
-        <circle class="rprog" cx="30" cy="30" r="26"
-          stroke-dasharray={RC} stroke-dashoffset={RC * (1 - cov.percent / 100)} />
-      </svg>
-      <span class="rval">{Math.round(cov.percent)}%</span>
-      <span class="rlbl caps">COVERAGE</span>
-      <span class="rtask caps">{cov.task}</span>
-    </button>
 
     <!-- LOST IN FOG: the only scarlet in this overlay -->
     {#each losses as l (l.id)}
@@ -261,34 +222,10 @@
 
   .band { stroke: var(--ink-dim); stroke-opacity: 0.28; stroke-width: 1; vector-effect: non-scaling-stroke; }
   .band.on { stroke: var(--cyan); stroke-opacity: 0.5; }
-  .band.hov { stroke-opacity: 0.9; }
 
-  .blabel { position: absolute; right: 66px; transform: translateY(-50%); pointer-events: auto;
-    background: rgba(4,7,10,0.62); border: none; padding: 2px 7px; cursor: crosshair;
-    font-size: 8px; letter-spacing: 0.14em; color: var(--ink-ghost); white-space: nowrap; }
-  .blabel:hover { color: var(--ink); }
-  .blabel.on { color: var(--cyan); }
 
-  .bcap { position: absolute; right: 66px; transform: translateY(0); font-size: 8px;
-    letter-spacing: 0.12em; color: var(--ink-dim); background: rgba(4,7,10,0.78);
-    padding: 3px 8px; white-space: nowrap; animation: fade 160ms var(--ease); }
   @keyframes fade { from { opacity: 0; } }
 
-  /* coverage ring — the standard gauge idiom from the suggestions cockpit */
-  .ring { position: absolute; top: 74px; right: 62px; width: 52px; pointer-events: auto;
-    background: none; border: none; padding: 0; cursor: crosshair; display: block; }
-  .ring svg { width: 52px; height: 52px; transform: rotate(-90deg); display: block; }
-  .rtrack { fill: none; stroke: var(--hairline); stroke-width: 4; }
-  .rprog { fill: none; stroke: var(--cyan); stroke-width: 4; stroke-linecap: round;
-    transition: stroke-dashoffset 700ms cubic-bezier(0.16, 1, 0.3, 1);
-    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--cyan) 60%, transparent)); }
-  .rval { position: absolute; left: 0; top: 0; width: 52px; height: 52px; display: flex;
-    align-items: center; justify-content: center; font-size: 11px; color: var(--cyan); }
-  .rlbl { position: absolute; left: 50%; top: 54px; transform: translateX(-50%);
-    font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.16em; white-space: nowrap; }
-  .rtask { position: absolute; left: 50%; top: 66px; transform: translateX(-50%);
-    font-size: 8px; color: var(--ink-dim); letter-spacing: 0.12em; white-space: nowrap; }
-  .ring:hover .rlbl, .ring:hover .rtask { color: var(--cyan); }
 
   .loss { position: absolute; transform: translate(-50%, -100%); pointer-events: none; }
   .lring { position: absolute; left: 50%; top: 0; width: 26px; height: 26px; margin: -13px 0 0 -13px;

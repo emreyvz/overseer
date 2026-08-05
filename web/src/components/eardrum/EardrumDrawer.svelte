@@ -34,6 +34,8 @@
   const frames = $derived($probeFrames)
   const refProbe = $derived(list.find((p) => p.kind === 'ref') ?? null)
   const saturated = $derived(Object.values(frames).some((f) => f.saturated))
+  // a baseline taken from two seconds of noise is worse than none, so the action waits
+  const enoughSignal = $derived(!!spec && spec.psd.length > 8)
 
   $effect(() => {
     const p = sel
@@ -193,10 +195,25 @@
       <span class="warnchip caps hot">CAMERA IS MOVING · MEASUREMENT SUSPENDED</span>
     {/if}
     <span class="spacer"></span>
-    <button class="tb caps" onmousedown={startHold} onmouseup={endHold} onmouseleave={endHold} disabled={busy || !sel}>
+    <!-- "Why would I set a baseline?" was the first thing an operator asked, so the button says
+         it. It is also disabled with a stated reason rather than silently. -->
+    <button class="tb caps" onmousedown={startHold} onmouseup={endHold} onmouseleave={endHold}
+      disabled={busy || !sel || !enoughSignal}
+      title={!sel ? 'Select a probe first'
+        : !enoughSignal ? 'Listen for a few more seconds first'
+        : 'Freeze how this surface behaves TODAY, while it is healthy. Every later reading is '
+          + 'compared against it, so a machine that slowly drifts out of true shows up as a peak '
+          + 'that moved.'}>
       <span class="hfill" style={`width:${(baseHeld / 800) * 100}%`}></span>
       <span class="ht">⊕ {sel?.baseline ? 'REPLACE BASELINE' : 'SET BASELINE'}</span>
     </button>
+    <span class="why caps">
+      {#if !sel}SELECT A PROBE
+      {:else if !enoughSignal}LISTENING_
+      {:else if sel.baseline}COMPARING AGAINST THE HEALTHY READING YOU SAVED
+      {:else}SAVE HOW IT SOUNDS WHILE HEALTHY, SO DRIFT SHOWS UP LATER
+      {/if}
+    </span>
     <button class="tb caps" class:on={modalOpen} onclick={runModal}
       disabled={list.filter((p) => p.kind !== 'ref').length < 3}
       title="Needs three probes on the same structure">◈ MODAL ANALYSIS</button>
@@ -351,6 +368,8 @@
   .tb:hover:not(:disabled) { border-color: var(--cyan); color: var(--cyan); }
   .tb.on { border-color: var(--cyan); color: var(--cyan); background: rgba(56,208,227,0.1); }
   .tb:disabled { opacity: 0.35; }
+  .why { font-size: 6px; color: var(--ink-ghost); letter-spacing: 0.1em; max-width: 190px;
+    line-height: 1.5; }
   .hfill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(56,208,227,0.3); }
   .ht { position: relative; }
   .x { padding: 5px 9px; border: 1px solid var(--ink-dim); background: none; color: var(--ink-dim);

@@ -76,7 +76,6 @@
   onMount(() => { raf = requestAnimationFrame(frame) })
   onDestroy(() => cancelAnimationFrame(raf))
 
-  const hot = $derived(st ? st.cells.filter((z) => z >= (st.threshold || 5)).length : 0)
 </script>
 
 {#if st}
@@ -96,9 +95,6 @@
       </button>
     {/if}
 
-    {#if !hot}
-      <span class="calm caps">◇ DREAMSTATE · CALM</span>
-    {/if}
   </div>
 {/if}
 
@@ -120,6 +116,4 @@
   .sub { font-size: 8px; color: var(--ink-dim); letter-spacing: 0.12em; text-shadow: 0 0 4px #000; }
   .tag:hover .sub { color: var(--ink); }
 
-  .calm { position: absolute; left: 62px; bottom: 112px; font-size: 8px; color: var(--ink-ghost);
-    letter-spacing: 0.16em; }
 </style>

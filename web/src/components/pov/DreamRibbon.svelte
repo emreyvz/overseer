@@ -86,8 +86,10 @@
 {#if st}
   <div class="rb">
     <span class="cap caps">
-      ◇ DIVERGENCE
-      <span class="now" class:hot={st.sigma >= (st.threshold || 5)}>{st.sigma.toFixed(1)}σ</span>
+      <span class="capttl">HOW UNUSUAL THIS SCENE IS</span>
+      <span class="now" class:hot={st.sigma >= (st.threshold || 5)}>
+        {st.sigma >= (st.threshold || 5) ? 'SOMETHING IS OFF' : 'NORMAL FOR THIS HOUR'}
+      </span>
     </span>
 
     <div class="plot">
@@ -105,6 +107,12 @@
       {/each}
     </div>
 
+    <!-- Without this, the line and the red pins are decoration nobody can read. -->
+    <span class="key caps">
+      <span class="krow"><span class="kline"></span>LAST 5 MIN · ABOVE THE DASH = NOT USUAL</span>
+      <span class="krow"><span class="kpin"></span>A MOMENT THAT DID NOT MATCH · CLICK IT</span>
+    </span>
+
     <button class="mat" onclick={() => dreamConsole.set('live')} title="Open the Dreamstate console">
       <svg viewBox="0 0 30 30">
         <circle class="mtrack" cx="15" cy="15" r="13" />
@@ -117,13 +125,19 @@
 {/if}
 
 <style>
-  .rb { position: absolute; left: 0; right: 0; bottom: 84px; height: 34px; z-index: var(--z-panel);
-    display: flex; align-items: center; gap: 12px; padding: 0 62px;
+  .rb { position: absolute; left: 0; right: 0; bottom: 84px; height: 34px; z-index: calc(var(--z-panel) + 1);
+    display: flex; align-items: center; gap: 12px; padding: 0 62px 0 210px;
     animation: slide 220ms var(--ease) both; pointer-events: none; }
   @keyframes slide { from { opacity: 0; transform: translateY(8px); } }
-  .cap { display: flex; align-items: baseline; gap: 7px; font-size: 8px; color: var(--ink-ghost);
+  .cap { display: flex; flex-direction: column; gap: 1px; font-size: 8px; color: var(--ink-ghost);
     letter-spacing: 0.16em; white-space: nowrap; }
-  .now { font-size: 10px; color: var(--ink-dim); letter-spacing: 0.06em; }
+  .capttl { font-size: 6px; color: var(--ink-ghost); letter-spacing: 0.14em; }
+  .now { font-size: 9px; color: var(--jade); letter-spacing: 0.1em; }
+  .key { display: flex; flex-direction: column; gap: 2px; white-space: nowrap; flex: 0 0 auto; }
+  .krow { display: flex; align-items: center; gap: 5px; font-size: 6px; color: var(--ink-ghost);
+    letter-spacing: 0.1em; }
+  .kline { width: 12px; height: 0; border-top: 1px dashed var(--scarlet); opacity: 0.6; }
+  .kpin { width: 5px; height: 5px; background: var(--scarlet); box-shadow: 0 0 5px var(--scarlet-glow); }
   .now.hot { color: var(--scarlet); text-shadow: 0 0 6px var(--scarlet-glow); }
   .plot { position: relative; flex: 1; height: 100%; }
   .plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; }

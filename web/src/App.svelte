@@ -4,7 +4,7 @@
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
     selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, enhanceResult, hydrateAlerts, hydrateModules, toggleModule,
-    dreamConsole, coverageScreen, grainScreen, eardrumDrawer, listenPlacing, modules, type Mode,
+    dreamConsole, coverageScreen, grainScreen, eardrumDrawer, listenPlacing, modules, perceptionPanel, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
@@ -173,6 +173,7 @@
       if ($dreamConsole !== null) { dreamConsole.set(null); return }
       if ($coverageScreen) { coverageScreen.set(false); return }
       if ($grainScreen) { grainScreen.set(false); return }
+      if ($perceptionPanel) { perceptionPanel.set(false); return }
       if ($listenPlacing) { listenPlacing.set(false); return }
       if ($eardrumDrawer) { eardrumDrawer.set(false); return }
       if ($operatorOpen) { operatorOpen.set(false); return }
@@ -203,6 +204,7 @@
     if (k === 'f' && $mode === 'pov') { if ($selectedDetection) { followOn.update((v) => !v); sfx('click') } else { flashBanner('SELECT A TARGET TO FOLLOW', true, 1400) } return }
     if (k === 's' && $mode === 'pov') { toggleModule('social'); sfx('click'); return }   // S -> Social X-ray
     // ── PERCEPTION suite: bare key toggles the live overlay, SHIFT opens its screen ──────────
+    if (k === 'p') { perceptionPanel.update((v) => !v); sfx('click'); return }
     if (k === 'm') { if (e.shiftKey) dreamConsole.set('live'); else toggleModule('dream'); sfx('click'); return }
     if (k === 'u') { if (e.shiftKey) coverageScreen.set(true); else toggleModule('unseen'); sfx('click'); return }
     if (k === 'h') { if (e.shiftKey) grainScreen.set(true); else toggleModule('grain'); sfx('click'); return }
