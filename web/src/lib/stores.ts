@@ -1,9 +1,9 @@
 // OVERSEER — shared reactive state (svelte stores).
 import { get, writable } from 'svelte/store'
 import type {
-  Alert, BedrockQuery, BedrockResult, Camera, ConnState, Coverage, Detection, Divergence,
-  DreamStatus, FrameMeta, GrainStatus, GrainTrackRow, Metric, OOITarget, Probe, ProbeFrame,
-  SystemStat, TimelineEvent,
+  Alert, BedrockQuery, BedrockResult, BlindSpot, Camera, ConnState, Coverage, Detection,
+  Divergence, DreamStatus, FogLoss, FrameMeta, GrainStatus, GrainTrackRow, Metric, OOITarget,
+  Probe, ProbeFrame, SystemStat, TimelineEvent,
 } from './types'
 import { MODULES } from './lexicon'
 import { fpRate } from './feedback'
@@ -185,6 +185,8 @@ export const probeFrames = writable<Record<string, ProbeFrame>>({})  // newest s
 export const divergences = writable<Divergence[]>([])                // DREAMSTATE divergence feed (newest first)
 export const dreamStatus = writable<DreamStatus | null>(null)        // maturity + current sigma for the active cam
 export const coverage = writable<Coverage | null>(null)              // FOG OF WAR field for the active cam
+export const blindSpots = writable<BlindSpot[]>([])                  // FOG OF WAR ranked blind-spot ledger
+export const fogLosses = writable<FogLoss[]>([])                     // live LOST IN FOG countdowns
 export const grainStatus = writable<GrainStatus | null>(null)        // GRAIN maturity + field for the active cam
 export const grainTracks = writable<GrainTrackRow[]>([])             // GRAIN ledger: scored tracks, newest first
 // BEDROCK query state (survives leaving/re-entering the mode so a long query is not lost).

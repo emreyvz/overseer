@@ -669,6 +669,40 @@ async def api_spatial_reel(sid: str, n: int = 28, grid: int = 256) -> Any:
     return await asyncio.to_thread(backend.spatial_reel, sid, n, grid)
 
 
+# -- FOG OF WAR: the observability field and its complement ---------------------------------
+@app.get("/api/coverage/{sid}")
+async def api_coverage(sid: str, task: str | None = None, height: float | None = None) -> Any:
+    """What this camera can and cannot see, right now. Always 200 with
+    {"coverage": {...}} or {"coverage": null, "reason": "..."}."""
+    if backend is None:
+        return {"coverage": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.coverage_scene, sid, task, height)
+
+
+@app.get("/api/coverage/{sid}/blindspots")
+async def api_blind_spots(sid: str) -> Any:
+    """Persistent blind spots, ranked by area times traffic times losses."""
+    if backend is None:
+        return {"spots": []}
+    return await asyncio.to_thread(backend.blind_spots, sid)
+
+
+@app.post("/api/blindspots/{spot_id}/dismiss")
+async def api_dismiss_blind_spot(spot_id: int, payload: dict | None = None) -> Any:
+    if backend is None:
+        return {"ok": False}
+    on = bool((payload or {}).get("on", True))
+    return await asyncio.to_thread(backend.dismiss_blind_spot, spot_id, on)
+
+
+@app.get("/api/coverage/{sid}/report")
+async def api_coverage_report(sid: str) -> Any:
+    """A printable coverage statement: task, percentage, DORI bands, blind spots, methodology."""
+    if backend is None:
+        return {"report": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.coverage_report, sid)
+
+
 # -- long-term identity: subjects / dossiers / reconstruction (features 5/6/7) --------------
 @app.get("/api/subjects")
 async def api_subjects(cls: str | None = None, limit: int = 200, order: str = "last_seen") -> Any:

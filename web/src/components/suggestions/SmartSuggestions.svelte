@@ -8,7 +8,10 @@
   //   · camera improvement: a health advisory drawn from the reputation signals.
   import { onDestroy, onMount } from 'svelte'
   import { api, type Suggestion, type CameraDna } from '../../lib/api'
-  import { cameras, activeCam, mode, stage, zoneEditor, triggerGlitch } from '../../lib/stores'
+  import { get } from 'svelte/store'
+  import {
+    cameras, activeCam, mode, stage, zoneEditor, triggerGlitch, coverageScreen, modules, toggleModule,
+  } from '../../lib/stores'
   import { sendCommand } from '../../lib/ws'
   import { SIM } from '../../lib/sim'
   import { sfx } from '../../lib/audio'
@@ -34,7 +37,9 @@
   const alertQ = $derived(items.filter((s) => s.kind === 'alert').sort((a, b) => score(b) - score(a)))
   const zoneQ = $derived(items.filter((s) => s.kind === 'zone').sort((a, b) => (b.count ?? 0) - (a.count ?? 0)))
   const camQ = $derived(items.filter((s) => s.kind === 'camera'))
-  const flat = $derived([...alertQ, ...zoneQ, ...camQ])
+  // FOG OF WAR blind spots arrive here as work items: ranked by how many tracks they have eaten.
+  const covQ = $derived(items.filter((s) => s.kind === 'coverage').sort((a, b) => (b.count ?? 0) - (a.count ?? 0)))
+  const flat = $derived([...alertQ, ...zoneQ, ...covQ, ...camQ])
   const selected = $derived(flat.find((s) => s.title === selKey) ?? flat[0] ?? null)
 
   // editable proposed zone (for kind==='zone'): normalized polygon the operator can drag
@@ -137,6 +142,20 @@
     onclose()
   }
 
+  // FOG OF WAR: jump to the camera and open its coverage cockpit on this gap.
+  function openCoverage(s: Suggestion | null) {
+    const id = s && camId(s.cam)
+    if (!s || !id) return
+    sfx('whoosh'); triggerGlitch(160)
+    activeCam.set(id)
+    if (!SIM) sendCommand(`connect:${s.cam}`)
+    mode.set('pov'); stage.set('live')
+    const m = get(modules).find((x) => x.key === 'unseen')
+    if (m && !m.on) toggleModule('unseen')
+    coverageScreen.set(true)
+    onclose()
+  }
+
   function step(dir: number) {
     if (!flat.length) return
     const i = Math.max(0, flat.findIndex((s) => s.title === selKey))
@@ -213,6 +232,19 @@
             </button>
           {/each}
         {/if}
+        {#if covQ.length}
+          <div class="qgrp caps"><span class="qd cov"></span>COVERAGE GAPS<span class="qgn">{covQ.length}</span></div>
+          {#each covQ as s (s.title)}
+            <button class="qrow" class:on={selected?.title === s.title} onclick={() => select(s)}>
+              <span class="pdot cov"></span>
+              <span class="qmid">
+                <span class="qttl">{s.title}</span>
+                <span class="qcam caps">◉ {s.cam}</span>
+              </span>
+              {#if s.count}<span class="qn caps">{s.count} LOST</span>{:else}<span class="qn caps">⛨ BLIND</span>{/if}
+            </button>
+          {/each}
+        {/if}
         {#if camQ.length}
           <div class="qgrp caps"><span class="qd cam"></span>CAMERA IMPROVEMENTS<span class="qgn">{camQ.length}</span></div>
           {#each camQ as s (s.title)}
@@ -243,6 +275,12 @@
               {/each}
               <span class="ztag caps">◱ PROPOSED ZONE · DRAG TO ADJUST</span>
             {/if}
+            {#if selected.kind === 'coverage' && selected.spot}
+              <svg class="zedit" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <polygon class="cpoly" points={selected.spot.polygon.map((p) => `${p[0] * 100},${p[1] * 100}`).join(' ')} />
+              </svg>
+              <span class="ztag caps cov">⛨ UNOBSERVED GROUND</span>
+            {/if}
             <span class="camtag caps">◉ {selected.cam}</span>
             <span class="impact caps imp-{impact(selected).toLowerCase()}">{impact(selected)} IMPACT</span>
             {#if selected.count && selected.kind !== 'zone'}<span class="seen caps">{selected.count}× SEEN</span>{/if}
@@ -252,7 +290,7 @@
           </div>
 
           <div class="detail">
-            <div class="kind caps">{selected.kind === 'alert' ? 'ALERT COVERAGE GAP' : selected.kind === 'zone' ? 'ZONE COVERAGE GAP' : 'CAMERA ADVISORY'}</div>
+            <div class="kind caps">{selected.kind === 'alert' ? 'ALERT COVERAGE GAP' : selected.kind === 'zone' ? 'ZONE COVERAGE GAP' : selected.kind === 'coverage' ? 'OBSERVABILITY GAP' : 'CAMERA ADVISORY'}</div>
             <h2 class="stitle">{selected.title}</h2>
             <p class="swhy">{selected.why}</p>
 
@@ -295,6 +333,11 @@
                   {#if camId(selected.cam)}
                     <button class="zone caps" onclick={() => drawZone(selected)} title="Open the full editor on this camera">◱ FULL EDITOR</button>
                   {/if}
+                {/if}
+              {:else if selected.kind === 'coverage'}
+                <button class="go caps" onclick={() => openCoverage(selected)}>⛨ OPEN COVERAGE REPORT</button>
+                {#if camId(selected.cam)}
+                  <button class="zone caps" onclick={() => drawZone(selected)} title="Open this camera">◉ OPEN CAMERA</button>
                 {/if}
               {:else}
                 <span class="advnote caps">HEALTH ADVISORY · NO RULE TO ADD</span>
@@ -340,7 +383,8 @@
   .queue { border-right: 1px solid var(--hairline); overflow-y: auto; padding: 12px 10px 40px; background: rgba(4,7,10,0.4); }
   .qgrp { display: flex; align-items: center; gap: 7px; font-size: 8px; color: var(--ink-dim); letter-spacing: 0.16em; margin: 14px 6px 7px; }
   .qgrp:first-child { margin-top: 4px; }
-  .qd { width: 6px; height: 6px; border-radius: 50%; } .qd.alert { background: var(--scarlet); box-shadow: 0 0 6px var(--scarlet); } .qd.cam { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); } .qd.zone { background: #2fbf8f; box-shadow: 0 0 6px #2fbf8f; }
+  .qd { width: 6px; height: 6px; border-radius: 50%; } .qd.alert { background: var(--scarlet); box-shadow: 0 0 6px var(--scarlet); } .qd.cam { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); } .qd.zone { background: var(--jade); box-shadow: 0 0 6px var(--jade); }
+  .qd.cov { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
   .qgn { margin-left: auto; color: var(--ink-ghost); }
   .qrow { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 9px 10px; margin-bottom: 3px; background: none;
     border: 1px solid transparent; border-left: 2px solid transparent; cursor: pointer; transition: background 140ms, border-color 140ms; }
@@ -351,7 +395,12 @@
   .pdot.sev-critical { background: var(--scarlet); box-shadow: 0 0 6px var(--scarlet); }
   .pdot.sev-warning { background: #e8a13a; box-shadow: 0 0 6px #e8a13a; }
   .pdot.sev-info, .pdot.cam { background: var(--cyan); }
-  .pdot.zone { background: #2fbf8f; box-shadow: 0 0 6px #2fbf8f; }
+  .pdot.zone { background: var(--jade); box-shadow: 0 0 6px var(--jade); }
+  .pdot.cov { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  /* FOG OF WAR gap: a dark, hatched region rather than a coloured fill — absence, not alarm */
+  .cpoly { fill: rgba(4,7,10,0.62); stroke: var(--amber); stroke-width: 1.4;
+    vector-effect: non-scaling-stroke; stroke-dasharray: 5 3; }
+  .ztag.cov { color: var(--amber); }
   .qmid { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
   .qttl { font-size: 11px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .qrow.on .qttl { color: var(--ink); } .qrow:not(.on) .qttl { color: var(--ink-dim); }

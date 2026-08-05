@@ -49,6 +49,7 @@ from vision.motion import MotionDetector
 from zones.monitor import ZoneMonitor
 from . import spatial, suggestions
 from .clipenc import encode_clip
+from .coverage import CoverageField
 from .media import MediaLibrary
 from .ooi import OOIManager
 from .pose_kp import PoseKP
@@ -284,6 +285,13 @@ class Backend:
         self._bg_plate_sid: Any = None   # which camera the plate belongs to
         self._bg_plate_n = 0             # frames accumulated (plate is only trusted once warmed up)
         self._last_frame_push = 0.0
+
+        # FOG OF WAR — the observability field. `observe` is two dict updates per track on the
+        # analysis worker; the expensive geometry only runs when the operator asks for it, and
+        # reuses the depth grid the spatial view already produced rather than inferring again.
+        self.coverage = CoverageField(self.db, self.config)
+        self._depth_cache: tuple[str, Any, float] | None = None   # (sid, disp01, ts)
+        self._last_loss_check = 0.0
 
         self._loop: Any = None
         self._broadcast: Broadcaster | None = None
@@ -1086,6 +1094,19 @@ class Backend:
                 continue
         out.extend(suggestions.zone_suggestions(zone_by_source, names, existing))
         out.extend(suggestions.camera_suggestions(self.cam_profiles.all(names)))
+        # FOG OF WAR: a persistent blind spot is a coverage gap with a named remedy, which makes
+        # it a work item rather than a picture. Surfacing it here is what turns the observability
+        # field into something that gets acted on.
+        spots_by_source: dict[int, list[dict]] = {}
+        for sid in names:
+            try:
+                spots = [s for s in self.coverage.blind_spots(sid)
+                         if s.get("persistent") and not s.get("dismissed")]
+                if spots:
+                    spots_by_source[sid] = spots
+            except Exception:  # noqa: BLE001
+                continue
+        out.extend(suggestions.coverage_suggestions(spots_by_source, names))
         return out
 
     def relationship_graph(self, min_count: int = 2, limit: int = 300) -> dict:
@@ -1548,6 +1569,9 @@ class Backend:
                 self._source_id, brightness=float(getattr(r.metrics, "brightness", 0.0)),
                 motion=float(r.motion_percent), fps=float(r.fps), dets=prof_dets,
                 points=prof_points)
+        # FOG OF WAR — the empirical channel. Where tracks are born and where they die, away
+        # from the frame border, is the only honest measure of where this camera fails.
+        self._observe_coverage(dets, now)
         # Throttle the detections emit (~15 Hz) so it can never saturate the single event loop and
         # starve /stream. Boxes are interpolated client-side, so a lower cadence is invisible.
         if _enc_now - self._last_det_push > 0.066:
@@ -1722,6 +1746,127 @@ class Backend:
             })
         return out
 
+    # ---- FOG OF WAR ---------------------------------------------------
+    def _observe_coverage(self, dets: list[dict], now: float) -> None:
+        """Accumulate the empirical channel and raise LOST IN FOG.
+
+        Deliberately cheap: two dict updates per track. The geometry that produces the shadow
+        set is only computed when the operator opens the overlay, so a camera nobody is looking
+        at costs nothing beyond the counters."""
+        if self._source_id is None or not self.config.get("coverage.enabled", True):
+            return
+        try:
+            self.coverage.observe(self._source_id, dets, now)
+            if now - self._last_loss_check > 1.0:
+                self._last_loss_check = now
+                for loss in self.coverage.check_losses(self._source_id, dets, now):
+                    cam = self._source_name(self._source_id)
+                    self._emit({"t": "alert", "d": {
+                        "ts": now * 1000, "severity": "warning", "type": "LOST IN FOG",
+                        "summary": (f"{loss['det_id']} entered an unobservable area and has not "
+                                    f"reappeared within the expected crossing time"),
+                        "cam": cam, "ack": False,
+                        "snapshot": self._alert_snapshot(), "clip": self._save_clip(),
+                    }})
+        except Exception:   # never let an observability channel break the analysis pass
+            log.debug("coverage observe failed", exc_info=True)
+
+    def _coverage_depth(self, sid: str, frame: Any) -> Any:
+        """The depth grid for the coverage build, reusing the spatial view's if it is fresh.
+
+        Depth inference contends with the detector and ReID for the GPU, so paying for it twice
+        to draw the same shadows would be indefensible."""
+        cache = self._depth_cache
+        if cache is not None and cache[0] == str(sid) and time.time() - cache[2] < 20.0:
+            return cache[1]
+        if self._depth is None:
+            return None
+        h0, w0 = frame.shape[:2]
+        work_w = int(self.config.get("spatial.input_width", 768))
+        work = (cv2.resize(frame, (work_w, int(work_w * h0 / w0)), interpolation=cv2.INTER_AREA)
+                if w0 > work_w else frame)
+        disp = self._depth.estimate(work)
+        if disp is None:
+            return None
+        disp01, _dmin, _dmax = spatial.normalize_disparity(
+            cv2.resize(disp, (160, max(1, int(160 * work.shape[0] / work.shape[1]))),
+                       interpolation=cv2.INTER_AREA))
+        self._depth_cache = (str(sid), disp01, time.time())
+        return disp01
+
+    def coverage_scene(self, sid: str, task: str | None = None,
+                       height: float | None = None) -> dict:
+        """The observability field for one camera. Always returns a dict with a specific reason
+        on failure, never a 5xx, so the UI can explain itself."""
+        if not self.config.get("coverage.enabled", True):
+            return {"coverage": None, "reason": "disabled"}
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"coverage": None, "reason": "no_source"}
+        frame = self._source_frame(src)
+        if frame is None:
+            return {"coverage": None, "reason": "no_frame"}
+        disp01 = self._coverage_depth(str(sid), frame)
+        if disp01 is None:
+            # Honest degradation: without depth there is no standing-object mask, so the
+            # geometric channel is empty. The other three still work and the UI says so.
+            log.debug("coverage: no depth field for %s, geometric channel disabled", sid)
+        try:
+            cov = self.coverage.build(int(src.id), src.name, frame, disp01,
+                                      float(self.config.get("spatial.fov_deg", 60.0)),
+                                      task=task, target_h=height)
+        except Exception:
+            log.exception("coverage build failed")
+            return {"coverage": None, "reason": "build_failed"}
+        cov["depth_backed"] = disp01 is not None
+        return {"coverage": cov}
+
+    def blind_spots(self, sid: str) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"spots": []}
+        try:
+            return {"spots": self.coverage.blind_spots(int(src.id))}
+        except Exception:
+            log.exception("blind spot listing failed")
+            return {"spots": []}
+
+    def dismiss_blind_spot(self, spot_id: int, on: bool = True) -> dict:
+        self.db.execute("UPDATE blind_spots SET dismissed = ? WHERE id = ?",
+                        (1 if on else 0, int(spot_id)))
+        return {"ok": True}
+
+    def coverage_report(self, sid: str) -> dict:
+        """A signed, printable statement of what this camera can and cannot see.
+
+        This is the artifact that answers 'prove your system works' in a procurement, which is
+        a question no VMS vendor can currently answer with a number."""
+        res = self.coverage_scene(sid)
+        cov = res.get("coverage")
+        if cov is None:
+            return {"report": None, "reason": res.get("reason", "unavailable")}
+        spots = self.blind_spots(sid).get("spots", [])
+        persistent = [s for s in spots if s.get("persistent") and not s.get("dismissed")]
+        return {"report": {
+            "camera": cov["cam"], "sid": str(sid),
+            "generated_at": time.time(),
+            "task": cov["task"], "target_height_m": cov["target_height_m"],
+            "coverage_percent": cov["percent"],
+            "fov_deg": cov["fov_deg"], "camera_height_m": cov["camera_height_m"],
+            "pitch_deg": cov["pitch_deg"],
+            "dori_bands": cov["bands"],
+            "blind_spots": [{"name": s["name"], "kind": s["kind"], "area_m2": s["area_m2"],
+                             "events": s["events"]} for s in persistent],
+            "methodology": (
+                "Observability is computed over the OBSERVED ground area only, from four "
+                "channels: ray occlusion against the depth-derived standing-object mask, "
+                "pixels-per-metre against EN 62676-4 (DORI), local photometric quality, and "
+                "measured track mortality. Ranges derive from a pinhole ground-plane model "
+                "using an estimated camera height and tilt, so all metre values are "
+                "approximate; relative ordering is reliable."),
+            "scale_estimated": True,
+        }}
+
     def spatial_scene(self, sid: str, grid_w: int = 320) -> dict:
         """Feature 4 — lift a camera's flat 2D frame into a navigable 3D point cloud.
 
@@ -1773,6 +1918,9 @@ class Backend:
         rgb_grid = cv2.resize(work, (grid_w, gh), interpolation=cv2.INTER_AREA)
         disp_grid = cv2.resize(disp, (grid_w, gh), interpolation=cv2.INTER_AREA)
         disp01, dmin, dmax = spatial.normalize_disparity(disp_grid)
+        # Hand the same grid to FOG OF WAR rather than making it infer depth again — the GPU is
+        # already shared between the detector, ReID and this model.
+        self._depth_cache = (str(sid), disp01.copy(), time.time())
         entities, boxes = self._spatial_entities(work, disp, dmin, dmax)
         # Geometric scene completion: reconstruct the occluded background behind foreground
         # objects as a real surface (inpainted depth + texture), shipped as a second mesh layer.

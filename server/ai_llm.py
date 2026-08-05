@@ -140,6 +140,13 @@ _OPERATOR_ACTIONS = (
     "social_xray {on} — Social X-ray: show each person's attention direction and who is interacting with whom.\n"
     "walkthrough {camera?} — open the 3D view in live mode (successive reconstructions) so you can move through the scene in 3D.\n"
     "enhance {} — start the box-select 'enhance' tool (the operator then drags a box to clarify it).\n"
+    "fog_of_war {on} — FOG OF WAR overlay: draw everything this camera CANNOT see (occluded, too "
+    "far to resolve, too dark, or where tracks keep dying) as static over the feed.\n"
+    "coverage_report {} — open the coverage cockpit and report what percentage of the observed "
+    "ground this camera actually covers at the chosen standard.\n"
+    "coverage_task {task} — set the standard coverage is measured against: detect | observe | "
+    "recognise | identify (EN 62676-4 DORI). 'can I read a face at the gate' -> identify.\n"
+    "blind_spots {} — list the persistent blind spots and open the one that matters most.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 

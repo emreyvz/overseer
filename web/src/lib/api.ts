@@ -38,7 +38,14 @@ export interface CaseDetail { id: number; name: string; threat: string; notes: s
 export interface SpatialEntity { id: string; cls: string; cx: number; cy: number; depth: number; conf: number; label: string }
 export interface SpatialScene { cam: string; sid: string; w: number; h: number; fov: number; image: string; depth: string; entities: SpatialEntity[]; ts: number; bg_image?: string; bg_depth?: string; tex_image?: string }
 export interface SuggestRule { name: string; event_type: string; source_id: number; severity: string }
-export interface Suggestion { kind: 'alert' | 'camera' | 'zone'; cam: string; title: string; why: string; count?: number; rule?: SuggestRule; zone?: [number, number][] }
+export interface Suggestion {
+  kind: 'alert' | 'camera' | 'zone' | 'coverage'
+  cam: string; title: string; why: string; count?: number
+  rule?: SuggestRule
+  zone?: [number, number][]
+  // FOG OF WAR: a persistent blind spot surfaced as a work item rather than a picture
+  spot?: { id: number; polygon: [number, number][]; kind: string }
+}
 export interface Subject { id: number; cls: string; label?: string | null; first_seen: number; last_seen: number; sighting_count: number; day_count: number; plate?: string | null; attrs: Record<string, unknown>; snapshot?: string | null; watched: boolean; flags: string[] }
 export interface Sighting { id: number; cam?: string | null; ts: number; snapshot?: string | null }
 export interface Dossier extends Subject { per_camera: { cam: string; count: number }[]; hour_histogram: number[]; distinct_days: number; sightings: Sighting[] }

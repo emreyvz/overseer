@@ -114,3 +114,44 @@ def camera_suggestions(profiles: list[dict], *, min_frames: int = 40) -> list[di
                         "why": f"reputation {int(p['reputation'] * 100)}% — check the camera's "
                                "angle, focus or occlusion"})
     return out
+
+
+_KIND_WHY = {
+    "occlusion": "an object standing in the way casts a permanent shadow across this ground",
+    "resolution": "this ground is too far away to meet the chosen identification standard",
+    "radiometric": "this region is too dark, too blown out or too blurred to be usable",
+    "empirical": "tracks keep ending here away from the frame edge, which means the system is "
+                 "losing people at this spot",
+}
+
+
+def coverage_suggestions(spots_by_source: dict[int, list[dict]], names: dict[int, str],
+                         *, max_per_camera: int = 3) -> list[dict]:
+    """FOG OF WAR blind spots as actionable work items.
+
+    A picture of a coverage gap is interesting; a ranked gap with a named remedy and a recovered
+    area is a task someone can close. Only PERSISTENT spots are surfaced — a van parked for ten
+    minutes is not an estate-management problem.
+    """
+    out: list[dict] = []
+    for sid, spots in spots_by_source.items():
+        nm = names.get(sid, f"CAM {sid}")
+        for s in spots[:max_per_camera]:
+            area = s.get("area_m2")
+            events = int(s.get("events") or 0)
+            why = _KIND_WHY.get(str(s.get("kind")), "this ground cannot be observed")
+            if area:
+                why += f" (~{area:.0f} m2, estimated)"
+            if events:
+                why += f"; {events} track{'' if events == 1 else 's'} already lost here"
+            remedy = (s.get("remedies") or [{}])[0].get("text")
+            if remedy:
+                why += f". Suggested: {remedy.lower()}"
+            out.append({
+                "kind": "coverage", "cam": nm,
+                "title": f"Blind spot at {s.get('name', 'an unobserved area')} on {nm}",
+                "why": why,
+                "count": events,
+                "spot": {"id": s.get("id"), "polygon": s.get("polygon"), "kind": s.get("kind")},
+            })
+    return out

@@ -107,10 +107,23 @@ export interface Coverage {
   grid: [number, number]
   unseen: number[]             // flattened cell grid of `unseen` in [0,1]
   cells_m2: number
-  shadows: { polygon: [number, number][]; persistent: boolean; id: number }[]
+  shadows: FogShadow[]
   bands: DoriBand[]
+  horizon_y?: number
+  camera_height_m?: number
+  pitch_deg?: number
+  depth_backed?: boolean       // false when there was no depth field: no geometric channel
   scale_estimated: boolean     // monocular depth → metres are ESTIMATED, always surfaced in UI
   ts: number
+}
+export interface FogShadow {
+  id: number
+  polygon: [number, number][]          // normalized frame rect the ground is hidden in
+  occluder?: [number, number, number, number]  // the object doing the hiding (punched out of the scrim)
+  persistent: boolean
+  z_near?: number                      // metres (estimated) where the shadow starts
+  z_far?: number | null                // ...and ends; null = to the horizon
+  height_m?: number
 }
 export interface FogLoss {                 // live LOST IN FOG tracker
   det_id: string; spot: number

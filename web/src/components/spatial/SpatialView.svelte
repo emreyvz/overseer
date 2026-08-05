@@ -17,7 +17,8 @@
   import { get } from 'svelte/store'
   import { api } from '../../lib/api'
   import { sfx } from '../../lib/audio'
-  import { walkthroughAuto } from '../../lib/stores'
+  import { coverage, walkthroughAuto } from '../../lib/stores'
+  import { refresh as refreshFog } from '../../lib/fog'
 
   let { cam, onclose }: { cam: string; onclose: () => void } = $props()
 
@@ -110,6 +111,13 @@
   let prevKey = ''
   let measurePts: THREE.Vector3[] = []         // 3D points picked on the mesh
   let measureGroup: THREE.Group | null = null
+  // FOG OF WAR volumes: the actual solid of space this camera cannot see, extruded away from
+  // the optical centre behind every standing object. Orbiting off the capture pose turns them
+  // from an abstraction into geometry you can walk around.
+  let fogGroup: THREE.Group | null = null
+  let fogOn = $state(false)
+  let fogVolumes = $state(0)
+  let bp: { fx: number; cx: number; cy: number; w: number; h: number; disp: Float32Array } | null = null
   let downXY: [number, number] | null = null   // pointer-down pos (click vs drag discrimination)
   const raycaster = new THREE.Raycaster()
 
@@ -571,6 +579,10 @@
     mesh = layerMesh(fgDisp, fg.rgba, w, h, fx, cx, cy, 1e9, 0,
       { solid: true, bgdisp: bgDisp, maxT: 0.5, flattenCoef: DEBOW ? gy : null, tex: fgTex, keep, dispJump: Infinity, zrange: Infinity })
     scene.add(mesh)
+    // Stash the back-projection so FOG OF WAR can lift its 2D shadow rectangles into this exact
+    // world without re-deriving the intrinsics (and drifting out of alignment with the mesh).
+    bp = { fx, cx, cy, w, h, disp: fgDisp }
+    buildFog()
 
     // thin completed-background layer behind everything, filling the far field (correct parallax).
     if (bgMesh) { scene.remove(bgMesh); bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose(); bgMesh = null }
@@ -630,6 +642,85 @@
       camera!.updateProjectionMatrix()
       hasFramed = true
     }
+  }
+
+  // ── FOG OF WAR volumes ────────────────────────────────────────────────────────────────────
+  // The shadow an object casts is a solid, and from the capture pose it is invisible by
+  // definition — you cannot see the thing you cannot see. Orbit away and it becomes a black
+  // wedge with a measurable reach, which is the entire point of rendering it in 3D.
+  //
+  // Scale note: the world here is in the depth field's arbitrary units, but the backend reports
+  // the shadow's near and far RANGES in metres. A ratio survives an unknown scale factor, so
+  // z_far/z_near extrudes the volume correctly without needing either side to be calibrated.
+  function disposeFog() {
+    if (!fogGroup) return
+    fogGroup.traverse((o) => {
+      const m = o as THREE.Mesh
+      if (m.geometry) m.geometry.dispose()
+      const mat = (m as unknown as { material?: THREE.Material | THREE.Material[] }).material
+      if (Array.isArray(mat)) mat.forEach((x) => x.dispose())
+      else mat?.dispose()
+    })
+    fogGroup.clear()
+  }
+
+  function buildFog() {
+    if (!scene) return
+    if (fogGroup) { scene.remove(fogGroup); disposeFog(); fogGroup = null }
+    fogVolumes = 0
+    const cov = $coverage
+    if (!fogOn || !bp || !cov || !cov.shadows.length) return
+    const { fx, cx, cy, w, h, disp } = bp
+    fogGroup = new THREE.Group()
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x02050b, transparent: true, opacity: 0.62, depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+    const edgeMat = new THREE.LineBasicMaterial({ color: 0x38d0e3, transparent: true, opacity: 0.22 })
+    const at = (px: number, py: number, z: number): [number, number, number] =>
+      [((px - cx) * z) / fx, (-(py - cy) * z) / fx, -z]
+
+    for (const s of cov.shadows) {
+      const o = s.occluder
+      if (!o) continue
+      const px0 = o[0] * w, px1 = (o[0] + o[2]) * w
+      const pyT = o[1] * h, pyB = (o[1] + o[3]) * h
+      // depth at the occluder's own foot — its range in scene units
+      const sx = Math.max(0, Math.min(w - 1, Math.round((px0 + px1) / 2)))
+      const sy = Math.max(0, Math.min(h - 1, Math.round(pyB) - 2))
+      const zNear = zOf(disp[sy * w + sx] ?? 0.5)
+      if (!isFinite(zNear) || zNear <= 0) continue
+      const k = s.z_far && s.z_near ? Math.max(1.15, Math.min(9, s.z_far / s.z_near)) : 6
+      const corners: [number, number][] = [[px0, pyT], [px1, pyT], [px1, pyB], [px0, pyB]]
+      const near = corners.map(([px, py]) => at(px, py, zNear))
+      const far = corners.map(([px, py]) => at(px, py, zNear * k))
+      const pos = new Float32Array([...near.flat(), ...far.flat()])
+      const idx = [
+        0, 1, 5, 0, 5, 4,   1, 2, 6, 1, 6, 5,
+        2, 3, 7, 2, 7, 6,   3, 0, 4, 3, 4, 7,
+        4, 5, 6, 4, 6, 7,   0, 2, 1, 0, 3, 2,
+      ]
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+      g.setIndex(idx)
+      g.computeVertexNormals()
+      const m = new THREE.Mesh(g, mat)
+      m.renderOrder = 3
+      fogGroup.add(m)
+      const eg = new THREE.EdgesGeometry(g, 30)
+      fogGroup.add(new THREE.LineSegments(eg, edgeMat))
+      fogVolumes++
+    }
+    scene.add(fogGroup)
+  }
+
+  async function toggleFog() {
+    fogOn = !fogOn
+    sfx('click', { volume: 0.25 })
+    // the field is only fetched on demand — a depth pass is not free and nobody should pay for
+    // it just because they opened the 3D view
+    if (fogOn && !$coverage) { await refreshFog(true) }
+    buildFog()
   }
 
   async function decodeLayer(image: string, depth: string, w: number, h: number) {
@@ -1012,6 +1103,7 @@
     if (bgMesh) { bgMesh.geometry.dispose(); (bgMesh.material as THREE.Material).dispose() }
     if (markers) disposeGroup(markers)
     if (shadows) disposeShadows()
+    if (fogGroup) disposeFog()
     if (sky) { sky.geometry.dispose(); (sky.material as THREE.Material).dispose() }
     fgTex?.dispose()
     shadowTex?.dispose()
@@ -1028,6 +1120,9 @@
     <span class="mode">MONOCULAR DEPTH · 3D</span>
     <span class="spacer"></span>
     {#if entityCount}<span class="ec caps">◈ {entityCount} ENTIT{entityCount === 1 ? 'Y' : 'IES'}</span>{/if}
+    {#if fogOn && $coverage}<span class="ec caps fogc">⛨ {Math.round($coverage.percent)}% SEEN · {fogVolumes} VOLUME{fogVolumes === 1 ? '' : 'S'}</span>{/if}
+    <button class="ref caps" class:on={fogOn} onclick={toggleFog}
+      title="Render the volumes of space this camera cannot see">⛨ FOG</button>
     <button class="ref caps" class:on={measure} onclick={toggleMeasure}>⟺ MEASURE</button>
     <button class="ref caps" class:on={reel} onclick={reel ? exitReel : startReel} title="capture a few seconds of 3D and replay it like a video you can fly through">◆ HOLOREEL</button>
     <button class="ref caps" class:on={auto} onclick={toggleAuto}>{auto ? '● LIVE' : '○ LIVE'}</button>
@@ -1095,6 +1190,7 @@
   .eyebrow { color: var(--scarlet); } .camn { color: var(--ink); font-size: 10px; letter-spacing: 0.14em; }
   .mode { color: var(--ink-ghost); font-size: 8px; } .spacer { flex: 1; }
   .ec { color: var(--cyan); font-size: 9px; }
+  .ec.fogc { color: var(--ink-dim); }
   .ref, .x { padding: 6px 12px; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: none; cursor: pointer; font-size: 9px; letter-spacing: var(--tracking); }
   .ref:hover { border-color: var(--cyan); color: var(--cyan); } .ref.on { border-color: var(--cyan); color: var(--cyan); }
   .x:hover { border-color: var(--scarlet); color: var(--scarlet); }

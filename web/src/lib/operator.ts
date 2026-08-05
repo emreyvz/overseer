@@ -10,8 +10,10 @@ import {
   suggestionsOpen, spatialOpen, walkthroughAuto, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
   rosterInit, modules, toggleModule, detections, alerts, timeline, timelineOpen, petRegistry,
   povZoom, muted, frame, system, narrateOn, followOn, xrayOn, enhanceMode, selectedDetection,
-  flashBanner, triggerGlitch, type Mode,
+  flashBanner, triggerGlitch, coverage, coverageScreen, blindSpots, type Mode,
 } from './stores'
+import { setFogTask } from './fog'
+import type { DoriTask } from './types'
 import { sendCommand } from './ws'
 import { SIM } from './sim'
 import { api } from './api'
@@ -654,6 +656,40 @@ export const ACTIONS: Record<string, Action> = {
     return 'draw a box on the frame and I will clarify that region'
   },
 
+  // ── FOG OF WAR ────────────────────────────────────────────────────────────────────────────
+  fog_of_war: ({ on }) => {
+    const want = on !== false
+    if (want) { stage.set('live'); mode.set('pov') }
+    const m = get(modules).find((x) => x.key === 'unseen')
+    if (m && m.on !== want) toggleModule('unseen')
+    return want
+      ? 'fog of war on — everything this camera cannot see is now drawn as static'
+      : 'fog of war off'
+  },
+  coverage_report: () => {
+    stage.set('live'); coverageScreen.set(true)
+    const c = get(coverage)
+    return c
+      ? { say: `coverage is ${Math.round(c.percent)} percent of the observed ground at the ${c.task} standard`,
+          value: c.percent }
+      : 'opening the coverage report — building the observability field now'
+  },
+  coverage_task: ({ task }) => {
+    const t = S(task).toLowerCase()
+    const valid = ['detect', 'observe', 'recognise', 'recognize', 'identify']
+    if (!valid.includes(t)) return `pick one of: detect, observe, recognise, identify`
+    setFogTask((t === 'recognize' ? 'recognise' : t) as DoriTask)
+    return `coverage is now measured against the ${t} standard`
+  },
+  blind_spots: () => {
+    const spots = get(blindSpots).filter((s) => !s.dismissed && s.persistent)
+    stage.set('live'); coverageScreen.set(true)
+    if (!spots.length) return { say: 'no persistent blind spots on this camera', value: 0 }
+    const worst = spots[0]
+    return { say: `${spots.length} persistent blind spot${spots.length === 1 ? '' : 's'}; the worst is ${worst.name}`,
+             value: spots.length }
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -791,6 +827,10 @@ export function routeCommand(raw: string): Plan | null {
   if (/(follow.?cam|takip et|takip kamerası|follow (the |that )?(target|subject|him|her|it|kişi))/i.test(low)) return { steps: [{ action: 'follow', args: { on: !/(kapat|stop|\boff\b|durdur|bırak)/i.test(low) } }], border: 'nav' }
   if (/(x.?ray|röntgen|thru cover|behind cover|arkasını gör|occlusion)/i.test(low)) return { steps: [{ action: 'xray', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
   if (/(social x.?ray|sosyal|gaze|attention|who.*(talking|interact)|kim.*(konuş|etkileş)|bakış)/i.test(low)) return { steps: [{ action: 'social_xray', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  // FOG OF WAR — "what can't you see", "kör nokta", "coverage"
+  if (/(blind ?spot|kör nokta|göremediğ|what.*(can.?t|cannot).*see|neyi göremiyor)/i.test(low)) return { steps: [{ action: 'blind_spots' }], border: 'nav' }
+  if (/(coverage|kapsama|kaç.*yüzde.*gör|how much.*see)/i.test(low)) return { steps: [{ action: 'coverage_report' }], border: 'nav' }
+  if (/(fog of war|savaş sisi|sis(i)? (aç|kapat)|unseen)/i.test(low)) return { steps: [{ action: 'fog_of_war', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
   if (/(walkthrough|walk.?through|chronoscape|zaman yolcul|3d.*(gez|dolaş|walk|yürü)|içinde (gez|dolaş))/i.test(low)) return { steps: [{ action: 'walkthrough', args: {} }], border: 'nav' }
   if (/(enhance|netleştir|yakınlaş.*netleş|clarify|zoom.*enhance|büyüt.*netleş)/i.test(low)) return { steps: [{ action: 'enhance', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }
