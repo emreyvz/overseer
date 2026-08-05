@@ -338,3 +338,82 @@ def test_every_factor_is_reported() -> None:
     row = g.sweep(base + 700)[0]
     assert set(row["factors"]) == set(FACTORS)
     assert all(0.0 <= v <= 100.0 for v in row["factors"].values())
+
+
+# ── regression: cost must not grow with the size of the record ──────────────────────────────
+
+class _CountingDb:
+    """Wraps a Database and counts queries, so a scaling regression is caught as a COUNT rather
+    than as a wall-clock threshold (which would be flaky on a loaded machine)."""
+
+    def __init__(self, db) -> None:
+        self._db = db
+        self.queries = 0
+
+    def query(self, sql, params=()):
+        self.queries += 1
+        return self._db.query(sql, params)
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+
+def test_peek_does_not_query_the_database(monkeypatch) -> None:
+    """percentile() and _factor_pct() used to scan grain_track on EVERY peek, and peek runs per
+    subject every couple of seconds. At 100k stored tracks that measured 4.7 seconds of CPU per
+    second of video for 20 subjects: a total pipeline stall that only appears after weeks in the
+    field. The live path must read its distribution from memory."""
+    g = _engine()
+    base = time.time()
+    _train(g, base, n=60)
+    counting = _CountingDb(g.db)
+    g.db = counting
+    for k in range(20):
+        g.observe(1, "TK_1.live", "person", 0.10 + k * 0.04, 0.70, base + 400 + k * 0.5)
+    counting.queries = 0
+    g.peek("TK_1.live", base + 420, min_interval=0.0)
+    assert counting.queries == 0, f"peek hit the database {counting.queries} times"
+
+
+def test_closing_a_track_costs_a_bounded_number_of_queries() -> None:
+    g = _engine()
+    base = time.time()
+    _train(g, base, n=80)
+    counting = _CountingDb(g.db)
+    g.db = counting
+    for k in range(20):
+        g.observe(1, "TK_1.close", "person", 0.10 + k * 0.04, 0.70, base + 900 + k * 0.5)
+    counting.queries = 0
+    g.sweep(base + 1200)
+    # one INSERT is fine; a per-factor scan of the whole table is not
+    assert counting.queries <= 2, f"close() ran {counting.queries} queries"
+
+
+def test_the_score_distribution_survives_a_reload() -> None:
+    """The in-memory distribution has to be rebuilt on load or percentiles reset to 50 after
+    every restart, silently un-learning the calibration."""
+    g = _engine()
+    base = time.time()
+    _train(g, base, n=60)
+    g.flush(1)
+    back = GrainEngine(g.db, g.config)
+    back.load(1)
+    assert len(back._scores.get(1, [])) >= 50
+    assert 0.0 <= back.percentile(1, -8.0) <= 100.0
+
+
+def test_muted_cells_survive_a_restart() -> None:
+    """A mute the operator painted is a setting, not session state."""
+    g = _engine()
+    g.mute(1, [5, 6, 7])
+    back = GrainEngine(g.db, g.config)
+    back.load(1)
+    assert back.muted.get(1) == {5, 6, 7}
+
+
+def test_muting_is_idempotent_and_unmute_is_explicit() -> None:
+    """It used to toggle, so a caller sending the same list twice silently un-muted."""
+    g = _engine()
+    assert g.mute(1, [4]) == [4]
+    assert g.mute(1, [4]) == [4]
+    assert g.mute(1, [4], on=False) == []

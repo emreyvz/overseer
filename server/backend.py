@@ -2195,11 +2195,11 @@ class Backend:
     def grain_verdict(self, track_id: int, verdict: str | None) -> dict:
         return self.grain.verdict(int(track_id), verdict)
 
-    def grain_mute(self, sid: str, cells: list[int]) -> dict:
+    def grain_mute(self, sid: str, cells: list[int], on: bool = True) -> dict:
         src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
         if src is None:
             return {"muted": []}
-        return {"muted": self.grain.mute(int(src.id), cells)}
+        return {"muted": self.grain.mute(int(src.id), cells, on)}
 
     def _coverage_depth(self, sid: str, frame: Any) -> Any:
         """The depth grid for the coverage build, reusing the spatial view's if it is fresh.

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -252,3 +253,61 @@ def test_observe_accumulates_and_survives_a_reload() -> None:
     assert rows and rows[0][0] >= 1
     reloaded = CoverageField(cf.db, cf.config)
     assert sum(reloaded._mort(1).enter.values()) >= 1
+
+
+# ── regression: the honesty of what was claimed ─────────────────────────────────────────────
+
+def _shadowed_field() -> CoverageField:
+    cf = _field()
+    cf._shadows[1] = [{"id": 0, "polygon": [[0.3, 0.3], [0.6, 0.3], [0.6, 0.8], [0.3, 0.8]],
+                       "occluder": [0.4, 0.5, 0.08, 0.3], "z_near": 8.0, "z_far": 20.0,
+                       "height_m": 1.9, "persistent": True}]
+    return cf
+
+
+def test_lost_in_fog_uses_the_subjects_own_speed() -> None:
+    """The countdown was documented as 'derived from their own speed and the shadow's depth',
+    but the speed key was read and never written, so every subject silently got the same default
+    and a sprinter was given the same leash as someone dawdling."""
+    cf = _shadowed_field()
+    t = 1000.0
+    fast = [{"id": "TK_1.fast", "cls": "person", "bbox": [0.45, 0.30, 0.05, 0.10]}]
+    for i in range(6):                       # crossing quickly
+        fast[0]["bbox"] = [0.45, 0.30 + i * 0.06, 0.05, 0.10]
+        cf.observe(1, fast, t + i * 0.2)
+        cf.check_losses(1, fast, t + i * 0.2)
+    fast_rec = dict(cf._losses["TK_1.fast"])
+
+    cf2 = _shadowed_field()
+    slow = [{"id": "TK_1.slow", "cls": "person", "bbox": [0.45, 0.30, 0.05, 0.10]}]
+    for i in range(6):                       # barely moving
+        slow[0]["bbox"] = [0.45, 0.30 + i * 0.004, 0.05, 0.10]
+        cf2.observe(1, slow, t + i * 0.2)
+        cf2.check_losses(1, slow, t + i * 0.2)
+    slow_rec = dict(cf2._losses["TK_1.slow"])
+
+    fast_leash = fast_rec["expected_exit"] - fast_rec["entered"]
+    slow_leash = slow_rec["expected_exit"] - slow_rec["entered"]
+    assert slow_leash > fast_leash * 2, (
+        f"speed is being ignored: fast {fast_leash:.1f}s vs slow {slow_leash:.1f}s")
+
+
+def test_blind_spots_does_not_grow_a_row_every_time_it_is_asked() -> None:
+    """blind_spots() runs on every Smart Suggestions open. It matched stored rows only by a
+    loose centroid test, so a shadow that drifts (a van parked slightly differently) inserted a
+    fresh row each time and the table grew without bound."""
+    cf = _shadowed_field()
+    for _ in range(8):
+        cf.blind_spots(1)
+    rows = cf.db.query("SELECT COUNT(*) FROM blind_spots WHERE source_id = 1")[0][0]
+    assert rows <= 2, f"{rows} rows for one shadow"
+
+
+def test_a_recurring_blind_spot_has_its_last_seen_refreshed() -> None:
+    cf = _shadowed_field()
+    cf.blind_spots(1)
+    first = cf.db.query("SELECT id, last_seen FROM blind_spots WHERE source_id = 1")[0]
+    time.sleep(0.02)
+    cf.blind_spots(1)
+    again = cf.db.query("SELECT id, last_seen FROM blind_spots WHERE id = ?", (first[0],))[0]
+    assert again[1] > first[1], "a spot seen again must not look stale"

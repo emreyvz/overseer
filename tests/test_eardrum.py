@@ -439,3 +439,66 @@ def test_the_tap_is_inert_when_nothing_is_listening(scene: np.ndarray) -> None:
     assert bank.active is False
     bank.tap(_frame(scene), time.time())
     assert len(bank._ring) == 0
+
+
+# ── regression: the capture thread must never be disturbed ──────────────────────────────────
+
+def test_tap_snapshots_the_probe_set_before_iterating(scene: np.ndarray) -> None:
+    """tap() runs on the CAPTURE thread, where an exception breaks the video feed. It used to
+    iterate the probe dict with no lock while the API thread added and removed probes, which in
+    CPython raises 'dictionary changed size during iteration'.
+
+    Tested deterministically rather than by racing threads: a dict that mutates itself the moment
+    it is iterated reproduces the exact failure every time, where a real race reproduces it
+    perhaps one run in ten.
+    """
+    bank = _bank()
+    bank.open(1)
+    f = _frame(scene)
+    for i in range(3):
+        bank.add(1, [0.1 + i * 0.2, 0.2, 0.25, 0.25], f"P{i}", "probe", f)
+
+    # Model the real race precisely: the other thread mutates while tap() is inside its LOOP
+    # BODY, which is where a thread switch can land. (A dict whose own values() mutates it is
+    # not a thing that can happen, and would break a correct snapshot too.)
+    victim = next(iter(bank.probes.values()))
+
+    class _ProbeThatRacesYou:
+        """Reading this probe's first attribute is when the API thread adds another."""
+
+        def __init__(self, inner, owner) -> None:
+            self._inner, self._owner, self._fired = inner, owner, False
+
+        def __getattr__(self, name):
+            if not self._fired and name == "enabled":
+                self._fired = True
+                self._owner.probes[9_001] = self._inner    # add() from the API thread
+            return getattr(self._inner, name)
+
+    bank.probes[victim.id] = _ProbeThatRacesYou(victim, bank)
+    bank.tap(f, time.time())          # must not raise
+    assert len(bank._ring) == 1
+
+
+def test_playback_rate_matches_the_octave_shift_it_claims(scene: np.ndarray) -> None:
+    """The UI button says '+3 OCT'. np.repeat(x, 1) was a no-op and the rate was clamped to a
+    floor, so a 30 Hz series was actually played about eight octaves up."""
+    bank = _bank()
+    bank.open(1)
+    bank.add(1, [0.3, 0.3, 0.25, 0.25], "REF", "ref", _frame(scene))
+    p = list(bank.probes.values())[0]
+    for i in range(600):
+        p.ts.append(i / 30.0); p.dx.append(float(np.sin(i * 0.4) * 0.2)); p.dy.append(0.0)
+    seconds = 8.0
+    data, fs = bank.wave(p.id, seconds)
+    assert data and data[:4] == b"RIFF"
+    rate = int.from_bytes(data[24:28], "little")
+    assert rate >= 8000, "a rate below 8 kHz will not play in a browser"
+    # the shift is encoded in the DURATION: the clip must be OCTAVES_UP times shorter than the
+    # stretch of time it was captured over
+    n_samples = int.from_bytes(data[40:44], "little") // 2
+    captured_s = min(seconds, len(p.ts) / fs)
+    assert n_samples / rate == pytest.approx(captured_s / bank.OCTAVES_UP, rel=0.05), (
+        f"{n_samples / rate:.3f}s of audio for {captured_s:.3f}s of capture is "
+        f"{math.log2(max(1e-9, captured_s / (n_samples / rate))):.1f} octaves, not "
+        f"{math.log2(bank.OCTAVES_UP):.0f}")

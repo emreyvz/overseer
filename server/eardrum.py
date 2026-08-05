@@ -502,6 +502,11 @@ class ProbeBank:
     """Owns the probes, the capture-thread tap and the worker that turns pixels into spectra."""
 
     RING = 512
+    #: Playback speed-up for the reconstructed waveform, as a ratio. The structural band sits
+    #: below 15 Hz and is inaudible, so it is played faster to be heard; the UI states the same
+    #: number on the button, and the test holds the two together.
+    OCTAVES_UP = 8.0      # 3 octaves
+    PLAY_RATE = 8000      # a rate browsers will actually play
 
     def __init__(self, db: Any, config: Any) -> None:
         self.db = db
@@ -566,7 +571,10 @@ class ProbeBank:
         h, w = frame.shape[:2]
         size = int(self._cfg("roi", 64))
         rois: dict[int, np.ndarray] = {}
-        for p in self.probes.values():
+        # Snapshot the probe set before iterating. add() and remove() mutate this dict from the
+        # API thread, and iterating it live raises "dictionary changed size during iteration" on
+        # the ONE thread where an exception stops the video.
+        for p in list(self.probes.values()):
             if not p.enabled:
                 continue
             x = int(p.roi[0] * w)
@@ -896,9 +904,17 @@ class ProbeBank:
         x = detrend(vals[-n:])
         peak = float(np.max(np.abs(x))) or 1.0
         x = (x / peak * 0.85)
-        shift = 8                                     # 3 octaves, so the band becomes audible
-        out = np.repeat(x, 1).astype(np.float32)
-        rate = int(max(8000, min(48000, fs * shift * 20)))
+        # The pitch shift is how much faster the content plays than it was captured, and it has
+        # to be the shift the button claims. Writing `fs * OCTAVES_UP` as the sample rate would
+        # be arithmetically right and useless: a 240 Hz WAV does not play in a browser. So the
+        # rate is a normal 8 kHz and the DURATION is divided instead, which is the same shift and
+        # is actually audible. (It was previously clamped to an 8 kHz floor with no resampling,
+        # which played a 30 Hz series about eight octaves up while the UI said three.)
+        rate = self.PLAY_RATE
+        seconds_out = (x.size / max(_EPS, fs)) / self.OCTAVES_UP
+        n_out = max(8, int(round(seconds_out * rate)))
+        out = np.interp(np.linspace(0, x.size - 1, n_out),
+                        np.arange(x.size), x).astype(np.float32)
         pcm = (out * 32767).astype("<i2")
         import struct as _st
         data = pcm.tobytes()

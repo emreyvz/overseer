@@ -24,13 +24,22 @@ so the explanation IS the score rather than a story told about it afterwards.
 """
 from __future__ import annotations
 
+import bisect
 import json
 import math
 import struct
 import time
+from collections import deque
 from typing import Any, Callable, Iterable
 
 import numpy as np
+
+#: How many recent track scores are kept in memory per camera to estimate percentiles. Large
+#: enough that the distribution is stable, small enough that the sorted snapshot is trivial.
+SAMPLE = 4000
+#: Re-sort the snapshot only every N appends; sorting 4k floats is ~0.3 ms and this happens
+#: once per this many track closes.
+RESORT_EVERY = 64
 
 # Anything that describes what a subject LOOKS like, rather than what they DO. Presence of any
 # of these in a sample dict is a programming error, not a value to ignore quietly.
@@ -343,6 +352,15 @@ class GrainEngine:
         self._track_counts: dict[int, int] = {}
         self._dirty: set[tuple[int, int, int, int, str]] = set()
         self._last_flush = 0.0
+        # In-memory score distributions, per source. These used to be SQL scans of grain_track,
+        # which made every peek() linear in the size of the record: at 100k stored tracks, twenty
+        # subjects in frame measured 4.7 SECONDS of CPU per second of video. A percentile is a
+        # bisect into a sorted sample, so it belongs in memory.
+        self._scores: dict[int, deque] = {}                    # source -> recent track scores
+        self._raw: dict[int, dict[str, deque]] = {}            # source -> factor -> recent values
+        self._sorted: dict[int, list[float]] = {}              # cached sorted snapshots
+        self._sorted_raw: dict[int, dict[str, list[float]]] = {}
+        self._since_sort: dict[int, int] = {}
 
     def _cfg(self, key: str, default: Any) -> Any:
         try:
@@ -372,6 +390,28 @@ class GrainEngine:
             self._track_counts[int(source_id)] = int(row[0][0]) if row else 0
         except Exception:
             self._track_counts[int(source_id)] = 0
+        # Rebuild the score distributions ONCE, here. Without this the percentiles reset to 50
+        # after every restart and the calibration is silently un-learned.
+        try:
+            rows = self.db.query(
+                "SELECT score, factors FROM grain_track WHERE source_id = ?"
+                " ORDER BY id DESC LIMIT ?", (int(source_id), SAMPLE))
+            for score, blob in reversed(rows):
+                raw = {}
+                try:
+                    parsed = json.loads(blob)
+                    raw = parsed.get("raw") or {} if isinstance(parsed, dict) else {}
+                except Exception:
+                    raw = {}
+                self.remember(int(source_id), float(score), raw)
+        except Exception:
+            pass
+        try:
+            mrows = self.db.query("SELECT cell FROM grain_mute WHERE source_id = ?",
+                                  (int(source_id),))
+            self.muted[int(source_id)] = {int(r[0]) for r in mrows}
+        except Exception:
+            self.muted.setdefault(int(source_id), set())
 
     def flush(self, source_id: int) -> None:
         if not self._dirty:
@@ -557,22 +597,37 @@ class GrainEngine:
         total = sum(per.values())
         return {"score": total, "per_factor": per, "immature": immature / n, "steps": n}
 
+    # -- in-memory distributions -------------------------------------------------------------
+    def _sample(self, sid: int) -> list[float]:
+        """Sorted snapshot of recent scores, re-sorted only every RESORT_EVERY appends."""
+        n = self._since_sort.get(sid, 0)
+        if sid not in self._sorted or n >= RESORT_EVERY:
+            self._sorted[sid] = sorted(self._scores.get(sid, ()))
+            self._sorted_raw[sid] = {f: sorted(self._raw.get(sid, {}).get(f, ()))
+                                     for f in FACTORS}
+            self._since_sort[sid] = 0
+        return self._sorted[sid]
+
+    def remember(self, sid: int, score: float, raw: dict) -> None:
+        """Fold one finished track's score into the distribution the next one is judged against."""
+        self._scores.setdefault(sid, deque(maxlen=SAMPLE)).append(float(score))
+        bag = self._raw.setdefault(sid, {})
+        for f in FACTORS:
+            if f in raw:
+                bag.setdefault(f, deque(maxlen=SAMPLE)).append(float(raw[f]))
+        self._since_sort[sid] = self._since_sort.get(sid, 0) + 1
+
     def percentile(self, sid: int, score: float) -> float:
         """Where this score sits in the site's own distribution of scores.
 
         A raw log-likelihood is meaningless across sites; a percentile is comparable everywhere
-        and makes the sensitivity control mean the same thing on every camera.
+        and makes the sensitivity control mean the same thing on every camera. Read from the
+        in-memory sample, never from SQL: this runs on every peek, per subject.
         """
-        try:
-            rows = self.db.query(
-                "SELECT COUNT(*), SUM(CASE WHEN score < ? THEN 1 ELSE 0 END)"
-                " FROM grain_track WHERE source_id = ?", (float(score), int(sid)))
-        except Exception:
+        arr = self._sample(sid)
+        if len(arr) < 20:
             return 50.0
-        if not rows or not rows[0][0]:
-            return 50.0
-        total, below = int(rows[0][0]), int(rows[0][1] or 0)
-        return float(100.0 * below / max(1, total))
+        return float(100.0 * bisect.bisect_left(arr, float(score)) / len(arr))
 
     def mature(self, sid: int) -> bool:
         return self._track_counts.get(sid, 0) >= int(self._cfg("min_tracks", 2000))
@@ -621,6 +676,9 @@ class GrainEngine:
             self._track_counts[sid] = self._track_counts.get(sid, 0) + 1
         except Exception:
             pass
+        # Fold this track in AFTER it has been scored, so it was judged against the distribution
+        # that existed before it arrived.
+        self.remember(sid, float(scored["score"]), raw)
         return {
             "id": int(row_id), "det_id": det_id, "cls": cls,
             "start_ts": float(samples[0]["t"]) * 1000.0,
@@ -632,32 +690,21 @@ class GrainEngine:
     def _factor_pct(self, sid: int, factor: str, value: float) -> float:
         """Empirical percentile of one factor against its own history on this camera.
 
-        Compared against the RAW stored log-likelihoods, never against stored percentiles: a
-        percentile of a percentile drifts toward 50 and stops meaning anything.
+        Compared against the RAW log-likelihoods, never against stored percentiles: a percentile
+        of a percentile drifts toward 50 and stops meaning anything. Served from the same
+        in-memory sample as `percentile`, because this is called four times per track and used
+        to parse 800 JSON blobs each time.
         """
-        try:
-            rows = self.db.query(
-                "SELECT factors FROM grain_track WHERE source_id = ?"
-                " ORDER BY id DESC LIMIT 800", (int(sid),))
-        except Exception:
-            return 50.0
-        vals: list[float] = []
-        for (blob,) in rows:
-            try:
-                raw = json.loads(blob).get("raw") or {}
-                if factor in raw:
-                    vals.append(float(raw[factor]))
-            except Exception:
-                continue
-        if len(vals) < 20:
+        self._sample(sid)                     # refresh the snapshot if it is stale
+        arr = self._sorted_raw.get(sid, {}).get(factor) or []
+        if len(arr) < 20:
             return 50.0                      # too little history to place this factor honestly
-        arr = np.asarray(vals, np.float64)
         # A factor whose history has no spread carries no information here (nobody has ever
         # dwelled in this corridor, so "dwell" cannot rank anyone). Reporting 0 or 100 for it
         # would put a confident number on an empty distribution.
-        if float(arr.max() - arr.min()) < 1e-6:
+        if arr[-1] - arr[0] < 1e-6:
             return 50.0
-        return float(100.0 * float((arr < value).mean()))
+        return float(100.0 * bisect.bisect_left(arr, float(value)) / len(arr))
 
     @staticmethod
     def explain(factors: dict) -> str:
@@ -810,10 +857,31 @@ class GrainEngine:
                         (verdict, time.time(), int(track_id)))
         return {"ok": True}
 
-    def mute(self, sid: int, cells: Iterable[int]) -> list[int]:
+    def mute(self, sid: int, cells: Iterable[int], on: bool = True) -> list[int]:
+        """Paint cells in or out of scoring, and persist it.
+
+        Sets rather than toggles: a caller that sends the same list twice (a retry, an operator
+        command, a re-render) used to silently un-mute. Unmuting is an explicit `on=False`.
+        """
         s = self.muted.setdefault(int(sid), set())
+        now = time.time()
         for c in cells:
-            s.symmetric_difference_update({int(c)})
+            c = int(c)
+            if on:
+                s.add(c)
+                try:
+                    self.db.execute(
+                        "INSERT INTO grain_mute (source_id, cell, created_at) VALUES (?,?,?)"
+                        " ON CONFLICT(source_id, cell) DO NOTHING", (int(sid), c, now))
+                except Exception:
+                    pass
+            else:
+                s.discard(c)
+                try:
+                    self.db.execute("DELETE FROM grain_mute WHERE source_id = ? AND cell = ?",
+                                    (int(sid), c))
+                except Exception:
+                    pass
         return sorted(s)
 
 
