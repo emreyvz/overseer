@@ -24,6 +24,7 @@
     { label: 'SOURCES', key: 'C', mode: '', act: () => { pickerView.set('grid'); stage.set('select') } },
     { label: 'FORENSIC', key: 'A', mode: 'forensic', act: () => mode.set('forensic') },
     { label: 'CASES', key: 'K', mode: 'case', act: () => mode.set('case') },
+    { label: 'BEDROCK', key: 'B', mode: 'bedrock', act: () => mode.set('bedrock') },
     { label: 'WATCHLIST', key: 'W', mode: '', act: () => watchlistOpen.set(true) },
     { label: 'OPERATOR', key: 'I', mode: '', act: () => operatorOpen.set(true) },
     { label: 'SUGGEST', key: 'G', mode: '', act: () => suggestionsOpen.set(true) },

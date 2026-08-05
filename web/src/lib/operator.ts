@@ -11,9 +11,10 @@ import {
   rosterInit, modules, toggleModule, detections, alerts, timeline, timelineOpen, petRegistry,
   povZoom, muted, frame, system, narrateOn, followOn, xrayOn, enhanceMode, selectedDetection,
   flashBanner, triggerGlitch, coverage, coverageScreen, blindSpots, grainScreen, grainStatus,
-  divergences, dreamConsole, dreamStatus, type Mode,
+  divergences, dreamConsole, dreamStatus, bedrockQuery, bedrockResult, bedrockAsOf, type Mode,
 } from './stores'
 import { setFogTask } from './fog'
+import { runQuery as runBedrock } from './bedrock'
 import type { DoriTask } from './types'
 import { sendCommand } from './ws'
 import { SIM } from './sim'
@@ -757,6 +758,35 @@ export const ACTIONS: Record<string, Action> = {
     return `divergence threshold set to ${v.toFixed(1)} sigma`
   },
 
+  // ── BEDROCK ───────────────────────────────────────────────────────────────────────────────
+  bedrock_query: async ({ text }) => {
+    stage.set('live'); mode.set('bedrock')
+    const question = S(text)
+    if (!question) return 'opening bedrock'
+    if (SIM) return `asking bedrock: ${question}`
+    try {
+      const r = await api.aiBedrock(question)
+      if (!r.query) return r.say ?? 'I could not turn that into a query I can run'
+      bedrockQuery.set(r.query)
+      await runBedrock(r.query)
+      const res = get(bedrockResult)
+      return {
+        say: res ? `${res.entities.length} match${res.entities.length === 1 ? '' : 'es'} in the record` : 'query ran',
+        value: res?.entities.length ?? 0,
+      }
+    } catch { return 'bedrock is unreachable' }
+  },
+  bedrock_asof: async ({ when }) => {
+    // belief-time travel: "what did we know last Tuesday"
+    const ms = Number(when)
+    bedrockAsOf.set(Number.isFinite(ms) && ms > 0 ? ms : null)
+    stage.set('live'); mode.set('bedrock')
+    await runBedrock()
+    return ms > 0
+      ? `showing what the system believed on ${new Date(ms).toLocaleString()}`
+      : 'back to what the system believes now'
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -905,6 +935,9 @@ export function routeCommand(raw: string): Plan | null {
   // DREAMSTATE — "is anything off", "her şey normal mi"
   if (/(anything (odd|off|unusual|wrong)|her ?şey normal|bir ?şey var mı|divergence|sapma)/i.test(low)) return { steps: [{ action: 'anything_odd' }], border: 'nav' }
   if (/(dream ?state|rüya|beklenti modeli|expectation model)/i.test(low)) return { steps: [{ action: 'dreamstate', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  // BEDROCK — questions about the PAST go to the fact store, not to live detections
+  if (/(has .*(been here|come here) before|daha önce (geldi|burada)|ever been here|kaç kez geldi)/i.test(low)) return { steps: [{ action: 'bedrock_query', args: { text }  }], border: 'nav' }
+  if (/(bedrock|kayıt defteri|fact store|what did we (know|believe))/i.test(low)) return { steps: [{ action: 'bedrock_query', args: { text }  }], border: 'nav' }
   if (/(walkthrough|walk.?through|chronoscape|zaman yolcul|3d.*(gez|dolaş|walk|yürü)|içinde (gez|dolaş))/i.test(low)) return { steps: [{ action: 'walkthrough', args: {} }], border: 'nav' }
   if (/(enhance|netleştir|yakınlaş.*netleş|clarify|zoom.*enhance|büyüt.*netleş)/i.test(low)) return { steps: [{ action: 'enhance', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }

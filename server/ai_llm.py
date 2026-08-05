@@ -161,6 +161,11 @@ _OPERATOR_ACTIONS = (
     "dream_console {} — open the dream-versus-world comparator.\n"
     "dream_sensitivity {sigma} — set the divergence threshold, 3 (jumpy) to 8 (only the "
     "blatant). Default 5.\n"
+    "bedrock_query {text} — ask a question about the PAST against the fact store: has this "
+    "vehicle been here before, who was near it, what happened between two times. Use this for "
+    "any historical question; the live count actions only see what is on screen now.\n"
+    "bedrock_asof {when} — epoch ms; show what the system BELIEVED at that moment rather than "
+    "what it believes now ('what did we know on Tuesday'). 0 returns to now.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 
@@ -366,6 +371,60 @@ class LLMClient:
         sev = str(rule.get("severity") or "warning").lower()
         rule["severity"] = sev if sev in ("info", "warning", "critical") else "warning"
         return rule
+
+    def plan_bedrock(self, text: str, vocab: dict, now_ms: float) -> dict | None:
+        """Compile plain language into a BEDROCK query AST.
+
+        The model emits the AST, never SQL. That makes it validatable, retryable and
+        injection-free, and it means the operator sees their sentence rendered back as chips
+        before anything runs, so a wrong interpretation is corrected by editing a chip rather
+        than by re-prompting and hoping.
+        """
+        preds = "\n".join(
+            f"  {p['pred']} ({p['object']}) — {p['label'].lower()}" for p in vocab["predicates"])
+        prompt = (
+            "You translate an operator's question about the PAST of a video-surveillance site "
+            "into a typed query. Reply with ONLY the JSON object, no prose.\n\n"
+            "SHAPE:\n"
+            '{"select":"entity","where":[<clauses>],"window":{"from":<ms>,"to":<ms>},'
+            '"asOf":<ms|null>,"limit":200}\n\n'
+            "CLAUSES:\n"
+            '  {"t":"kind","kind":"person|vehicle|animal|object|zone|camera|event|alert|subject"}\n'
+            '  {"t":"pred","pred":"<predicate>","val":<string|number|[lo,hi]>,"op":">=|<=|=="}\n'
+            '  {"t":"count","pred":"<predicate>","op":">=|<=|==","n":<int>}\n'
+            '  {"t":"allen","rel":"before|after|during|overlaps|meets|starts|finishes",'
+            '"a":<clause index>,"b":<clause index>}\n'
+            '  {"t":"not","clause":<clause>}   (requires a window)\n\n'
+            f"PREDICATES (use ONLY these):\n{preds}\n\n"
+            "RULES:\n"
+            f"- Now is {int(now_ms)} in epoch milliseconds. Always set a window; default to the "
+            "last 24 hours unless the question names a period.\n"
+            "- 'has it been here before' / 'ever' means a WIDE window, not no window.\n"
+            "- 'what did we know then' / 'as of' sets asOf; otherwise leave it null.\n"
+            "- Colours, plates and vehicle types are `wore`, `has_plate`, `is_subtype`.\n"
+            "- 'who was with X' is co_present_with; 'near' is spatial proximity.\n"
+            "- If the question cannot be expressed with these predicates, return "
+            '{"where":[],"say":"<why, in one short sentence>"}.\n\n'
+            "Question: " + text)
+        out = self._json(self.chat(
+            prompt, system="You output only a strict JSON query object.", max_tokens=500))
+        if not isinstance(out, dict):
+            return None
+        where = out.get("where")
+        if not isinstance(where, list):
+            return None
+        valid = {p["pred"] for p in vocab["predicates"]}
+        kinds = set(vocab["kinds"])
+        for c in where:
+            if not isinstance(c, dict):
+                return None
+            if c.get("t") == "pred" and c.get("pred") not in valid:
+                return None
+            if c.get("t") == "kind" and c.get("kind") not in kinds:
+                return None
+        out.setdefault("select", "entity")
+        out.setdefault("limit", 200)
+        return out
 
     def plan_command(self, command: str, context: dict | None = None) -> dict | None:
         """AI Operator: turn a natural-language command into an ordered plan of system actions.

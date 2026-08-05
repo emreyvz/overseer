@@ -669,6 +669,77 @@ async def api_spatial_reel(sid: str, n: int = 28, grid: int = 256) -> Any:
     return await asyncio.to_thread(backend.spatial_reel, sid, n, grid)
 
 
+# -- BEDROCK: the past as a database, with provenance and two time axes ---------------------
+@app.post("/api/bedrock/query")
+async def api_bedrock_query(payload: dict) -> Any:
+    """Run a typed query AST. Never 5xx: a refusal comes back as {error, clause, hint} so the
+    UI can offer the fix rather than a stack trace."""
+    if backend is None:
+        return {"entities": [], "facts": [], "error": "backend_down"}
+    return await asyncio.to_thread(backend.bedrock_query, payload)
+
+
+@app.post("/api/ai/bedrock")
+async def api_ai_bedrock(payload: dict[str, str]) -> Any:
+    """Plain language into a BEDROCK query AST. The model never emits SQL, and the AST is
+    rendered back to the operator as chips before it runs."""
+    if backend is None or not backend.ai.enabled:
+        return {"query": None, "disabled": True}
+    vocab = await asyncio.to_thread(backend.bedrock_vocab)
+    q = await asyncio.to_thread(backend.ai.plan_bedrock, payload.get("text", ""), vocab,
+                                time.time() * 1000.0)
+    if q is None:
+        return {"query": None, "say": "I could not turn that into a query I can run."}
+    return {"query": q, "say": q.pop("say", None) if isinstance(q, dict) else None}
+
+
+@app.get("/api/bedrock/vocab")
+async def api_bedrock_vocab() -> Any:
+    """The closed predicate vocabulary the chip builder and the LLM planner may use."""
+    if backend is None:
+        return {"version": 0, "predicates": [], "kinds": []}
+    return await asyncio.to_thread(backend.bedrock_vocab)
+
+
+@app.get("/api/bedrock/stats")
+async def api_bedrock_stats() -> Any:
+    if backend is None:
+        return {"facts": 0, "entities": 0, "oldest": None,
+                "backfill": {"running": False, "done": 0, "total": 0, "phase": ""}}
+    return await asyncio.to_thread(backend.bedrock_stats)
+
+
+@app.post("/api/bedrock/backfill")
+async def api_bedrock_backfill() -> Any:
+    if backend is None:
+        return {"started": False}
+    return await asyncio.to_thread(backend.bedrock_backfill)
+
+
+@app.get("/api/bedrock/entity/{uid}")
+async def api_bedrock_entity(uid: int) -> Any:
+    """One entity, everything currently believed about it, and everything ever believed."""
+    if backend is None:
+        return {"entity": None, "current": [], "history": []}
+    return await asyncio.to_thread(backend.bedrock_entity, uid)
+
+
+@app.get("/api/bedrock/fact/{fact_id}/provenance")
+async def api_bedrock_provenance(fact_id: int) -> Any:
+    """Which model asserted this, from which frame, and what it replaced."""
+    if backend is None:
+        return {"fact": None, "lineage": []}
+    return await asyncio.to_thread(backend.bedrock_provenance, fact_id)
+
+
+@app.post("/api/bedrock/purge/{uid}")
+async def api_bedrock_purge(uid: int) -> Any:
+    """Hard erasure of one individual's entire record. Irreversible by design."""
+    if backend is None:
+        return {"facts": 0, "entities": 0, "snapshots": 0}
+    return await asyncio.to_thread(backend.bedrock_purge, uid)
+
+
 # -- DREAMSTATE: what this place normally looks like, and where reality departs from it ------
 @app.get("/api/dream/divergences")
 async def api_dream_divergences(sid: str | None = None, limit: int = 100) -> Any:

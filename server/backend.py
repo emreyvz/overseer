@@ -49,6 +49,7 @@ from vision.motion import MotionDetector
 from zones.monitor import ZoneMonitor
 from . import spatial, suggestions
 from .clipenc import encode_clip
+from .bedrock import BedrockError, FactStore, Projector, QueryCompiler, suggest as bd_suggest, vocabulary as bd_vocab
 from .coverage import CoverageField
 from .dreamstate import DreamEngine
 from .grain import GrainEngine
@@ -306,6 +307,15 @@ class Backend:
         self.dream = DreamEngine(self.db, self.config)
         self._last_dream_status = 0.0
 
+        # BEDROCK — a bitemporal projection of everything above, so the past can be queried as a
+        # database rather than as video. It is a PROJECTION, never the source of truth: if it is
+        # ever wrong it can be dropped and rebuilt from the tables it reads.
+        self.bd_store = FactStore(self.db)
+        self.bedrock = Projector(self.bd_store, self.config)
+        self.bd_query = QueryCompiler(self.bd_store)
+        self._last_bd = 0.0
+        self._bd_backfill: dict = {"running": False, "done": 0, "total": 0, "phase": "", "facts": 0}
+
         self._loop: Any = None
         self._broadcast: Broadcaster | None = None
         self._unsub = self.bus.subscribe(None, self._on_event)
@@ -332,6 +342,18 @@ class Backend:
                 clip = self._save_clip()
                 if clip:
                     d["clip"] = clip
+            # BEDROCK: every alert becomes a fact with its provenance, so an alert is queryable
+            # alongside everything else rather than living only in its own list. Point events go
+            # straight in; the debouncer is only for values that persist.
+            try:
+                self.bedrock.observe_alert(d, time.time())
+            except Exception:
+                log.debug("bedrock alert projection failed", exc_info=True)
+        elif msg.get("t") == "divergence" and isinstance(msg.get("d"), dict):
+            try:
+                self.bedrock.observe_divergence(msg["d"].get("cam", "?"), msg["d"], time.time())
+            except Exception:
+                log.debug("bedrock divergence projection failed", exc_info=True)
         if self._loop is None or self._broadcast is None:
             return
         try:
@@ -1591,6 +1613,15 @@ class Backend:
         self._observe_grain(dets, now)
         # DREAMSTATE — is this frame consistent with what this place normally does at this hour?
         self._observe_dream(img, dets, now)
+        # BEDROCK — project the pass into interval-compressed assertions. Runs at 2 Hz because
+        # the debouncer needs consecutive observations, not every one of them.
+        if now - self._last_bd > 0.5:
+            self._last_bd = now
+            try:
+                self.bedrock.observe_detections(
+                    self._source_name(self._source_id), self._source_id, dets, now)
+            except Exception:
+                log.debug("bedrock projection failed", exc_info=True)
         # Throttle the detections emit (~15 Hz) so it can never saturate the single event loop and
         # starve /stream. Boxes are interpolated client-side, so a lower cadence is invisible.
         if _enc_now - self._last_det_push > 0.066:
@@ -1764,6 +1795,74 @@ class Backend:
                 "klass": "WEAPON" if d.category == "weapon" else _CLS_KLASS.get(cls, "TRACKED"),
             })
         return out
+
+    # ---- BEDROCK ------------------------------------------------------
+    def bedrock_query(self, q: dict) -> dict:
+        """Run a typed query AST. Errors come back as structured data, never a 5xx, so the UI
+        can turn "too broad" into a one-click narrowing instead of a stack trace."""
+        try:
+            return self.bd_query.run(q)
+        except BedrockError as exc:
+            return {"entities": [], "facts": [], "truncated": False, "estimated": 0,
+                    "took_ms": 0.0, "as_of": q.get("asOf"),
+                    "window": q.get("window") or {"from": 0, "to": time.time() * 1000.0},
+                    "error": exc.message, "clause": exc.clause, "hint": exc.hint}
+        except Exception as exc:   # noqa: BLE001
+            log.exception("bedrock query failed")
+            return {"entities": [], "facts": [], "truncated": False, "estimated": 0,
+                    "took_ms": 0.0, "as_of": None,
+                    "window": {"from": 0, "to": time.time() * 1000.0}, "error": str(exc)}
+
+    def bedrock_entity(self, uid: int) -> dict:
+        ent = self.bd_store.get_entity(int(uid))
+        if ent is None:
+            return {"entity": None, "current": [], "history": []}
+        if ent.get("snapshot"):
+            ent["snapshot"] = self._subj_url(ent["snapshot"])
+        facts = self.bd_store.facts_for(int(uid))
+        for f in facts:
+            if f.get("snapshot"):
+                f["snapshot"] = self._subj_url(f["snapshot"])
+        current = [f for f in facts if f["tx_to"] is None and f["valid_to"] is None]
+        return {"entity": ent, "current": current, "history": facts}
+
+    def bedrock_provenance(self, fact_id: int) -> dict:
+        p = self.bd_store.provenance(int(fact_id))
+        if p.get("fact") and p["fact"].get("snapshot"):
+            p["fact"]["snapshot"] = self._subj_url(p["fact"]["snapshot"])
+            p["snapshot"] = p["fact"]["snapshot"]
+        return p
+
+    def bedrock_vocab(self) -> dict:
+        v = bd_vocab()
+        v["suggestions"] = bd_suggest(self.bd_store, 3)
+        return v
+
+    def bedrock_stats(self) -> dict:
+        s = self.bd_store.stats()
+        s["backfill"] = dict(self._bd_backfill)
+        return s
+
+    def bedrock_backfill(self) -> dict:
+        """Project the tables that already hold the history. Resumable, and reported: a first
+        run on a busy install has real work to do."""
+        if self._bd_backfill.get("running"):
+            return {"started": False}
+        self._bd_backfill = {"running": True, "done": 0, "total": 4, "phase": "", "facts": 0}
+
+        def _run() -> None:
+            try:
+                self.bedrock.backfill(self.db, self._bd_backfill)
+            except Exception:
+                log.exception("bedrock backfill failed")
+                self._bd_backfill["running"] = False
+        threading.Thread(target=_run, name="BedrockBackfill", daemon=True).start()
+        return {"started": True}
+
+    def bedrock_purge(self, uid: int) -> dict:
+        if not self.config.get("bedrock.purge_enabled", True):
+            return {"facts": 0, "entities": 0, "snapshots": 0, "reason": "disabled"}
+        return self.bd_store.purge_subject(int(uid))
 
     # ---- DREAMSTATE ---------------------------------------------------
     def _observe_dream(self, img: Any, dets: list[dict], now: float) -> None:
