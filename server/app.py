@@ -978,8 +978,9 @@ async def api_grain_mute(sid: str, payload: dict | None = None) -> Any:
     """Paint cells out of scoring (the doorway where staff always loiter)."""
     if backend is None:
         return {"muted": []}
-    cells = [int(c) for c in ((payload or {}).get("cells") or [])]
-    return await asyncio.to_thread(backend.grain_mute, sid, cells)
+    p = payload or {}
+    cells = [int(c) for c in (p.get("cells") or [])]
+    return await asyncio.to_thread(backend.grain_mute, sid, cells, bool(p.get("on", True)))
 
 
 # -- long-term identity: subjects / dossiers / reconstruction (features 5/6/7) --------------

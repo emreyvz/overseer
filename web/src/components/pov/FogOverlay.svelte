@@ -151,8 +151,16 @@
     const out: Loss[] = []
     for (const [id, l] of pending) {
       if (live.has(id)) continue
-      if (now - l.entered > 120000) { pending.delete(id); last.delete(id); continue }
+      if (now - l.entered > 120000) { pending.delete(id); continue }
       out.push(l)
+    }
+    // Prune the motion history for anyone no longer on screen and not being counted down.
+    // Track ids are unique per subject, so without this the map grows for the whole session:
+    // every person who ever walked past stays in memory forever.
+    if (last.size > 256) {
+      for (const [id, p] of last) {
+        if (!live.has(id) && !pending.has(id) && now - p.t > 30000) last.delete(id)
+      }
     }
     losses = out
   })

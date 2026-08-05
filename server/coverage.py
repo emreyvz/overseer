@@ -344,6 +344,10 @@ class CoverageField:
         self._last_flush = 0.0
         self._shadows: dict[int, list[dict]] = {}          # source_id -> latest shadow set
         self._losses: dict[str, dict] = {}                 # det_id -> live LOST IN FOG record
+        # det_id -> (last ny, last ts, smoothed |dny/dt|). The LOST IN FOG leash is derived from
+        # the subject's OWN speed, so it has to actually be measured; it used to read a key that
+        # was never written, which handed a sprinter and a dawdler the same countdown.
+        self._speed: dict[str, tuple[float, float, float]] = {}
         self._occ_hits: dict[int, dict[int, int]] = {}     # persistence accumulator per source
 
     # -- configuration helpers ---------------------------------------------------------------
@@ -394,8 +398,18 @@ class CoverageField:
                 continue
             nx = float(bbox[0]) + float(bbox[2]) / 2.0
             ny = min(0.999, float(bbox[1]) + float(bbox[3]))       # foot point
-            m.observe(str(d.get("id")), nx, ny, self.cell_of(nx, ny), now)
+            did = str(d.get("id"))
+            prev = self._speed.get(did)
+            if prev is not None:
+                dt = max(1e-3, now - prev[1])
+                v = abs(ny - prev[0]) / dt
+                self._speed[did] = (ny, now, prev[2] * 0.7 + v * 0.3)   # smoothed
+            else:
+                self._speed[did] = (ny, now, 0.05)
+            m.observe(did, nx, ny, self.cell_of(nx, ny), now)
         m.sweep(now)
+        if len(self._speed) > 512:            # a long session sees a lot of distinct track ids
+            self._speed = {k: v for k, v in self._speed.items() if now - v[1] < 30.0}
         if now - self._last_flush > 30.0:
             self._last_flush = now
             self.flush(int(source_id))
@@ -441,11 +455,9 @@ class CoverageField:
                 continue
             did = str(d.get("id"))
             seen.add(did)
-            if did in self._losses:
-                self._losses.pop(did, None)                # reappeared: nothing to report
-                continue
             nx = float(bbox[0]) + float(bbox[2]) / 2.0
             ny = min(0.999, float(bbox[1]) + float(bbox[3]))
+            inside = None
             for sh in shadows:
                 poly = sh.get("polygon") or []
                 if len(poly) < 4:
@@ -453,13 +465,26 @@ class CoverageField:
                 x0, y0 = poly[0][0], poly[0][1]
                 x1, y1 = poly[2][0], poly[2][1]
                 if x0 <= nx <= x1 and y0 <= ny <= y1:
-                    depth = max(0.02, abs(y1 - y0))
-                    speed = max(0.01, float(d.get("_ny_speed", 0.05)))
-                    self._losses[did] = {
-                        "det_id": did, "spot": int(sh.get("id", 0)), "entered": now,
-                        "expected_exit": now + (depth / speed) * tol, "overdue": False,
-                    }
+                    inside = sh
                     break
+            if inside is None:
+                # out in the open: nothing to count down
+                self._losses.pop(did, None)
+                continue
+            # Inside a shadow and still VISIBLE: arm the countdown, and keep the LEASH refreshed
+            # from the current speed while the entry time stays put. Two reasons this is not a
+            # one-shot: the record used to be popped and re-armed on alternate frames so a
+            # subject standing in cover flip-flopped, and at the instant of entry there is barely
+            # any speed history, so a one-shot leash would hand everyone the default.
+            depth = max(0.02, abs(inside["polygon"][2][1] - inside["polygon"][0][1]))
+            tracked = self._speed.get(did)
+            speed = max(0.005, tracked[2] if tracked else 0.05)
+            rec = self._losses.get(did)
+            if rec is None:
+                rec = {"det_id": did, "spot": int(inside.get("id", 0)), "entered": now,
+                       "overdue": False}
+                self._losses[did] = rec
+            rec["expected_exit"] = now + (depth / speed) * tol
         out: list[dict] = []
         for did, rec in list(self._losses.items()):
             if did in seen:
@@ -623,11 +648,20 @@ class CoverageField:
                 "remedies": _remedies(kind, name, area),
             })
         # live occlusion wedges that are not yet recorded
+        now_ts = time.time()
         for sh in self._shadows.get(int(source_id)) or []:
             if not sh.get("persistent"):
                 continue
             poly = sh["polygon"]
-            if any(_poly_close(poly, s["polygon"]) for s in out):
+            # A shadow that is already recorded gets its last_seen refreshed, NOT a second row.
+            # blind_spots() runs on every Smart Suggestions open, so inserting on every near-miss
+            # grew the table without bound and made a live spot look stale.
+            match = next((s for s in out if _poly_close(poly, s["polygon"])), None)
+            if match is not None:
+                if match["id"] > 0:
+                    self.db.execute("UPDATE blind_spots SET last_seen = ?, polygon = ? WHERE id = ?",
+                                    (now_ts, json.dumps(poly), int(match["id"])))
+                    match["last_seen"] = now_ts
                 continue
             name = _name_for(poly, gw, gh)
             area = _shadow_area(sh)

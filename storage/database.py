@@ -322,6 +322,14 @@ CREATE TABLE IF NOT EXISTS grain_track (
 );
 CREATE INDEX IF NOT EXISTS idx_grain_track ON grain_track(source_id, start_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_grain_pct ON grain_track(percentile);
+-- Cells the operator painted out of scoring (the doorway where staff always wait). A mute is a
+-- setting, not session state, so it has to outlive a restart.
+CREATE TABLE IF NOT EXISTS grain_mute (
+    source_id INTEGER NOT NULL,
+    cell INTEGER NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (source_id, cell)
+);
 
 -- EARDRUM: listening probes, their frozen baseline spectrum, and a per-minute trend row.
 CREATE TABLE IF NOT EXISTS probes (
