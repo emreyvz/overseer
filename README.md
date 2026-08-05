@@ -63,6 +63,26 @@ Capture a few seconds of the scene in 3D and replay it like a video you can fly 
 
 See the hidden social layer of a single camera: each person gets an attention cone showing where they are looking, and people who are interacting are linked as engaged, watching or approaching. Click a person to see only their connections.
 
+### Fog of war
+
+Every other part of overseer answers "what is there". This answers "what could be there that you would never know about". Occluded ground, ground too far away to identify anyone on, regions too dark or blurred to use, and the places where tracks keep quietly dying, all drawn as static over the feed and as solid black volumes you can orbit around in 3D. Coverage is reported as a percentage against the EN 62676-4 (DORI) standard, so "is this camera good enough" finally has a number, and a blind spot arrives with a ranked list of what would fix it.
+
+### Dreamstate
+
+The camera learns what this place normally looks like at this hour and marks anything that departs from it, in calibrated sigma. It is not looking for a list of things: it has no idea what a pallet is, only that a wall which has been empty for three weeks is not empty now. Open the console and a draggable wipe puts what the camera remembers next to what is there now, with the difference outlined on both. It reports divergence, never a threat, because it genuinely cannot tell you what happened.
+
+### Grain
+
+Every site has an unwritten choreography: which way people go here, how fast, where they pause. Grain learns it from your own footage and draws it as a slow current across the ground, then gives each person a quiet ring showing how ordinary their movement is for this place. Someone doing individually innocuous things in an arrangement this place has never seen becomes visible. It scores movement only, never appearance, and when it has not seen a spot often enough it says so instead of guessing.
+
+### Eardrum
+
+A camera with no microphone, listening. Drag a box onto a textured surface and overseer reads its vibration from sub-pixel motion in the pixels: machinery imbalance, structural resonance, an impact, a door slamming. Freeze a baseline and a bearing that starts to drift months later shows up as a peak that moved. The measured noise floor is drawn across every spectrum, so you never read something that was not really there.
+
+### Bedrock
+
+The past as a database rather than as video. Every observation becomes a fact carrying its provenance and two independent clocks: when it was true, and when the system came to believe it. Ask questions nobody indexed for, see the answer as a timeline of everything that was true and for how long, and rewind the second clock to see exactly what was knowable at the time. Corrections never delete, so what you used to believe stays visible with a line through it.
+
 ### Forensic search
 
 ![Forensic search](demo/forensic_search.png)

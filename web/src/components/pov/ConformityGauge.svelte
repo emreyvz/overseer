@@ -28,12 +28,19 @@
   const scored = $derived($detections.filter((d) => d.conformity && !d.coasting))
   const opened = $derived(scored.find((d) => d.id === openFor) ?? null)
 
-  // a short foot-point trail, kept here rather than borrowed so the tick can sit on the exact
-  // step the model disliked
+  // A short foot-point trail, kept here rather than borrowed from foresight so the tick can sit
+  // on the exact step the model disliked.
+  //
+  // The accumulator is a plain Map, NOT $state, and the effect publishes a fresh array rather
+  // than incrementing a counter. An effect that both reads and writes the same $state (which a
+  // `tick++` does) re-triggers itself forever; Svelte catches it as effect_update_depth_exceeded
+  // and the whole overlay dies.
   const trails = new Map<string, [number, number][]>()
-  let trailTick = $state(0)
+  let trailList = $state<{ id: string; pts: [number, number][]; tone: string }[]>([])
+
   $effect(() => {
-    for (const d of $detections) {
+    const dets = $detections
+    for (const d of dets) {
       if (!d.conformity) continue
       const p: [number, number] = [d.bbox[0] + d.bbox[2] / 2, Math.min(0.999, d.bbox[1] + d.bbox[3])]
       const t = trails.get(d.id) ?? []
@@ -44,9 +51,11 @@
         trails.set(d.id, t)
       }
     }
-    const live = new Set($detections.map((d) => d.id))
+    const live = new Map(dets.map((d) => [d.id, d]))
     for (const id of [...trails.keys()]) if (!live.has(id)) trails.delete(id)
-    trailTick++
+    trailList = [...trails]
+      .filter(([, pts]) => pts.length > 2)
+      .map(([id, pts]) => ({ id, pts, tone: tone(live.get(id)!) }))
   })
 
   const arc = (p: number) => C * Math.max(0.04, Math.min(1, p / 100))
@@ -96,14 +105,9 @@
 <div class="cg">
   <!-- trails: ordinary in ink-dim, the disliked segment in scarlet -->
   <svg class="trails" viewBox="0 0 100 100" preserveAspectRatio="none">
-    {#key trailTick}
-      {#each scored as d (d.id)}
-        {@const t = trails.get(d.id) ?? []}
-        {#if t.length > 2}
-          <polyline class="trail t-{tone(d)}" points={polyline(t)} />
-        {/if}
-      {/each}
-    {/key}
+    {#each trailList as t (t.id)}
+      <polyline class="trail t-{t.tone}" points={polyline(t.pts)} />
+    {/each}
     {#if hoverPrec}
       <polyline class="ghost" points={polyline(hoverPrec.path as [number, number][])} />
     {/if}

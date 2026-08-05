@@ -4,7 +4,7 @@
 // what the console needs on demand: the pulse history, the divergence ledger, and the SIM
 // fixtures that let the whole thing be built and screenshotted with no backend.
 import { get } from 'svelte/store'
-import { activeCam, divergences, dreamStatus } from './stores'
+import { activeCam, divergences, dreamStatus, modules } from './stores'
 import { api } from './api'
 import type { Divergence, DreamPulse, DreamStatus } from './types'
 import { SIM } from './sim'
@@ -32,6 +32,21 @@ export async function loadDream(hours = 24): Promise<{ pulse: DreamPulse[] }> {
 export function seedDreamSim() {
   const cam = get(activeCam)
   if (SIM && cam) { dreamStatus.set(simStatus(cam)); divergences.set(simDivergences()) }
+}
+
+/** Start/stop with the module toggle, mirroring the fog and grain engines.
+ *
+ *  In production the live field arrives over the WS and this is a no-op; in SIM it seeds the
+ *  fixture, without which the veil and the ribbon can never be seen in development at all. */
+export function startDreamEngine() {
+  modules.subscribe(() => {
+    const on = !!get(modules).find((m) => m.key === 'dream')?.on
+    if (on) seedDreamSim()
+    else if (SIM) { dreamStatus.set(null); divergences.set([]) }
+  })
+  activeCam.subscribe(() => {
+    if (get(modules).find((m) => m.key === 'dream')?.on) seedDreamSim()
+  })
 }
 
 /** How many times a given threshold WOULD have fired over the loaded pulse.

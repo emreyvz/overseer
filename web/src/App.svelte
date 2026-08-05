@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
     selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, enhanceResult, hydrateAlerts, hydrateModules, toggleModule,
-    dreamConsole, coverageScreen, grainScreen, eardrumDrawer, listenPlacing, type Mode,
+    dreamConsole, coverageScreen, grainScreen, eardrumDrawer, listenPlacing, modules, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
@@ -12,6 +13,7 @@
   import { startAnomalyEngine } from './lib/anomaly'
   import { startFogEngine } from './lib/fog'
   import { startGrainEngine } from './lib/grain'
+  import { startDreamEngine } from './lib/dreamstate'
   import { refreshAiStatus, aiStatus } from './lib/ai'
   import { LEX } from './lib/lexicon'
   import type { Camera } from './lib/types'
@@ -52,13 +54,36 @@
 
   const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case', b: 'bedrock' }
 
-  onMount(() => { startZoneEngine(); startAnomalyEngine(); startFogEngine(); startGrainEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts(); hydrateModules() }
+  onMount(() => { startZoneEngine(); startAnomalyEngine(); startFogEngine(); startGrainEngine(); startDreamEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts(); hydrateModules() }
     if (SIM && location.search.includes('shot=')) {   // dev-only screenshot hook (SIM + ?shot=; inert in prod), see scripts/shot_capture.cjs
       aiStatus.set({ enabled: true, provider: 'glm', base: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-4.6', vision_model: 'glm-4.6v', vision: true, features: {} } as any)
       const shot = new URLSearchParams(location.search).get('shot')
       if (shot === 'grid') { pickerView.set('grid'); stage.set('select') }
       if (shot === 'live') { stage.set('live'); mode.set('pov'); activeCam.set('1') }
-      operatorOpen.set(true)
+      // PERCEPTION suite targets, so every new surface can be rendered headlessly and any
+      // runtime error surfaces as a PAGE-ERR in the capture log. Typechecking cannot catch
+      // a component that throws on mount.
+      // Idempotent: Electron reuses its user-data dir between capture runs, so a plain toggle
+      // would flip the module back OFF on the second run and screenshot nothing.
+      const on = (key: string) => { if (!get(modules).find((m) => m.key === key)?.on) toggleModule(key) }
+      const PERCEPTION: Record<string, () => void> = {
+        fog: () => on('unseen'),
+        coverage: () => { on('unseen'); coverageScreen.set(true) },
+        grain: () => on('grain'),
+        grainscreen: () => { on('grain'); grainScreen.set(true) },
+        dream: () => on('dream'),
+        dreamconsole: () => { on('dream'); dreamConsole.set('live') },
+        eardrum: () => { on('listen'); eardrumDrawer.set(true) },
+        probes: () => { on('listen'); listenPlacing.set(true) },
+        bedrock: () => { mode.set('bedrock') },
+      }
+      const target = shot ? PERCEPTION[shot] : undefined
+      if (target) {
+        stage.set('live'); mode.set('pov'); activeCam.set('1')
+        setTimeout(target, 400)
+      } else {
+        operatorOpen.set(true)
+      }
     }
   })
 
