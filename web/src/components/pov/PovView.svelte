@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen, spatialOpen, modules } from '../../lib/stores'
+  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen, spatialOpen, modules, listenPlacing } from '../../lib/stores'
   import { SIM } from '../../lib/sim'
   import { LEX } from '../../lib/lexicon'
   import { api } from '../../lib/api'
@@ -14,6 +14,7 @@
   import FogOverlay from './FogOverlay.svelte'
   import GhostLayer from './GhostLayer.svelte'
   import GrainField from './GrainField.svelte'
+  import ListenProbes from './ListenProbes.svelte'
   import SocialXray from './SocialXray.svelte'
   import TacticalMap from './TacticalMap.svelte'
   import MatchHighlight from './MatchHighlight.svelte'
@@ -39,6 +40,8 @@
   let unseenOn = $derived(!!$modules.find((m) => m.key === 'unseen')?.on)
   let grainOn = $derived(!!$modules.find((m) => m.key === 'grain')?.on)
   let dreamOn = $derived(!!$modules.find((m) => m.key === 'dream')?.on)
+  // EARDRUM brackets stay visible whenever listening is on OR the operator is placing probes
+  let listenOn = $derived(!!$modules.find((m) => m.key === 'listen')?.on || $listenPlacing)
   let showOverlays = $derived((live && !failed) || SIM)
 
   // 3D fly-between: the old feed zooms out and banks away in perspective while the
@@ -134,6 +137,7 @@
     <MatchHighlight />
   </div>
 
+  {#if listenOn && showOverlays}<ListenProbes />{/if}
   {#if dreamOn && showOverlays}<DreamRibbon />{/if}
   {#if tacticalOn && showOverlays}<TacticalMap />{/if}
 

@@ -52,6 +52,7 @@ from .clipenc import encode_clip
 from .bedrock import BedrockError, FactStore, Projector, QueryCompiler, suggest as bd_suggest, vocabulary as bd_vocab
 from .coverage import CoverageField
 from .dreamstate import DreamEngine
+from .eardrum import ProbeBank, line_rate_from_flicker
 from .grain import GrainEngine
 from .media import MediaLibrary
 from .ooi import OOIManager
@@ -316,6 +317,11 @@ class Backend:
         self._last_bd = 0.0
         self._bd_backfill: dict = {"running": False, "done": 0, "total": 0, "phase": "", "facts": 0}
 
+        # EARDRUM — sub-pixel surface motion as a vibration channel. Reads the RAW capture frame
+        # (see _tap_frame); everything expensive runs on its own worker thread.
+        self.ear = ProbeBank(self.db, self.config)
+        self._last_probe_push = 0.0
+
         self._loop: Any = None
         self._broadcast: Broadcaster | None = None
         self._unsub = self.bus.subscribe(None, self._on_event)
@@ -453,6 +459,13 @@ class Backend:
             # Warm the pose model off-thread so the first pose pass (facing / Social X-ray / gait /
             # hand-raise) does not stall the analysis worker for seconds on its lazy first load.
             threading.Thread(target=self.pose_kp.warmup, name="PoseWarm", daemon=True).start()
+            # Load this camera's listening probes and start the EARDRUM worker. `active` stays
+            # False until a probe actually exists, so an unlistened camera costs one attribute
+            # read per captured frame and nothing else.
+            try:
+                self.ear.open(source_id)
+            except Exception:
+                log.debug("eardrum open failed", exc_info=True)
             self._health = HealthMonitor(freeze_timeout=float(self.config.get("camera.freeze_timeout", 10.0)))
             self._plugins = PluginManager()
             self._motion_det = MotionDetector(self.config)
@@ -1419,6 +1432,12 @@ class Backend:
         stuttering at the analysis rate. Boxes are streamed separately and interpolated client-side."""
         self._latest_raw = frame.image
         self._raw_seq += 1
+        # EARDRUM listens here and NOWHERE else: JPEG quantisation destroys the sub-pixel
+        # surface motion this reads, so the probes must see the raw frame before any encoding.
+        # The off path is a single attribute lookup, because this is the one slot in the whole
+        # perception suite where a slow line becomes visible stutter.
+        if self.ear.active:
+            self.ear.tap(frame.image, time.time())
 
     def _display_encoder_loop(self) -> None:
         """Encode the newest raw frame to JPEG at a steady 30 fps, off the capture and analysis threads.
@@ -1613,6 +1632,8 @@ class Backend:
         self._observe_grain(dets, now)
         # DREAMSTATE — is this frame consistent with what this place normally does at this hour?
         self._observe_dream(img, dets, now)
+        # EARDRUM — publish the probes' spectra (the DSP itself runs on its own worker thread).
+        self._push_probes(now)
         # BEDROCK — project the pass into interval-compressed assertions. Runs at 2 Hz because
         # the debouncer needs consecutive observations, not every one of them.
         if now - self._last_bd > 0.5:
@@ -1795,6 +1816,79 @@ class Backend:
                 "klass": "WEAPON" if d.category == "weapon" else _CLS_KLASS.get(cls, "TRACKED"),
             })
         return out
+
+    # ---- EARDRUM ------------------------------------------------------
+    def _push_probes(self, now: float) -> None:
+        """Publish each probe's newest spectral frame at ~4 Hz over the existing socket."""
+        if not self.ear.active or now - self._last_probe_push < 0.25:
+            return
+        self._last_probe_push = now
+        try:
+            for pid in list(self.ear.probes):
+                fr = self.ear.frame(pid)
+                if fr is not None:
+                    self._emit({"t": "probe", "d": fr})
+            self.ear.record_history(now)
+        except Exception:
+            log.debug("eardrum push failed", exc_info=True)
+
+    def probes_list(self, sid: str) -> dict:
+        return {"probes": [p.public() for p in self.ear.probes.values()]}
+
+    def probe_add(self, sid: str, roi: list, name: str | None, kind: str | None) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"probe": None, "reason": "no_source"}
+        if self.ear.source_id != int(src.id):
+            self.ear.open(int(src.id))
+        frame = self._source_frame(src)
+        return self.ear.add(int(src.id), list(roi), name, str(kind or "probe"), frame)
+
+    def probe_update(self, pid: int, patch: dict) -> dict:
+        return self.ear.update(int(pid), patch)
+
+    def probe_delete(self, pid: int) -> dict:
+        return self.ear.remove(int(pid))
+
+    def probe_spectrum(self, pid: int) -> dict:
+        return {"spectrum": self.ear.spectrum_full(int(pid))}
+
+    def probe_trend(self, pid: int, hours: int = 168) -> dict:
+        return {"trend": self.ear.trend(int(pid), hours)}
+
+    def probe_baseline(self, pid: int) -> dict:
+        return self.ear.set_baseline(int(pid))
+
+    def probe_wave(self, pid: int, seconds: float = 8.0) -> bytes | None:
+        data, _fs = self.ear.wave(int(pid), seconds)
+        return data
+
+    def eardrum_suggest(self, sid: str, n: int = 5) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"candidates": []}
+        return {"candidates": self.ear.suggest(self._source_frame(src), int(n))}
+
+    def eardrum_modal(self, sid: str) -> dict:
+        return self.ear.modal_analysis()
+
+    def eardrum_calibrate(self, sid: str) -> dict:
+        """Solve the rolling-shutter line rate from mains flicker.
+
+        Enabling the acoustic band is logged every time, because unlike the structural band it
+        can approach speech bandwidth and that is a different legal question in most places.
+        """
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"ok": False, "reason": "no_source"}
+        frame = self._source_frame(src)
+        if frame is None:
+            return {"ok": False, "reason": "no_frame"}
+        res = line_rate_from_flicker(frame, float(self.ear.fps))
+        if res.get("ok"):
+            log.info("eardrum: acoustic band calibrated on source %s (mains %.0f Hz, line rate %.0f)",
+                     sid, res.get("mains", 0), res.get("line_rate", 0))
+        return res
 
     # ---- BEDROCK ------------------------------------------------------
     def bedrock_query(self, q: dict) -> dict:

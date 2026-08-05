@@ -169,14 +169,19 @@ export interface Probe {
   texture: number              // Shi-Tomasi min-eigenvalue score at placement, [0,1]
   baseline?: boolean           // a baseline spectrum has been captured
 }
-export interface ProbePeak { hz: number; db: number; prominence: number; is_new?: boolean; shift?: number }
+export interface ProbePeak {
+  hz: number; db: number; prominence: number
+  is_new?: boolean          // absent from the frozen baseline
+  shift?: number            // Hz drift vs baseline; a fall is the stiffness-loss signature
+  rise?: number             // dB growth vs baseline
+}
 export interface ProbeFrame {
   id: number
   rms: number                  // current displacement RMS, px
   db: number                   // dB vs baseline (0 when no baseline)
   snr: number
   peaks: ProbePeak[]
-  col: string                  // newest spectrogram column, base64 uint8
+  col: string                  // newest spectrogram column, hex-encoded uint8 (128 bins)
   wave: number[]               // newest waveform chunk (decimated) for the micro-scope
   saturated?: boolean          // common-mode reference lost / camera moving
 }

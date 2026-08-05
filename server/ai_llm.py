@@ -30,6 +30,10 @@ _RULE_EVENTS = [
     "RUNNING", "STOPPED", "U_TURN", "WRONG_DIRECTION", "TAILGATING", "QUEUE", "FALLING",
     "CROWDING", "FIGHTING", "ABANDONED_OBJECT", "REMOVED_OBJECT",
     "DEFOCUS", "OBSTRUCTION", "CAMERA_MOVED", "ANOMALY",
+    # PERCEPTION suite events: they flow through the SAME alert engine, storage, cases and
+    # alerts board as everything above, so a rule on a vibration peak needs no new plumbing.
+    "DIVERGENCE", "UNUSUAL_BEHAVIOUR", "LOST_IN_FOG",
+    "VIBRATION_PEAK", "VIBRATION_RMS", "IMPACT", "MODAL_SHIFT",
 ]
 
 DEFAULT_FEATURES: dict[str, bool] = {
@@ -166,6 +170,12 @@ _OPERATOR_ACTIONS = (
     "any historical question; the live count actions only see what is on screen now.\n"
     "bedrock_asof {when} — epoch ms; show what the system BELIEVED at that moment rather than "
     "what it believes now ('what did we know on Tuesday'). 0 returns to now.\n"
+    "listen {on} — EARDRUM: enter probe placement so the operator can drag a box onto a surface "
+    "and read its VIBRATION from sub-pixel motion. The camera has no microphone; this is "
+    "recovered from pixels and cannot carry speech.\n"
+    "probe_status {} — are any listening probes above their baseline, by how much, and at what "
+    "frequency. Use for 'does that machine sound wrong', 'titresim var mi'.\n"
+    "set_baseline {} — freeze today's spectrum as the reference future readings compare against.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 

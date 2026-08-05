@@ -669,6 +669,99 @@ async def api_spatial_reel(sid: str, n: int = 28, grid: int = 256) -> Any:
     return await asyncio.to_thread(backend.spatial_reel, sid, n, grid)
 
 
+# -- EARDRUM: sub-pixel surface motion as a vibration channel -------------------------------
+@app.get("/api/probes/{sid}")
+async def api_probes(sid: str) -> Any:
+    if backend is None:
+        return {"probes": []}
+    return await asyncio.to_thread(backend.probes_list, sid)
+
+
+@app.post("/api/probes/{sid}")
+async def api_probe_add(sid: str, payload: dict) -> Any:
+    """Place a listening probe. Refused with a reason when the surface has no texture to track."""
+    if backend is None:
+        return {"probe": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.probe_add, sid, payload.get("roi") or [],
+                                   payload.get("name"), payload.get("kind"))
+
+
+@app.put("/api/probes/{pid}")
+async def api_probe_update(pid: int, payload: dict) -> Any:
+    if backend is None:
+        return {"probe": None}
+    return await asyncio.to_thread(backend.probe_update, pid, payload)
+
+
+@app.delete("/api/probes/{pid}")
+async def api_probe_delete(pid: int) -> Any:
+    if backend is None:
+        return {"ok": False}
+    return await asyncio.to_thread(backend.probe_delete, pid)
+
+
+@app.get("/api/probes/{pid}/spectrum")
+async def api_probe_spectrum(pid: int) -> Any:
+    """The averaged spectrum, its measured noise floor, the peaks and the machinery hypothesis."""
+    if backend is None:
+        return {"spectrum": None}
+    return await asyncio.to_thread(backend.probe_spectrum, pid)
+
+
+@app.get("/api/probes/{pid}/trend")
+async def api_probe_trend(pid: int, hours: int = 168) -> Any:
+    if backend is None:
+        return {"trend": []}
+    return await asyncio.to_thread(backend.probe_trend, pid, hours)
+
+
+@app.post("/api/probes/{pid}/baseline")
+async def api_probe_baseline(pid: int) -> Any:
+    """Freeze today's spectrum as the reference every later reading is compared against."""
+    if backend is None:
+        return {"ok": False}
+    return await asyncio.to_thread(backend.probe_baseline, pid)
+
+
+@app.get("/api/probes/{pid}/wave")
+async def api_probe_wave(pid: int, seconds: float = 8.0) -> Response:
+    """A band-limited WAV of the recovered displacement. Not an audio recording: the structural
+    band cannot carry intelligible speech, and that is enforced in code."""
+    if backend is None:
+        return Response(status_code=503)
+    data = await asyncio.to_thread(backend.probe_wave, pid, seconds)
+    if not data:
+        return Response(status_code=204)
+    return Response(content=data, media_type="audio/wav",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/eardrum/{sid}/suggest")
+async def api_eardrum_suggest(sid: str, payload: dict | None = None) -> Any:
+    """Rank candidate ROIs by trackability. An operator cannot see texture, and a probe on a
+    blank wall returns noise forever without ever saying so."""
+    if backend is None:
+        return {"candidates": []}
+    return await asyncio.to_thread(backend.eardrum_suggest, sid, int((payload or {}).get("n", 5)))
+
+
+@app.get("/api/eardrum/{sid}/modal")
+async def api_eardrum_modal(sid: str) -> Any:
+    """Natural frequencies, damping and mode shapes across three or more probes."""
+    if backend is None:
+        return {"modes": [], "reason": "backend_down"}
+    return await asyncio.to_thread(backend.eardrum_modal, sid)
+
+
+@app.post("/api/eardrum/{sid}/calibrate")
+async def api_eardrum_calibrate(sid: str) -> Any:
+    """Solve the rolling-shutter line rate from mains flicker, so the acoustic band becomes
+    available. Fails honestly when the scene has no flicker."""
+    if backend is None:
+        return {"ok": False, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.eardrum_calibrate, sid)
+
+
 # -- BEDROCK: the past as a database, with provenance and two time axes ---------------------
 @app.post("/api/bedrock/query")
 async def api_bedrock_query(payload: dict) -> Any:

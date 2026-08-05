@@ -45,6 +45,7 @@
   import CoverageScreen from './components/coverage/CoverageScreen.svelte'
   import GrainScreen from './components/grain/GrainScreen.svelte'
   import DreamstateConsole from './components/dreamstate/DreamstateConsole.svelte'
+  import EardrumDrawer from './components/eardrum/EardrumDrawer.svelte'
   // SpatialView pulls in three.js (~450 kB) — lazy-load it so the main bundle stays lean and
   // the 3D engine only loads when the operator actually opens the spatial view.
   const SpatialView = () => import('./components/spatial/SpatialView.svelte')
@@ -244,6 +245,7 @@
 {#if $coverageScreen}<CoverageScreen onclose={() => coverageScreen.set(false)} />{/if}
 {#if $grainScreen}<GrainScreen onclose={() => grainScreen.set(false)} />{/if}
 {#if $dreamConsole !== null}<DreamstateConsole open={$dreamConsole} onclose={() => dreamConsole.set(null)} />{/if}
+{#if $eardrumDrawer && $stage === 'live'}<EardrumDrawer onclose={() => eardrumDrawer.set(false)} />{/if}
 <OperatorBorder />
 {#if $spatialOpen}
   {#await SpatialView() then M}
