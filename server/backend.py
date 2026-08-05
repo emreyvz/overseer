@@ -49,6 +49,11 @@ from vision.motion import MotionDetector
 from zones.monitor import ZoneMonitor
 from . import spatial, suggestions
 from .clipenc import encode_clip
+from .bedrock import BedrockError, FactStore, Projector, QueryCompiler, suggest as bd_suggest, vocabulary as bd_vocab
+from .coverage import CoverageField
+from .dreamstate import DreamEngine
+from .eardrum import ProbeBank, line_rate_from_flicker
+from .grain import GrainEngine
 from .media import MediaLibrary
 from .ooi import OOIManager
 from .pose_kp import PoseKP
@@ -285,6 +290,38 @@ class Backend:
         self._bg_plate_n = 0             # frames accumulated (plate is only trusted once warmed up)
         self._last_frame_push = 0.0
 
+        # FOG OF WAR — the observability field. `observe` is two dict updates per track on the
+        # analysis worker; the expensive geometry only runs when the operator asks for it, and
+        # reuses the depth grid the spatial view already produced rather than inferring again.
+        self.coverage = CoverageField(self.db, self.config)
+        self._depth_cache: tuple[str, Any, float] | None = None   # (sid, disp01, ts)
+        self._last_loss_check = 0.0
+
+        # GRAIN — the behavioural grain of the place. Movement only, never appearance. Wired to
+        # FOG OF WAR so a track that ends inside a known shadow is not scored as a
+        # disappearance: without that link both features generate noise.
+        self.grain = GrainEngine(self.db, self.config, occluded=self._grain_occluded)
+
+        # DREAMSTATE — what this place normally looks like at this hour, and where reality
+        # departs from it. Feeds off the background plate maintained just above, so the most
+        # informative channel costs nothing extra.
+        self.dream = DreamEngine(self.db, self.config)
+        self._last_dream_status = 0.0
+
+        # BEDROCK — a bitemporal projection of everything above, so the past can be queried as a
+        # database rather than as video. It is a PROJECTION, never the source of truth: if it is
+        # ever wrong it can be dropped and rebuilt from the tables it reads.
+        self.bd_store = FactStore(self.db)
+        self.bedrock = Projector(self.bd_store, self.config)
+        self.bd_query = QueryCompiler(self.bd_store)
+        self._last_bd = 0.0
+        self._bd_backfill: dict = {"running": False, "done": 0, "total": 0, "phase": "", "facts": 0}
+
+        # EARDRUM — sub-pixel surface motion as a vibration channel. Reads the RAW capture frame
+        # (see _tap_frame); everything expensive runs on its own worker thread.
+        self.ear = ProbeBank(self.db, self.config)
+        self._last_probe_push = 0.0
+
         self._loop: Any = None
         self._broadcast: Broadcaster | None = None
         self._unsub = self.bus.subscribe(None, self._on_event)
@@ -311,6 +348,18 @@ class Backend:
                 clip = self._save_clip()
                 if clip:
                     d["clip"] = clip
+            # BEDROCK: every alert becomes a fact with its provenance, so an alert is queryable
+            # alongside everything else rather than living only in its own list. Point events go
+            # straight in; the debouncer is only for values that persist.
+            try:
+                self.bedrock.observe_alert(d, time.time())
+            except Exception:
+                log.debug("bedrock alert projection failed", exc_info=True)
+        elif msg.get("t") == "divergence" and isinstance(msg.get("d"), dict):
+            try:
+                self.bedrock.observe_divergence(msg["d"].get("cam", "?"), msg["d"], time.time())
+            except Exception:
+                log.debug("bedrock divergence projection failed", exc_info=True)
         if self._loop is None or self._broadcast is None:
             return
         try:
@@ -410,6 +459,13 @@ class Backend:
             # Warm the pose model off-thread so the first pose pass (facing / Social X-ray / gait /
             # hand-raise) does not stall the analysis worker for seconds on its lazy first load.
             threading.Thread(target=self.pose_kp.warmup, name="PoseWarm", daemon=True).start()
+            # Load this camera's listening probes and start the EARDRUM worker. `active` stays
+            # False until a probe actually exists, so an unlistened camera costs one attribute
+            # read per captured frame and nothing else.
+            try:
+                self.ear.open(source_id)
+            except Exception:
+                log.debug("eardrum open failed", exc_info=True)
             self._health = HealthMonitor(freeze_timeout=float(self.config.get("camera.freeze_timeout", 10.0)))
             self._plugins = PluginManager()
             self._motion_det = MotionDetector(self.config)
@@ -1086,6 +1142,19 @@ class Backend:
                 continue
         out.extend(suggestions.zone_suggestions(zone_by_source, names, existing))
         out.extend(suggestions.camera_suggestions(self.cam_profiles.all(names)))
+        # FOG OF WAR: a persistent blind spot is a coverage gap with a named remedy, which makes
+        # it a work item rather than a picture. Surfacing it here is what turns the observability
+        # field into something that gets acted on.
+        spots_by_source: dict[int, list[dict]] = {}
+        for sid in names:
+            try:
+                spots = [s for s in self.coverage.blind_spots(sid)
+                         if s.get("persistent") and not s.get("dismissed")]
+                if spots:
+                    spots_by_source[sid] = spots
+            except Exception:  # noqa: BLE001
+                continue
+        out.extend(suggestions.coverage_suggestions(spots_by_source, names))
         return out
 
     def relationship_graph(self, min_count: int = 2, limit: int = 300) -> dict:
@@ -1363,6 +1432,12 @@ class Backend:
         stuttering at the analysis rate. Boxes are streamed separately and interpolated client-side."""
         self._latest_raw = frame.image
         self._raw_seq += 1
+        # EARDRUM listens here and NOWHERE else: JPEG quantisation destroys the sub-pixel
+        # surface motion this reads, so the probes must see the raw frame before any encoding.
+        # The off path is a single attribute lookup, because this is the one slot in the whole
+        # perception suite where a slow line becomes visible stutter.
+        if self.ear.active:
+            self.ear.tap(frame.image, time.time())
 
     def _display_encoder_loop(self) -> None:
         """Encode the newest raw frame to JPEG at a steady 30 fps, off the capture and analysis threads.
@@ -1548,6 +1623,26 @@ class Backend:
                 self._source_id, brightness=float(getattr(r.metrics, "brightness", 0.0)),
                 motion=float(r.motion_percent), fps=float(r.fps), dets=prof_dets,
                 points=prof_points)
+        # FOG OF WAR — the empirical channel. Where tracks are born and where they die, away
+        # from the frame border, is the only honest measure of where this camera fails.
+        self._observe_coverage(dets, now)
+        # GRAIN — score each subject's MOVEMENT against what this place normally does, and
+        # attach it to the detection so the live gauge has something to show. Two dict writes
+        # and four log-density evaluations per track: it rides on the existing pass.
+        self._observe_grain(dets, now)
+        # DREAMSTATE — is this frame consistent with what this place normally does at this hour?
+        self._observe_dream(img, dets, now)
+        # EARDRUM — publish the probes' spectra (the DSP itself runs on its own worker thread).
+        self._push_probes(now)
+        # BEDROCK — project the pass into interval-compressed assertions. Runs at 2 Hz because
+        # the debouncer needs consecutive observations, not every one of them.
+        if now - self._last_bd > 0.5:
+            self._last_bd = now
+            try:
+                self.bedrock.observe_detections(
+                    self._source_name(self._source_id), self._source_id, dets, now)
+            except Exception:
+                log.debug("bedrock projection failed", exc_info=True)
         # Throttle the detections emit (~15 Hz) so it can never saturate the single event loop and
         # starve /stream. Boxes are interpolated client-side, so a lower cadence is invisible.
         if _enc_now - self._last_det_push > 0.066:
@@ -1722,6 +1817,486 @@ class Backend:
             })
         return out
 
+    # ---- EARDRUM ------------------------------------------------------
+    def _push_probes(self, now: float) -> None:
+        """Publish each probe's newest spectral frame at ~4 Hz over the existing socket."""
+        if not self.ear.active or now - self._last_probe_push < 0.25:
+            return
+        self._last_probe_push = now
+        try:
+            for pid in list(self.ear.probes):
+                fr = self.ear.frame(pid)
+                if fr is not None:
+                    self._emit({"t": "probe", "d": fr})
+            self.ear.record_history(now)
+        except Exception:
+            log.debug("eardrum push failed", exc_info=True)
+
+    def probes_list(self, sid: str) -> dict:
+        return {"probes": [p.public() for p in self.ear.probes.values()]}
+
+    def probe_add(self, sid: str, roi: list, name: str | None, kind: str | None) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"probe": None, "reason": "no_source"}
+        if self.ear.source_id != int(src.id):
+            self.ear.open(int(src.id))
+        frame = self._source_frame(src)
+        return self.ear.add(int(src.id), list(roi), name, str(kind or "probe"), frame)
+
+    def probe_update(self, pid: int, patch: dict) -> dict:
+        return self.ear.update(int(pid), patch)
+
+    def probe_delete(self, pid: int) -> dict:
+        return self.ear.remove(int(pid))
+
+    def probe_spectrum(self, pid: int) -> dict:
+        return {"spectrum": self.ear.spectrum_full(int(pid))}
+
+    def probe_trend(self, pid: int, hours: int = 168) -> dict:
+        return {"trend": self.ear.trend(int(pid), hours)}
+
+    def probe_baseline(self, pid: int) -> dict:
+        return self.ear.set_baseline(int(pid))
+
+    def probe_wave(self, pid: int, seconds: float = 8.0) -> bytes | None:
+        data, _fs = self.ear.wave(int(pid), seconds)
+        return data
+
+    def eardrum_suggest(self, sid: str, n: int = 5) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"candidates": []}
+        return {"candidates": self.ear.suggest(self._source_frame(src), int(n))}
+
+    def eardrum_modal(self, sid: str) -> dict:
+        return self.ear.modal_analysis()
+
+    def eardrum_calibrate(self, sid: str) -> dict:
+        """Solve the rolling-shutter line rate from mains flicker.
+
+        Enabling the acoustic band is logged every time, because unlike the structural band it
+        can approach speech bandwidth and that is a different legal question in most places.
+        """
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"ok": False, "reason": "no_source"}
+        frame = self._source_frame(src)
+        if frame is None:
+            return {"ok": False, "reason": "no_frame"}
+        res = line_rate_from_flicker(frame, float(self.ear.fps))
+        if res.get("ok"):
+            log.info("eardrum: acoustic band calibrated on source %s (mains %.0f Hz, line rate %.0f)",
+                     sid, res.get("mains", 0), res.get("line_rate", 0))
+        return res
+
+    # ---- BEDROCK ------------------------------------------------------
+    def bedrock_query(self, q: dict) -> dict:
+        """Run a typed query AST. Errors come back as structured data, never a 5xx, so the UI
+        can turn "too broad" into a one-click narrowing instead of a stack trace."""
+        try:
+            return self.bd_query.run(q)
+        except BedrockError as exc:
+            return {"entities": [], "facts": [], "truncated": False, "estimated": 0,
+                    "took_ms": 0.0, "as_of": q.get("asOf"),
+                    "window": q.get("window") or {"from": 0, "to": time.time() * 1000.0},
+                    "error": exc.message, "clause": exc.clause, "hint": exc.hint}
+        except Exception as exc:   # noqa: BLE001
+            log.exception("bedrock query failed")
+            return {"entities": [], "facts": [], "truncated": False, "estimated": 0,
+                    "took_ms": 0.0, "as_of": None,
+                    "window": {"from": 0, "to": time.time() * 1000.0}, "error": str(exc)}
+
+    def bedrock_entity(self, uid: int) -> dict:
+        ent = self.bd_store.get_entity(int(uid))
+        if ent is None:
+            return {"entity": None, "current": [], "history": []}
+        if ent.get("snapshot"):
+            ent["snapshot"] = self._subj_url(ent["snapshot"])
+        facts = self.bd_store.facts_for(int(uid))
+        for f in facts:
+            if f.get("snapshot"):
+                f["snapshot"] = self._subj_url(f["snapshot"])
+        current = [f for f in facts if f["tx_to"] is None and f["valid_to"] is None]
+        return {"entity": ent, "current": current, "history": facts}
+
+    def bedrock_provenance(self, fact_id: int) -> dict:
+        p = self.bd_store.provenance(int(fact_id))
+        if p.get("fact") and p["fact"].get("snapshot"):
+            p["fact"]["snapshot"] = self._subj_url(p["fact"]["snapshot"])
+            p["snapshot"] = p["fact"]["snapshot"]
+        return p
+
+    def bedrock_vocab(self) -> dict:
+        v = bd_vocab()
+        v["suggestions"] = bd_suggest(self.bd_store, 3)
+        return v
+
+    def bedrock_stats(self) -> dict:
+        s = self.bd_store.stats()
+        s["backfill"] = dict(self._bd_backfill)
+        return s
+
+    def bedrock_backfill(self) -> dict:
+        """Project the tables that already hold the history. Resumable, and reported: a first
+        run on a busy install has real work to do."""
+        if self._bd_backfill.get("running"):
+            return {"started": False}
+        self._bd_backfill = {"running": True, "done": 0, "total": 4, "phase": "", "facts": 0}
+
+        def _run() -> None:
+            try:
+                self.bedrock.backfill(self.db, self._bd_backfill)
+            except Exception:
+                log.exception("bedrock backfill failed")
+                self._bd_backfill["running"] = False
+        threading.Thread(target=_run, name="BedrockBackfill", daemon=True).start()
+        return {"started": True}
+
+    def bedrock_purge(self, uid: int) -> dict:
+        if not self.config.get("bedrock.purge_enabled", True):
+            return {"facts": 0, "entities": 0, "snapshots": 0, "reason": "disabled"}
+        return self.bd_store.purge_subject(int(uid))
+
+    # ---- DREAMSTATE ---------------------------------------------------
+    def _observe_dream(self, img: Any, dets: list[dict], now: float) -> None:
+        if self._source_id is None or not self.config.get("dream.enabled", True):
+            return
+        try:
+            plate = (self._bg_plate if (self._bg_plate is not None
+                                        and str(self._bg_plate_sid) == str(self._source_id)
+                                        and self._bg_plate_n >= 40) else None)
+            div = self.dream.observe(self._source_id, img, plate, dets, now)
+            # push the live status at a low rate so the veil and the ribbon have a field to draw
+            if now - self._last_dream_status > 1.0:
+                self._last_dream_status = now
+                self._emit({"t": "dream", "d": self.dream.status(
+                    self._source_id, self._source_name(self._source_id))})
+            if div is None:
+                return
+            # GRAIN coupling. A divergence with a concurrent low-percentile subject means a
+            # PERSON did something; without one it means the SCENE changed. Two bits of triage
+            # the operator would otherwise have to do by eye.
+            odd = any((d.get("conformity") or {}).get("state") == "unusual" for d in dets)
+            triage = "subject" if odd else "scene"
+            snapshot = self._alert_snapshot(img)
+            div_id = self.dream.record(div, snapshot, triage)
+            payload = {
+                "id": div_id, "cam": self._source_name(self._source_id), "ts": div["ts"],
+                "peak_sigma": div["peak_sigma"], "area_sigma_s": div["area_sigma_s"],
+                "blob": div["blob"], "cells": div["cells"], "snapshot": snapshot,
+                "verdict": None, "tier": div["tier"], "triage": triage,
+            }
+            self._emit({"t": "divergence", "d": payload})
+            if float(div["peak_sigma"]) >= float(self.config.get("dream.alert_sigma", 7.0)):
+                self._emit({"t": "alert", "d": {
+                    "ts": now * 1000, "severity": "warning", "type": "DIVERGENCE",
+                    # deliberately not "threat": the model has no semantics and must not pretend to
+                    "summary": (f"Something here does not match what this place normally looks "
+                                f"like at this hour ({div['peak_sigma']:.1f} sigma, "
+                                f"{'subject behaviour' if odd else 'scene change'})"),
+                    "cam": self._source_name(self._source_id), "ack": False,
+                    "snapshot": snapshot, "clip": self._save_clip(),
+                }})
+        except Exception:
+            log.debug("dream observe failed", exc_info=True)
+
+    def dream_plate(self, sid: str) -> bytes | None:
+        """The learned background plate as a JPEG: literally what this camera expects to be
+        there once everything that moves has averaged out. It is what the console shows on the
+        DREAM side of the wipe, and it costs nothing because the plate is already maintained."""
+        if (self._bg_plate is None or str(self._bg_plate_sid) != str(sid)
+                or self._bg_plate_n < 30):
+            return None
+        ok, buf = cv2.imencode(".jpg", self._bg_plate.astype(np.uint8),
+                               [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+        return buf.tobytes() if ok else None
+
+    def dream_status(self, sid: str) -> dict:
+        if not self.config.get("dream.enabled", True):
+            return {"status": None, "reason": "disabled"}
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"status": None, "reason": "no_source"}
+        return {"status": self.dream.status(int(src.id), src.name)}
+
+    def dream_pulse(self, sid: str, hours: int = 24) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        return {"pulse": self.dream.pulse(int(src.id), hours) if src else []}
+
+    def dream_divergences(self, sid: str | None = None, limit: int = 100) -> dict:
+        rid = None
+        if sid is not None:
+            src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+            rid = int(src.id) if src else None
+        rows = self.dream.divergences(rid, limit)
+        names = {str(s.id): s.name for s in self.db.list_sources()}
+        for r in rows:
+            r["cam"] = names.get(str(r["cam"]), r["cam"])
+            if r.get("snapshot"):
+                r["snapshot"] = self._subj_url(r["snapshot"])
+        return {"divergences": rows}
+
+    def dream_verdict(self, div_id: int, verdict: str | None) -> dict:
+        return self.dream.verdict(int(div_id), verdict)
+
+    def dream_mute(self, sid: str, cells: list[int], from_hour: int = 0,
+                   to_hour: int = 24) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"muted": []}
+        return {"muted": self.dream.mute(int(src.id), cells, from_hour, to_hour)}
+
+    def dream_threshold(self, sid: str, sigma: float) -> dict:
+        """Sensitivity is a per-install decision the operator tunes with live feedback, so it
+        persists in the settings table rather than the config file."""
+        val = max(3.0, min(8.0, float(sigma)))
+        self.dream.threshold = val
+        try:
+            self.db.set_setting("dream.sigma_threshold", str(val))
+        except Exception:
+            pass
+        return {"threshold": val}
+
+    def dream_reset(self, sid: str, mode: str = "relearn") -> dict:
+        """Re-register against a stored reference, or forget the camera entirely.
+
+        A moved camera makes every learned statistic wrong. Saying so and offering both repairs
+        is better than silently reporting nonsense.
+        """
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"ok": False}
+        if mode == "reregister":
+            # ECC alignment against the current background plate. If the view really has moved,
+            # the correlation will not recover and the honest answer is to relearn.
+            cc = 0.0
+            try:
+                if self._bg_plate is not None and self._latest_raw is not None:
+                    a = cv2.cvtColor(self._bg_plate.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+                    b = cv2.cvtColor(self._latest_raw, cv2.COLOR_BGR2GRAY)
+                    if a.shape == b.shape:
+                        warp = np.eye(2, 3, dtype=np.float32)
+                        cc, _warp = cv2.findTransformECC(
+                            a, b, warp, cv2.MOTION_TRANSLATION,
+                            (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 60, 1e-4), None, 5)
+            except Exception:
+                cc = 0.0
+            if cc >= 0.85:
+                self.dream.stale[int(src.id)] = False
+                return {"ok": True, "cc": round(float(cc), 3)}
+            return {"ok": False, "cc": round(float(cc), 3)}
+        self.dream.reset(int(src.id))
+        return {"ok": True}
+
+    # ---- FOG OF WAR ---------------------------------------------------
+    def _observe_coverage(self, dets: list[dict], now: float) -> None:
+        """Accumulate the empirical channel and raise LOST IN FOG.
+
+        Deliberately cheap: two dict updates per track. The geometry that produces the shadow
+        set is only computed when the operator opens the overlay, so a camera nobody is looking
+        at costs nothing beyond the counters."""
+        if self._source_id is None or not self.config.get("coverage.enabled", True):
+            return
+        try:
+            self.coverage.observe(self._source_id, dets, now)
+            if now - self._last_loss_check > 1.0:
+                self._last_loss_check = now
+                for loss in self.coverage.check_losses(self._source_id, dets, now):
+                    cam = self._source_name(self._source_id)
+                    self._emit({"t": "alert", "d": {
+                        "ts": now * 1000, "severity": "warning", "type": "LOST IN FOG",
+                        "summary": (f"{loss['det_id']} entered an unobservable area and has not "
+                                    f"reappeared within the expected crossing time"),
+                        "cam": cam, "ack": False,
+                        "snapshot": self._alert_snapshot(), "clip": self._save_clip(),
+                    }})
+        except Exception:   # never let an observability channel break the analysis pass
+            log.debug("coverage observe failed", exc_info=True)
+
+    # ---- GRAIN --------------------------------------------------------------------------
+    def _grain_occluded(self, source_id: int, nx: float, ny: float) -> bool:
+        """Is this ground point inside a known FOG OF WAR shadow? Consulted before a track's
+        ending is treated as a disappearance."""
+        try:
+            for sh in (self.coverage._shadows.get(int(source_id)) or []):
+                p = sh.get("polygon") or []
+                if len(p) >= 4 and p[0][0] <= nx <= p[1][0] and p[0][1] <= ny <= p[2][1]:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _observe_grain(self, dets: list[dict], now: float) -> None:
+        if self._source_id is None or not self.config.get("grain.enabled", True):
+            return
+        try:
+            people = [d for d in dets if d.get("cls") in ("person", "vehicle")
+                      and not d.get("coasting")]
+            density = len(people)
+            for d in people:
+                b = d.get("bbox")
+                if not b:
+                    continue
+                nx = float(b[0]) + float(b[2]) / 2.0
+                ny = min(0.999, float(b[1]) + float(b[3]))
+                aspect = float(b[2]) / max(1e-6, float(b[3]))
+                # NOTE: only geometry is passed. Colour, height, plate, make and every other
+                # appearance attribute on `d` is deliberately left behind — see server/grain.py.
+                self.grain.observe(self._source_id, str(d["id"]), str(d["cls"]), nx, ny, now,
+                                   aspect=aspect, density=density)
+                c = self.grain.peek(str(d["id"]), now)
+                if c is not None:
+                    d["conformity"] = c
+            for row in self.grain.sweep(now):
+                self._emit({"t": "grain", "d": row})
+                if row.get("state") == "unusual":
+                    self._grain_alert(row)
+        except Exception:
+            log.debug("grain observe failed", exc_info=True)
+
+    def _grain_alert(self, row: dict) -> None:
+        """Raise an alert only for the genuinely rare, and say WHY in the summary rather than
+        asserting that something is wrong."""
+        thr = float(self.config.get("grain.alert_percentile", 0.1))
+        if float(row.get("percentile", 100.0)) > thr:
+            return
+        cam = self._source_name(self._source_id)
+        why = row.get("why") or "moved in a way this place rarely sees"
+        self._emit({"t": "alert", "d": {
+            "ts": time.time() * 1000, "severity": "warning", "type": "UNUSUAL BEHAVIOUR",
+            "summary": f"{row.get('det_id')} {why[0].lower()}{why[1:]} "
+                       f"({row.get('percentile', 0):.1f}th percentile for this camera)",
+            "cam": cam, "ack": False,
+            "snapshot": self._alert_snapshot(), "clip": self._save_clip(),
+        }})
+
+    def grain_field(self, sid: str, bucket: int | None = None, cls: str = "person") -> dict:
+        if not self.config.get("grain.enabled", True):
+            return {"status": None, "reason": "disabled"}
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"status": None, "reason": "no_source"}
+        try:
+            return {"status": self.grain.field(int(src.id), src.name, bucket, cls)}
+        except Exception:
+            log.exception("grain field failed")
+            return {"status": None, "reason": "failed"}
+
+    def grain_ledger(self, sid: str, limit: int = 100, unusual_only: bool = False) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"tracks": []}
+        return {"tracks": self.grain.ledger(int(src.id), limit, unusual_only)}
+
+    def grain_precedents(self, track_id: int, n: int = 6) -> dict:
+        return {"precedents": self.grain.precedents(int(track_id), int(n))}
+
+    def grain_verdict(self, track_id: int, verdict: str | None) -> dict:
+        return self.grain.verdict(int(track_id), verdict)
+
+    def grain_mute(self, sid: str, cells: list[int]) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"muted": []}
+        return {"muted": self.grain.mute(int(src.id), cells)}
+
+    def _coverage_depth(self, sid: str, frame: Any) -> Any:
+        """The depth grid for the coverage build, reusing the spatial view's if it is fresh.
+
+        Depth inference contends with the detector and ReID for the GPU, so paying for it twice
+        to draw the same shadows would be indefensible."""
+        cache = self._depth_cache
+        if cache is not None and cache[0] == str(sid) and time.time() - cache[2] < 20.0:
+            return cache[1]
+        if self._depth is None:
+            return None
+        h0, w0 = frame.shape[:2]
+        work_w = int(self.config.get("spatial.input_width", 768))
+        work = (cv2.resize(frame, (work_w, int(work_w * h0 / w0)), interpolation=cv2.INTER_AREA)
+                if w0 > work_w else frame)
+        disp = self._depth.estimate(work)
+        if disp is None:
+            return None
+        disp01, _dmin, _dmax = spatial.normalize_disparity(
+            cv2.resize(disp, (160, max(1, int(160 * work.shape[0] / work.shape[1]))),
+                       interpolation=cv2.INTER_AREA))
+        self._depth_cache = (str(sid), disp01, time.time())
+        return disp01
+
+    def coverage_scene(self, sid: str, task: str | None = None,
+                       height: float | None = None) -> dict:
+        """The observability field for one camera. Always returns a dict with a specific reason
+        on failure, never a 5xx, so the UI can explain itself."""
+        if not self.config.get("coverage.enabled", True):
+            return {"coverage": None, "reason": "disabled"}
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"coverage": None, "reason": "no_source"}
+        frame = self._source_frame(src)
+        if frame is None:
+            return {"coverage": None, "reason": "no_frame"}
+        disp01 = self._coverage_depth(str(sid), frame)
+        if disp01 is None:
+            # Honest degradation: without depth there is no standing-object mask, so the
+            # geometric channel is empty. The other three still work and the UI says so.
+            log.debug("coverage: no depth field for %s, geometric channel disabled", sid)
+        try:
+            cov = self.coverage.build(int(src.id), src.name, frame, disp01,
+                                      float(self.config.get("spatial.fov_deg", 60.0)),
+                                      task=task, target_h=height)
+        except Exception:
+            log.exception("coverage build failed")
+            return {"coverage": None, "reason": "build_failed"}
+        cov["depth_backed"] = disp01 is not None
+        return {"coverage": cov}
+
+    def blind_spots(self, sid: str) -> dict:
+        src = next((s for s in self.db.list_sources() if str(s.id) == str(sid)), None)
+        if src is None:
+            return {"spots": []}
+        try:
+            return {"spots": self.coverage.blind_spots(int(src.id))}
+        except Exception:
+            log.exception("blind spot listing failed")
+            return {"spots": []}
+
+    def dismiss_blind_spot(self, spot_id: int, on: bool = True) -> dict:
+        self.db.execute("UPDATE blind_spots SET dismissed = ? WHERE id = ?",
+                        (1 if on else 0, int(spot_id)))
+        return {"ok": True}
+
+    def coverage_report(self, sid: str) -> dict:
+        """A signed, printable statement of what this camera can and cannot see.
+
+        This is the artifact that answers 'prove your system works' in a procurement, which is
+        a question no VMS vendor can currently answer with a number."""
+        res = self.coverage_scene(sid)
+        cov = res.get("coverage")
+        if cov is None:
+            return {"report": None, "reason": res.get("reason", "unavailable")}
+        spots = self.blind_spots(sid).get("spots", [])
+        persistent = [s for s in spots if s.get("persistent") and not s.get("dismissed")]
+        return {"report": {
+            "camera": cov["cam"], "sid": str(sid),
+            "generated_at": time.time(),
+            "task": cov["task"], "target_height_m": cov["target_height_m"],
+            "coverage_percent": cov["percent"],
+            "fov_deg": cov["fov_deg"], "camera_height_m": cov["camera_height_m"],
+            "pitch_deg": cov["pitch_deg"],
+            "dori_bands": cov["bands"],
+            "blind_spots": [{"name": s["name"], "kind": s["kind"], "area_m2": s["area_m2"],
+                             "events": s["events"]} for s in persistent],
+            "methodology": (
+                "Observability is computed over the OBSERVED ground area only, from four "
+                "channels: ray occlusion against the depth-derived standing-object mask, "
+                "pixels-per-metre against EN 62676-4 (DORI), local photometric quality, and "
+                "measured track mortality. Ranges derive from a pinhole ground-plane model "
+                "using an estimated camera height and tilt, so all metre values are "
+                "approximate; relative ordering is reliable."),
+            "scale_estimated": True,
+        }}
+
     def spatial_scene(self, sid: str, grid_w: int = 320) -> dict:
         """Feature 4 — lift a camera's flat 2D frame into a navigable 3D point cloud.
 
@@ -1773,6 +2348,9 @@ class Backend:
         rgb_grid = cv2.resize(work, (grid_w, gh), interpolation=cv2.INTER_AREA)
         disp_grid = cv2.resize(disp, (grid_w, gh), interpolation=cv2.INTER_AREA)
         disp01, dmin, dmax = spatial.normalize_disparity(disp_grid)
+        # Hand the same grid to FOG OF WAR rather than making it infer depth again — the GPU is
+        # already shared between the detector, ReID and this model.
+        self._depth_cache = (str(sid), disp01.copy(), time.time())
         entities, boxes = self._spatial_entities(work, disp, dmin, dmax)
         # Geometric scene completion: reconstruct the occluded background behind foreground
         # objects as a real surface (inpainted depth + texture), shipped as a second mesh layer.

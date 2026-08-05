@@ -30,6 +30,10 @@ _RULE_EVENTS = [
     "RUNNING", "STOPPED", "U_TURN", "WRONG_DIRECTION", "TAILGATING", "QUEUE", "FALLING",
     "CROWDING", "FIGHTING", "ABANDONED_OBJECT", "REMOVED_OBJECT",
     "DEFOCUS", "OBSTRUCTION", "CAMERA_MOVED", "ANOMALY",
+    # PERCEPTION suite events: they flow through the SAME alert engine, storage, cases and
+    # alerts board as everything above, so a rule on a vibration peak needs no new plumbing.
+    "DIVERGENCE", "UNUSUAL_BEHAVIOUR", "LOST_IN_FOG",
+    "VIBRATION_PEAK", "VIBRATION_RMS", "IMPACT", "MODAL_SHIFT",
 ]
 
 DEFAULT_FEATURES: dict[str, bool] = {
@@ -140,6 +144,38 @@ _OPERATOR_ACTIONS = (
     "social_xray {on} — Social X-ray: show each person's attention direction and who is interacting with whom.\n"
     "walkthrough {camera?} — open the 3D view in live mode (successive reconstructions) so you can move through the scene in 3D.\n"
     "enhance {} — start the box-select 'enhance' tool (the operator then drags a box to clarify it).\n"
+    "fog_of_war {on} — FOG OF WAR overlay: draw everything this camera CANNOT see (occluded, too "
+    "far to resolve, too dark, or where tracks keep dying) as static over the feed.\n"
+    "coverage_report {} — open the coverage cockpit and report what percentage of the observed "
+    "ground this camera actually covers at the chosen standard.\n"
+    "coverage_task {task} — set the standard coverage is measured against: detect | observe | "
+    "recognise | identify (EN 62676-4 DORI). 'can I read a face at the gate' -> identify.\n"
+    "blind_spots {} — list the persistent blind spots and open the one that matters most.\n"
+    "grain {on} — GRAIN overlay: draw the learned movement current of this place and give every "
+    "subject a conformity ring showing how ordinary their MOVEMENT is here.\n"
+    "who_is_odd {} — who in view is moving unusually for this place, and why. Use this for "
+    "'is anyone acting strange', NOT for appearance questions (GRAIN never sees appearance).\n"
+    "grain_model {} — open the learned behavioural model: the flow field, per-cell histograms "
+    "and the ledger of scored tracks.\n"
+    "dreamstate {on} — DREAMSTATE overlay: mark anything in the frame that does not match what "
+    "this place normally looks like at this hour. It reports DIVERGENCE, never a threat: it has "
+    "no idea WHAT happened, only that something departed from the learned scene.\n"
+    "anything_odd {} — has anything diverged recently, how large, and was it a scene change or "
+    "a subject behaving unusually. Use for 'is anything off/wrong', 'her sey normal mi'.\n"
+    "dream_console {} — open the dream-versus-world comparator.\n"
+    "dream_sensitivity {sigma} — set the divergence threshold, 3 (jumpy) to 8 (only the "
+    "blatant). Default 5.\n"
+    "bedrock_query {text} — ask a question about the PAST against the fact store: has this "
+    "vehicle been here before, who was near it, what happened between two times. Use this for "
+    "any historical question; the live count actions only see what is on screen now.\n"
+    "bedrock_asof {when} — epoch ms; show what the system BELIEVED at that moment rather than "
+    "what it believes now ('what did we know on Tuesday'). 0 returns to now.\n"
+    "listen {on} — EARDRUM: enter probe placement so the operator can drag a box onto a surface "
+    "and read its VIBRATION from sub-pixel motion. The camera has no microphone; this is "
+    "recovered from pixels and cannot carry speech.\n"
+    "probe_status {} — are any listening probes above their baseline, by how much, and at what "
+    "frequency. Use for 'does that machine sound wrong', 'titresim var mi'.\n"
+    "set_baseline {} — freeze today's spectrum as the reference future readings compare against.\n"
     "say {text} — just speak a reply, for questions that need no action."
 )
 
@@ -345,6 +381,60 @@ class LLMClient:
         sev = str(rule.get("severity") or "warning").lower()
         rule["severity"] = sev if sev in ("info", "warning", "critical") else "warning"
         return rule
+
+    def plan_bedrock(self, text: str, vocab: dict, now_ms: float) -> dict | None:
+        """Compile plain language into a BEDROCK query AST.
+
+        The model emits the AST, never SQL. That makes it validatable, retryable and
+        injection-free, and it means the operator sees their sentence rendered back as chips
+        before anything runs, so a wrong interpretation is corrected by editing a chip rather
+        than by re-prompting and hoping.
+        """
+        preds = "\n".join(
+            f"  {p['pred']} ({p['object']}) — {p['label'].lower()}" for p in vocab["predicates"])
+        prompt = (
+            "You translate an operator's question about the PAST of a video-surveillance site "
+            "into a typed query. Reply with ONLY the JSON object, no prose.\n\n"
+            "SHAPE:\n"
+            '{"select":"entity","where":[<clauses>],"window":{"from":<ms>,"to":<ms>},'
+            '"asOf":<ms|null>,"limit":200}\n\n'
+            "CLAUSES:\n"
+            '  {"t":"kind","kind":"person|vehicle|animal|object|zone|camera|event|alert|subject"}\n'
+            '  {"t":"pred","pred":"<predicate>","val":<string|number|[lo,hi]>,"op":">=|<=|=="}\n'
+            '  {"t":"count","pred":"<predicate>","op":">=|<=|==","n":<int>}\n'
+            '  {"t":"allen","rel":"before|after|during|overlaps|meets|starts|finishes",'
+            '"a":<clause index>,"b":<clause index>}\n'
+            '  {"t":"not","clause":<clause>}   (requires a window)\n\n'
+            f"PREDICATES (use ONLY these):\n{preds}\n\n"
+            "RULES:\n"
+            f"- Now is {int(now_ms)} in epoch milliseconds. Always set a window; default to the "
+            "last 24 hours unless the question names a period.\n"
+            "- 'has it been here before' / 'ever' means a WIDE window, not no window.\n"
+            "- 'what did we know then' / 'as of' sets asOf; otherwise leave it null.\n"
+            "- Colours, plates and vehicle types are `wore`, `has_plate`, `is_subtype`.\n"
+            "- 'who was with X' is co_present_with; 'near' is spatial proximity.\n"
+            "- If the question cannot be expressed with these predicates, return "
+            '{"where":[],"say":"<why, in one short sentence>"}.\n\n'
+            "Question: " + text)
+        out = self._json(self.chat(
+            prompt, system="You output only a strict JSON query object.", max_tokens=500))
+        if not isinstance(out, dict):
+            return None
+        where = out.get("where")
+        if not isinstance(where, list):
+            return None
+        valid = {p["pred"] for p in vocab["predicates"]}
+        kinds = set(vocab["kinds"])
+        for c in where:
+            if not isinstance(c, dict):
+                return None
+            if c.get("t") == "pred" and c.get("pred") not in valid:
+                return None
+            if c.get("t") == "kind" and c.get("kind") not in kinds:
+                return None
+        out.setdefault("select", "entity")
+        out.setdefault("limit", 200)
+        return out
 
     def plan_command(self, command: str, context: dict | None = None) -> dict | None:
         """AI Operator: turn a natural-language command into an ordered plan of system actions.

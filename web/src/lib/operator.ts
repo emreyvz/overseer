@@ -10,8 +10,13 @@ import {
   suggestionsOpen, spatialOpen, walkthroughAuto, storageScreen, commandOpen, investigateCase, alertsScreen, objectRegister,
   rosterInit, modules, toggleModule, detections, alerts, timeline, timelineOpen, petRegistry,
   povZoom, muted, frame, system, narrateOn, followOn, xrayOn, enhanceMode, selectedDetection,
-  flashBanner, triggerGlitch, type Mode,
+  flashBanner, triggerGlitch, coverage, coverageScreen, blindSpots, grainScreen, grainStatus,
+  divergences, dreamConsole, dreamStatus, bedrockQuery, bedrockResult, bedrockAsOf,
+  probes, probeFrames, eardrumDrawer, listenPlacing, type Mode,
 } from './stores'
+import { setFogTask } from './fog'
+import { runQuery as runBedrock } from './bedrock'
+import type { DoriTask } from './types'
 import { sendCommand } from './ws'
 import { SIM } from './sim'
 import { api } from './api'
@@ -654,6 +659,170 @@ export const ACTIONS: Record<string, Action> = {
     return 'draw a box on the frame and I will clarify that region'
   },
 
+  // ── FOG OF WAR ────────────────────────────────────────────────────────────────────────────
+  fog_of_war: ({ on }) => {
+    const want = on !== false
+    if (want) { stage.set('live'); mode.set('pov') }
+    const m = get(modules).find((x) => x.key === 'unseen')
+    if (m && m.on !== want) toggleModule('unseen')
+    return want
+      ? 'fog of war on — everything this camera cannot see is now drawn as static'
+      : 'fog of war off'
+  },
+  coverage_report: () => {
+    stage.set('live'); coverageScreen.set(true)
+    const c = get(coverage)
+    return c
+      ? { say: `coverage is ${Math.round(c.percent)} percent of the observed ground at the ${c.task} standard`,
+          value: c.percent }
+      : 'opening the coverage report — building the observability field now'
+  },
+  coverage_task: ({ task }) => {
+    const t = S(task).toLowerCase()
+    const valid = ['detect', 'observe', 'recognise', 'recognize', 'identify']
+    if (!valid.includes(t)) return `pick one of: detect, observe, recognise, identify`
+    setFogTask((t === 'recognize' ? 'recognise' : t) as DoriTask)
+    return `coverage is now measured against the ${t} standard`
+  },
+  blind_spots: () => {
+    const spots = get(blindSpots).filter((s) => !s.dismissed && s.persistent)
+    stage.set('live'); coverageScreen.set(true)
+    if (!spots.length) return { say: 'no persistent blind spots on this camera', value: 0 }
+    const worst = spots[0]
+    return { say: `${spots.length} persistent blind spot${spots.length === 1 ? '' : 's'}; the worst is ${worst.name}`,
+             value: spots.length }
+  },
+
+  // ── GRAIN ─────────────────────────────────────────────────────────────────────────────────
+  grain: ({ on }) => {
+    const want = on !== false
+    if (want) { stage.set('live'); mode.set('pov') }
+    const m = get(modules).find((x) => x.key === 'grain')
+    if (m && m.on !== want) toggleModule('grain')
+    return want
+      ? 'grain on — showing the learned current of this place, and how ordinary each subject is'
+      : 'grain off'
+  },
+  who_is_odd: () => {
+    const odd = get(detections).filter((d) => d.conformity?.state === 'unusual')
+    if (!odd.length) {
+      const st = get(grainStatus)
+      if (st && !st.mature) {
+        return { say: `still learning this place — ${Math.round(st.maturity * 100)} percent of the way there`, value: 0 }
+      }
+      return { say: 'nobody in view is moving unusually for this place', value: 0 }
+    }
+    const worst = odd.reduce((a, b) => ((a.conformity!.p <= b.conformity!.p) ? a : b))
+    selectedDetection.set(worst)
+    return {
+      say: `${odd.length} subject${odd.length === 1 ? '' : 's'} moving unusually; ${worst.id} is at the ${worst.conformity!.p.toFixed(1)} percentile — ${worst.conformity!.why}`,
+      value: odd.length,
+    }
+  },
+  grain_model: () => {
+    stage.set('live'); grainScreen.set(true)
+    const st = get(grainStatus)
+    return st
+      ? { say: `learned from ${st.tracks} tracks over ${st.days} days`, value: st.tracks }
+      : 'opening the grain model'
+  },
+
+  // ── DREAMSTATE ────────────────────────────────────────────────────────────────────────────
+  dreamstate: ({ on }) => {
+    const want = on !== false
+    if (want) { stage.set('live'); mode.set('pov') }
+    const m = get(modules).find((x) => x.key === 'dream')
+    if (m && m.on !== want) toggleModule('dream')
+    return want
+      ? 'dreamstate on — I will mark anything that does not match what this place normally looks like at this hour'
+      : 'dreamstate off'
+  },
+  anything_odd: () => {
+    const st = get(dreamStatus)
+    const recent = get(divergences).filter((d) => Date.now() - d.ts < 3600_000)
+    if (st && st.maturity < 1) {
+      return { say: `still learning this hour — ${Math.round(st.maturity * 100)} percent of the way there, so I am not reporting yet`, value: 0 }
+    }
+    if (!recent.length) return { say: 'nothing has diverged in the last hour; the scene is behaving', value: 0 }
+    const worst = recent.reduce((a, b) => (a.peak_sigma >= b.peak_sigma ? a : b))
+    dreamConsole.set(worst.id)
+    return {
+      say: `${recent.length} divergence${recent.length === 1 ? '' : 's'} in the last hour; the largest is ${worst.peak_sigma.toFixed(1)} sigma and looks like a ${worst.triage === 'subject' ? 'subject behaviour' : 'scene change'}`,
+      value: recent.length,
+    }
+  },
+  dream_console: () => { stage.set('live'); dreamConsole.set('live'); return 'opening the dreamstate console' },
+  dream_sensitivity: async ({ sigma }) => {
+    const v = Math.max(3, Math.min(8, Number(sigma) || 5))
+    const cam = get(activeCam)
+    if (cam && !SIM) await api.dreamThreshold(cam, v).catch(() => undefined)
+    return `divergence threshold set to ${v.toFixed(1)} sigma`
+  },
+
+  // ── BEDROCK ───────────────────────────────────────────────────────────────────────────────
+  bedrock_query: async ({ text }) => {
+    stage.set('live'); mode.set('bedrock')
+    const question = S(text)
+    if (!question) return 'opening bedrock'
+    if (SIM) return `asking bedrock: ${question}`
+    try {
+      const r = await api.aiBedrock(question)
+      if (!r.query) return r.say ?? 'I could not turn that into a query I can run'
+      bedrockQuery.set(r.query)
+      await runBedrock(r.query)
+      const res = get(bedrockResult)
+      return {
+        say: res ? `${res.entities.length} match${res.entities.length === 1 ? '' : 'es'} in the record` : 'query ran',
+        value: res?.entities.length ?? 0,
+      }
+    } catch { return 'bedrock is unreachable' }
+  },
+  bedrock_asof: async ({ when }) => {
+    // belief-time travel: "what did we know last Tuesday"
+    const ms = Number(when)
+    bedrockAsOf.set(Number.isFinite(ms) && ms > 0 ? ms : null)
+    stage.set('live'); mode.set('bedrock')
+    await runBedrock()
+    return ms > 0
+      ? `showing what the system believed on ${new Date(ms).toLocaleString()}`
+      : 'back to what the system believes now'
+  },
+
+  // ── EARDRUM ───────────────────────────────────────────────────────────────────────────────
+  listen: ({ on }) => {
+    const want = on !== false
+    if (want) { stage.set('live'); mode.set('pov'); listenPlacing.set(true) }
+    else listenPlacing.set(false)
+    const m = get(modules).find((x) => x.key === 'listen')
+    if (m && m.on !== want) toggleModule('listen')
+    return want
+      ? 'listening mode on — drag a box on a textured, rigid surface and I will read its vibration'
+      : 'listening off'
+  },
+  probe_status: () => {
+    const list = get(probes)
+    if (!list.length) return { say: 'no probes are placed on this camera', value: 0 }
+    const frames = get(probeFrames)
+    const hot = list.filter((p) => (frames[String(p.id)]?.db ?? 0) >= 6)
+    stage.set('live'); eardrumDrawer.set(true)
+    if (!hot.length) return { say: `${list.length} probes, all within their baseline`, value: 0 }
+    const worst = hot.reduce((a, b) =>
+      ((frames[String(a.id)]?.db ?? 0) >= (frames[String(b.id)]?.db ?? 0) ? a : b))
+    const f = frames[String(worst.id)]
+    const peak = f?.peaks?.[0]
+    return {
+      say: `${worst.name} is ${f?.db.toFixed(1)} dB above its baseline`
+        + (peak ? `, strongest at ${peak.hz.toFixed(1)} hertz` : ''),
+      value: hot.length,
+    }
+  },
+  set_baseline: async () => {
+    const list = get(probes).filter((p) => p.kind !== 'ref')
+    if (!list.length) return 'place a probe first'
+    if (!SIM) for (const p of list) await api.probeBaseline(p.id).catch(() => undefined)
+    return `baseline frozen for ${list.length} probe${list.length === 1 ? '' : 's'}`
+  },
+
   say: ({ text }) => S(text),
 }
 
@@ -791,6 +960,23 @@ export function routeCommand(raw: string): Plan | null {
   if (/(follow.?cam|takip et|takip kamerası|follow (the |that )?(target|subject|him|her|it|kişi))/i.test(low)) return { steps: [{ action: 'follow', args: { on: !/(kapat|stop|\boff\b|durdur|bırak)/i.test(low) } }], border: 'nav' }
   if (/(x.?ray|röntgen|thru cover|behind cover|arkasını gör|occlusion)/i.test(low)) return { steps: [{ action: 'xray', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
   if (/(social x.?ray|sosyal|gaze|attention|who.*(talking|interact)|kim.*(konuş|etkileş)|bakış)/i.test(low)) return { steps: [{ action: 'social_xray', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  // FOG OF WAR — "what can't you see", "kör nokta", "coverage"
+  if (/(blind ?spot|kör nokta|göremediğ|what.*(can.?t|cannot).*see|neyi göremiyor)/i.test(low)) return { steps: [{ action: 'blind_spots' }], border: 'nav' }
+  if (/(coverage|kapsama|kaç.*yüzde.*gör|how much.*see)/i.test(low)) return { steps: [{ action: 'coverage_report' }], border: 'nav' }
+  if (/(fog of war|savaş sisi|sis(i)? (aç|kapat)|unseen)/i.test(low)) return { steps: [{ action: 'fog_of_war', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  // GRAIN — "who is behaving oddly", "normal nedir burada"
+  if (/(who.*(odd|unusual|strange|weird|out of place)|kim.*(tuhaf|garip|anormal|sıra ?dışı))/i.test(low)) return { steps: [{ action: 'who_is_odd' }], border: 'nav' }
+  if (/(grain model|learned (normal|pattern)|öğrenilen|normal nedir|akış deseni)/i.test(low)) return { steps: [{ action: 'grain_model' }], border: 'nav' }
+  if (/(grain|doku|davranış deseni|behaviou?ral (grain|field))/i.test(low)) return { steps: [{ action: 'grain', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  // DREAMSTATE — "is anything off", "her şey normal mi"
+  if (/(anything (odd|off|unusual|wrong)|her ?şey normal|bir ?şey var mı|divergence|sapma)/i.test(low)) return { steps: [{ action: 'anything_odd' }], border: 'nav' }
+  if (/(dream ?state|rüya|beklenti modeli|expectation model)/i.test(low)) return { steps: [{ action: 'dreamstate', args: { on: !/(kapat|\boff\b|disable|gizle)/i.test(low) } }], border: 'nav' }
+  // BEDROCK — questions about the PAST go to the fact store, not to live detections
+  if (/(has .*(been here|come here) before|daha önce (geldi|burada)|ever been here|kaç kez geldi)/i.test(low)) return { steps: [{ action: 'bedrock_query', args: { text }  }], border: 'nav' }
+  if (/(bedrock|kayıt defteri|fact store|what did we (know|believe))/i.test(low)) return { steps: [{ action: 'bedrock_query', args: { text }  }], border: 'nav' }
+  // EARDRUM — "listen to that", "titreşim"
+  if (/(vibration|titreşim|probe status|makine sesi|machine (sound|health))/i.test(low)) return { steps: [{ action: 'probe_status' }], border: 'nav' }
+  if (/(eardrum|listen|dinle|kulak)/i.test(low)) return { steps: [{ action: 'listen', args: { on: !/(kapat|off|disable|dur)/i.test(low) } }], border: 'nav' }
   if (/(walkthrough|walk.?through|chronoscape|zaman yolcul|3d.*(gez|dolaş|walk|yürü)|içinde (gez|dolaş))/i.test(low)) return { steps: [{ action: 'walkthrough', args: {} }], border: 'nav' }
   if (/(enhance|netleştir|yakınlaş.*netleş|clarify|zoom.*enhance|büyüt.*netleş)/i.test(low)) return { steps: [{ action: 'enhance', args: {} }], border: 'nav' }
   if (/(plaka|plate)\s*[:#]?\s*([a-z0-9]{4,})/i.test(low)) { const m = low.match(/(plaka|plate)\s*[:#]?\s*([a-z0-9\s]{4,})/i); return { steps: [{ action: 'find_plate', args: { plate: m?.[2] ?? '' } }], border: 'nav' } }

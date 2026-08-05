@@ -1,4 +1,6 @@
 // OVERSEER — REST client for the FastAPI bridge. Falls back gracefully when offline.
+import type * as T from './types'
+
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:8787'
 
 async function get<T>(path: string): Promise<T> {
@@ -36,7 +38,14 @@ export interface CaseDetail { id: number; name: string; threat: string; notes: s
 export interface SpatialEntity { id: string; cls: string; cx: number; cy: number; depth: number; conf: number; label: string }
 export interface SpatialScene { cam: string; sid: string; w: number; h: number; fov: number; image: string; depth: string; entities: SpatialEntity[]; ts: number; bg_image?: string; bg_depth?: string; tex_image?: string }
 export interface SuggestRule { name: string; event_type: string; source_id: number; severity: string }
-export interface Suggestion { kind: 'alert' | 'camera' | 'zone'; cam: string; title: string; why: string; count?: number; rule?: SuggestRule; zone?: [number, number][] }
+export interface Suggestion {
+  kind: 'alert' | 'camera' | 'zone' | 'coverage'
+  cam: string; title: string; why: string; count?: number
+  rule?: SuggestRule
+  zone?: [number, number][]
+  // FOG OF WAR: a persistent blind spot surfaced as a work item rather than a picture
+  spot?: { id: number; polygon: [number, number][]; kind: string }
+}
 export interface Subject { id: number; cls: string; label?: string | null; first_seen: number; last_seen: number; sighting_count: number; day_count: number; plate?: string | null; attrs: Record<string, unknown>; snapshot?: string | null; watched: boolean; flags: string[] }
 export interface Sighting { id: number; cam?: string | null; ts: number; snapshot?: string | null }
 export interface Dossier extends Subject { per_camera: { cam: string; count: number }[]; hour_histogram: number[]; distinct_days: number; sightings: Sighting[] }
@@ -134,6 +143,82 @@ export const api = {
     if (!r.ok) throw new Error(`stt ${r.status}`)
     return r.json()
   },
+  // ── PERCEPTION SUITE ──────────────────────────────────────────────────────────────────────
+  // DREAMSTATE
+  dream: (sid: string) => get<{ status: T.DreamStatus | null; reason?: string }>(`/api/dream/${sid}`),
+  dreamPulse: (sid: string, hours = 24) => get<{ pulse: T.DreamPulse[] }>(`/api/dream/${sid}/pulse?hours=${hours}`),
+  divergences: (sid?: string, limit = 100) =>
+    get<{ divergences: T.Divergence[] }>(`/api/dream/divergences?limit=${limit}${sid ? `&sid=${sid}` : ''}`),
+  dreamVerdict: (id: number, verdict: 'expected' | 'flagged' | null) =>
+    post<{ ok: boolean }>(`/api/dream/divergence/${id}/verdict`, { verdict }),
+  dreamMute: (sid: string, cells: number[], from_hour = 0, to_hour = 24) =>
+    post<{ muted: number[] }>(`/api/dream/${sid}/mute`, { cells, from_hour, to_hour }),
+  dreamThreshold: (sid: string, sigma: number) =>
+    post<{ threshold: number }>(`/api/dream/${sid}/threshold`, { sigma }),
+  dreamReset: (sid: string, mode: 'reregister' | 'relearn') =>
+    post<{ ok: boolean; cc?: number }>(`/api/dream/${sid}/reset`, { mode }),
+
+  // FOG OF WAR
+  coverage: (sid: string, task?: string, height?: number) => {
+    const p = new URLSearchParams()
+    if (task) p.set('task', task)
+    if (height) p.set('height', String(height))
+    const q = p.toString()
+    return get<{ coverage: T.Coverage | null; reason?: string }>(`/api/coverage/${sid}${q ? '?' + q : ''}`)
+  },
+  blindSpots: (sid: string) => get<{ spots: T.BlindSpot[] }>(`/api/coverage/${sid}/blindspots`),
+  dismissBlindSpot: (id: number, on = true) => post<{ ok: boolean }>(`/api/blindspots/${id}/dismiss`, { on }),
+  coverageReport: (sid: string) => get<Record<string, unknown>>(`/api/coverage/${sid}/report`),
+
+  // GRAIN
+  grain: (sid: string, bucket?: number, cls?: string) => {
+    const p = new URLSearchParams()
+    if (bucket !== undefined) p.set('bucket', String(bucket))
+    if (cls) p.set('cls', cls)
+    const q = p.toString()
+    return get<{ status: T.GrainStatus | null; reason?: string }>(`/api/grain/${sid}${q ? '?' + q : ''}`)
+  },
+  grainTracks: (sid: string, limit = 100, unusualOnly = false) =>
+    get<{ tracks: T.GrainTrackRow[] }>(`/api/grain/${sid}/tracks?limit=${limit}&unusual=${unusualOnly ? 1 : 0}`),
+  grainPrecedents: (trackId: number, n = 6) =>
+    get<{ precedents: T.GrainTrackRow[] }>(`/api/grain/track/${trackId}/precedents?n=${n}`),
+  grainVerdict: (trackId: number, verdict: 'ordinary' | 'noteworthy' | null) =>
+    post<{ ok: boolean }>(`/api/grain/track/${trackId}/verdict`, { verdict }),
+  grainMute: (sid: string, cells: number[]) => post<{ muted: number[] }>(`/api/grain/${sid}/mute`, { cells }),
+
+  // EARDRUM
+  probes: (sid: string) => get<{ probes: T.Probe[] }>(`/api/probes/${sid}`),
+  addProbe: (sid: string, roi: [number, number, number, number], name?: string, kind?: 'probe' | 'ref') =>
+    post<{ probe: T.Probe | null; reason?: string }>(`/api/probes/${sid}`, { roi, name, kind }),
+  updateProbe: (id: number, patch: { name?: string; kind?: 'probe' | 'ref'; enabled?: boolean }) =>
+    put<{ probe: T.Probe }>(`/api/probes/${id}`, patch),
+  deleteProbe: (id: number) => del<{ ok: boolean }>(`/api/probes/${id}`),
+  probeSpectrum: (id: number) => get<{ spectrum: T.ProbeSpectrum | null }>(`/api/probes/${id}/spectrum`),
+  probeTrend: (id: number, hours = 168) =>
+    get<{ trend: { ts: number; rms: number; snr: number }[] }>(`/api/probes/${id}/trend?hours=${hours}`),
+  probeBaseline: (id: number) => post<{ ok: boolean }>(`/api/probes/${id}/baseline`, {}),
+  probeWave: (id: number, seconds = 8) => `${API_BASE}/api/probes/${id}/wave?seconds=${seconds}`,
+  suggestProbes: (sid: string, n = 5) =>
+    post<{ candidates: { roi: [number, number, number, number]; texture: number; rigid: boolean }[] }>(
+      `/api/eardrum/${sid}/suggest`, { n }),
+  eardrumModal: (sid: string) =>
+    get<{ modes: { hz: number; damping: number; shape: number[] }[]; reason?: string }>(`/api/eardrum/${sid}/modal`),
+  eardrumCalibrate: (sid: string) =>
+    post<{ ok: boolean; line_rate?: number; mains?: number; reason?: string }>(`/api/eardrum/${sid}/calibrate`, {}),
+
+  // BEDROCK
+  bedrockQuery: (q: T.BedrockQuery) => post<T.BedrockResult & { error?: string; clause?: number }>(`/api/bedrock/query`, q),
+  bedrockVocab: () => get<T.BedrockVocab>(`/api/bedrock/vocab`),
+  bedrockEntity: (uid: number) =>
+    get<{ entity: T.BedrockEntity | null; current: T.BedrockFact[]; history: T.BedrockFact[] }>(`/api/bedrock/entity/${uid}`),
+  bedrockProvenance: (id: number) =>
+    get<{ fact: T.BedrockFact | null; lineage: T.BedrockFact[]; snapshot?: string | null }>(`/api/bedrock/fact/${id}/provenance`),
+  bedrockStats: () => get<{ facts: number; entities: number; oldest: number | null; backfill: { running: boolean; done: number; total: number; phase: string } }>(`/api/bedrock/stats`),
+  bedrockBackfill: () => post<{ started: boolean }>(`/api/bedrock/backfill`, {}),
+  bedrockPurge: (uid: number) => post<{ facts: number; entities: number; snapshots: number }>(`/api/bedrock/purge/${uid}`, {}),
+  aiBedrock: (text: string) =>
+    post<{ query: T.BedrockQuery | null; say?: string; disabled?: boolean }>(`/api/ai/bedrock`, { text }),
+
   shutdown: () => post<{ ok: boolean }>(`/api/shutdown`, {}),
 }
 

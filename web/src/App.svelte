@@ -1,14 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
   import {
     stage, pickerView, mode, commandOpen, zoneEditor, alertRules, shuttingDown, objectRegister, storageScreen,
-    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, enhanceResult, hydrateAlerts, hydrateModules, toggleModule, type Mode,
+    selectedDetection, dossierOpen, activeCam, cameras, triggerGlitch, flashBanner, enrollOpen, watchlistOpen, aiOpen, suggestionsOpen, spatialOpen, alertsScreen, operatorOpen, narrateOn, followOn, enhanceMode, enhanceResult, hydrateAlerts, hydrateModules, toggleModule,
+    dreamConsole, coverageScreen, grainScreen, eardrumDrawer, listenPlacing, modules, type Mode,
   } from './lib/stores'
   import { connectWs, sendCommand } from './lib/ws'
   import { SIM, startSim } from './lib/sim'
   import { sfx, startAmbience, toggleMute } from './lib/audio'
   import { startZoneEngine } from './lib/zones'
   import { startAnomalyEngine } from './lib/anomaly'
+  import { startFogEngine } from './lib/fog'
+  import { startGrainEngine } from './lib/grain'
+  import { startDreamEngine } from './lib/dreamstate'
   import { refreshAiStatus, aiStatus } from './lib/ai'
   import { LEX } from './lib/lexicon'
   import type { Camera } from './lib/types'
@@ -27,6 +32,7 @@
   import Archive from './components/modes/Archive.svelte'
   import Roster from './components/modes/Roster.svelte'
   import Case from './components/modes/Case.svelte'
+  import Bedrock from './components/modes/Bedrock.svelte'
   import ZoneEditor from './components/pov/ZoneEditor.svelte'
   import ObjectRegister from './components/pov/ObjectRegister.svelte'
   import AlertRules from './components/AlertRules.svelte'
@@ -38,19 +44,46 @@
   import OperatorBorder from './components/OperatorBorder.svelte'
   import AlertsBoard from './components/AlertsBoard.svelte'
   import SmartSuggestions from './components/suggestions/SmartSuggestions.svelte'
+  import CoverageScreen from './components/coverage/CoverageScreen.svelte'
+  import GrainScreen from './components/grain/GrainScreen.svelte'
+  import DreamstateConsole from './components/dreamstate/DreamstateConsole.svelte'
+  import EardrumDrawer from './components/eardrum/EardrumDrawer.svelte'
   // SpatialView pulls in three.js (~450 kB) — lazy-load it so the main bundle stays lean and
   // the 3D engine only loads when the operator actually opens the spatial view.
   const SpatialView = () => import('./components/spatial/SpatialView.svelte')
 
-  const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case' }
+  const MODE_KEYS: Record<string, Mode> = { a: 'forensic', r: 'archive', k: 'case', b: 'bedrock' }
 
-  onMount(() => { startZoneEngine(); startAnomalyEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts(); hydrateModules() }
+  onMount(() => { startZoneEngine(); startAnomalyEngine(); startFogEngine(); startGrainEngine(); startDreamEngine(); if (SIM) startSim(); else { connectWs(); refreshAiStatus(); hydrateAlerts(); hydrateModules() }
     if (SIM && location.search.includes('shot=')) {   // dev-only screenshot hook (SIM + ?shot=; inert in prod), see scripts/shot_capture.cjs
       aiStatus.set({ enabled: true, provider: 'glm', base: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-4.6', vision_model: 'glm-4.6v', vision: true, features: {} } as any)
       const shot = new URLSearchParams(location.search).get('shot')
       if (shot === 'grid') { pickerView.set('grid'); stage.set('select') }
       if (shot === 'live') { stage.set('live'); mode.set('pov'); activeCam.set('1') }
-      operatorOpen.set(true)
+      // PERCEPTION suite targets, so every new surface can be rendered headlessly and any
+      // runtime error surfaces as a PAGE-ERR in the capture log. Typechecking cannot catch
+      // a component that throws on mount.
+      // Idempotent: Electron reuses its user-data dir between capture runs, so a plain toggle
+      // would flip the module back OFF on the second run and screenshot nothing.
+      const on = (key: string) => { if (!get(modules).find((m) => m.key === key)?.on) toggleModule(key) }
+      const PERCEPTION: Record<string, () => void> = {
+        fog: () => on('unseen'),
+        coverage: () => { on('unseen'); coverageScreen.set(true) },
+        grain: () => on('grain'),
+        grainscreen: () => { on('grain'); grainScreen.set(true) },
+        dream: () => on('dream'),
+        dreamconsole: () => { on('dream'); dreamConsole.set('live') },
+        eardrum: () => { on('listen'); eardrumDrawer.set(true) },
+        probes: () => { on('listen'); listenPlacing.set(true) },
+        bedrock: () => { mode.set('bedrock') },
+      }
+      const target = shot ? PERCEPTION[shot] : undefined
+      if (target) {
+        stage.set('live'); mode.set('pov'); activeCam.set('1')
+        setTimeout(target, 400)
+      } else {
+        operatorOpen.set(true)
+      }
     }
   })
 
@@ -136,6 +169,12 @@
     if ($stage !== 'live') return
     if (k === 'escape') {
       if ($enhanceMode || $enhanceResult) { enhanceMode.set(false); enhanceResult.set(null); return }
+      // PERCEPTION screens close before the older panels (they are the top-most layer).
+      if ($dreamConsole !== null) { dreamConsole.set(null); return }
+      if ($coverageScreen) { coverageScreen.set(false); return }
+      if ($grainScreen) { grainScreen.set(false); return }
+      if ($listenPlacing) { listenPlacing.set(false); return }
+      if ($eardrumDrawer) { eardrumDrawer.set(false); return }
       if ($operatorOpen) { operatorOpen.set(false); return }
       if ($alertsScreen) { alertsScreen.set(false); return }
       if ($suggestionsOpen) { suggestionsOpen.set(false); return }
@@ -163,6 +202,17 @@
     if (k === 'e' && $mode === 'pov') { enhanceMode.update((v) => !v); sfx('click'); return }
     if (k === 'f' && $mode === 'pov') { if ($selectedDetection) { followOn.update((v) => !v); sfx('click') } else { flashBanner('SELECT A TARGET TO FOLLOW', true, 1400) } return }
     if (k === 's' && $mode === 'pov') { toggleModule('social'); sfx('click'); return }   // S -> Social X-ray
+    // ── PERCEPTION suite: bare key toggles the live overlay, SHIFT opens its screen ──────────
+    if (k === 'm') { if (e.shiftKey) dreamConsole.set('live'); else toggleModule('dream'); sfx('click'); return }
+    if (k === 'u') { if (e.shiftKey) coverageScreen.set(true); else toggleModule('unseen'); sfx('click'); return }
+    if (k === 'h') { if (e.shiftKey) grainScreen.set(true); else toggleModule('grain'); sfx('click'); return }
+    // L enters probe placement (the overlay component turns the module on itself, so leaving
+    // placement does not switch listening off); SHIFT+L is the analysis drawer.
+    if (k === 'l') {
+      if (e.shiftKey) eardrumDrawer.update((v) => !v)
+      else if ($mode === 'pov') listenPlacing.update((v) => !v)
+      sfx('click'); return
+    }
     if (/^[1-9]$/.test(k)) { switchCam(Number(k)); return }
     if (k in MODE_KEYS) { toMode(MODE_KEYS[k]); return }
   }
@@ -203,6 +253,7 @@
   {#if $mode === 'archive'}<Archive />{/if}
   {#if $mode === 'roster'}<Roster />{/if}
   {#if $mode === 'case'}<Case />{/if}
+  {#if $mode === 'bedrock'}<Bedrock />{/if}
   {#if $zoneEditor}<ZoneEditor />{/if}
   {#if $objectRegister}<ObjectRegister />{/if}
   {#if $alertRules}<AlertRules />{/if}
@@ -216,6 +267,10 @@
 {#if !$operatorOpen && $aiStatus.enabled && ($stage === 'live' || $stage === 'select')}<OperatorLauncher />{/if}
 {#if $alertsScreen}<AlertsBoard onclose={() => alertsScreen.set(false)} />{/if}
 {#if $suggestionsOpen}<SmartSuggestions onclose={() => suggestionsOpen.set(false)} />{/if}
+{#if $coverageScreen}<CoverageScreen onclose={() => coverageScreen.set(false)} />{/if}
+{#if $grainScreen}<GrainScreen onclose={() => grainScreen.set(false)} />{/if}
+{#if $dreamConsole !== null}<DreamstateConsole open={$dreamConsole} onclose={() => dreamConsole.set(null)} />{/if}
+{#if $eardrumDrawer && $stage === 'live'}<EardrumDrawer onclose={() => eardrumDrawer.set(false)} />{/if}
 <OperatorBorder />
 {#if $spatialOpen}
   {#await SpatialView() then M}

@@ -669,6 +669,319 @@ async def api_spatial_reel(sid: str, n: int = 28, grid: int = 256) -> Any:
     return await asyncio.to_thread(backend.spatial_reel, sid, n, grid)
 
 
+# -- EARDRUM: sub-pixel surface motion as a vibration channel -------------------------------
+@app.get("/api/probes/{sid}")
+async def api_probes(sid: str) -> Any:
+    if backend is None:
+        return {"probes": []}
+    return await asyncio.to_thread(backend.probes_list, sid)
+
+
+@app.post("/api/probes/{sid}")
+async def api_probe_add(sid: str, payload: dict) -> Any:
+    """Place a listening probe. Refused with a reason when the surface has no texture to track."""
+    if backend is None:
+        return {"probe": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.probe_add, sid, payload.get("roi") or [],
+                                   payload.get("name"), payload.get("kind"))
+
+
+@app.put("/api/probes/{pid}")
+async def api_probe_update(pid: int, payload: dict) -> Any:
+    if backend is None:
+        return {"probe": None}
+    return await asyncio.to_thread(backend.probe_update, pid, payload)
+
+
+@app.delete("/api/probes/{pid}")
+async def api_probe_delete(pid: int) -> Any:
+    if backend is None:
+        return {"ok": False}
+    return await asyncio.to_thread(backend.probe_delete, pid)
+
+
+@app.get("/api/probes/{pid}/spectrum")
+async def api_probe_spectrum(pid: int) -> Any:
+    """The averaged spectrum, its measured noise floor, the peaks and the machinery hypothesis."""
+    if backend is None:
+        return {"spectrum": None}
+    return await asyncio.to_thread(backend.probe_spectrum, pid)
+
+
+@app.get("/api/probes/{pid}/trend")
+async def api_probe_trend(pid: int, hours: int = 168) -> Any:
+    if backend is None:
+        return {"trend": []}
+    return await asyncio.to_thread(backend.probe_trend, pid, hours)
+
+
+@app.post("/api/probes/{pid}/baseline")
+async def api_probe_baseline(pid: int) -> Any:
+    """Freeze today's spectrum as the reference every later reading is compared against."""
+    if backend is None:
+        return {"ok": False}
+    return await asyncio.to_thread(backend.probe_baseline, pid)
+
+
+@app.get("/api/probes/{pid}/wave")
+async def api_probe_wave(pid: int, seconds: float = 8.0) -> Response:
+    """A band-limited WAV of the recovered displacement. Not an audio recording: the structural
+    band cannot carry intelligible speech, and that is enforced in code."""
+    if backend is None:
+        return Response(status_code=503)
+    data = await asyncio.to_thread(backend.probe_wave, pid, seconds)
+    if not data:
+        return Response(status_code=204)
+    return Response(content=data, media_type="audio/wav",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/eardrum/{sid}/suggest")
+async def api_eardrum_suggest(sid: str, payload: dict | None = None) -> Any:
+    """Rank candidate ROIs by trackability. An operator cannot see texture, and a probe on a
+    blank wall returns noise forever without ever saying so."""
+    if backend is None:
+        return {"candidates": []}
+    return await asyncio.to_thread(backend.eardrum_suggest, sid, int((payload or {}).get("n", 5)))
+
+
+@app.get("/api/eardrum/{sid}/modal")
+async def api_eardrum_modal(sid: str) -> Any:
+    """Natural frequencies, damping and mode shapes across three or more probes."""
+    if backend is None:
+        return {"modes": [], "reason": "backend_down"}
+    return await asyncio.to_thread(backend.eardrum_modal, sid)
+
+
+@app.post("/api/eardrum/{sid}/calibrate")
+async def api_eardrum_calibrate(sid: str) -> Any:
+    """Solve the rolling-shutter line rate from mains flicker, so the acoustic band becomes
+    available. Fails honestly when the scene has no flicker."""
+    if backend is None:
+        return {"ok": False, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.eardrum_calibrate, sid)
+
+
+# -- BEDROCK: the past as a database, with provenance and two time axes ---------------------
+@app.post("/api/bedrock/query")
+async def api_bedrock_query(payload: dict) -> Any:
+    """Run a typed query AST. Never 5xx: a refusal comes back as {error, clause, hint} so the
+    UI can offer the fix rather than a stack trace."""
+    if backend is None:
+        return {"entities": [], "facts": [], "error": "backend_down"}
+    return await asyncio.to_thread(backend.bedrock_query, payload)
+
+
+@app.post("/api/ai/bedrock")
+async def api_ai_bedrock(payload: dict[str, str]) -> Any:
+    """Plain language into a BEDROCK query AST. The model never emits SQL, and the AST is
+    rendered back to the operator as chips before it runs."""
+    if backend is None or not backend.ai.enabled:
+        return {"query": None, "disabled": True}
+    vocab = await asyncio.to_thread(backend.bedrock_vocab)
+    q = await asyncio.to_thread(backend.ai.plan_bedrock, payload.get("text", ""), vocab,
+                                time.time() * 1000.0)
+    if q is None:
+        return {"query": None, "say": "I could not turn that into a query I can run."}
+    return {"query": q, "say": q.pop("say", None) if isinstance(q, dict) else None}
+
+
+@app.get("/api/bedrock/vocab")
+async def api_bedrock_vocab() -> Any:
+    """The closed predicate vocabulary the chip builder and the LLM planner may use."""
+    if backend is None:
+        return {"version": 0, "predicates": [], "kinds": []}
+    return await asyncio.to_thread(backend.bedrock_vocab)
+
+
+@app.get("/api/bedrock/stats")
+async def api_bedrock_stats() -> Any:
+    if backend is None:
+        return {"facts": 0, "entities": 0, "oldest": None,
+                "backfill": {"running": False, "done": 0, "total": 0, "phase": ""}}
+    return await asyncio.to_thread(backend.bedrock_stats)
+
+
+@app.post("/api/bedrock/backfill")
+async def api_bedrock_backfill() -> Any:
+    if backend is None:
+        return {"started": False}
+    return await asyncio.to_thread(backend.bedrock_backfill)
+
+
+@app.get("/api/bedrock/entity/{uid}")
+async def api_bedrock_entity(uid: int) -> Any:
+    """One entity, everything currently believed about it, and everything ever believed."""
+    if backend is None:
+        return {"entity": None, "current": [], "history": []}
+    return await asyncio.to_thread(backend.bedrock_entity, uid)
+
+
+@app.get("/api/bedrock/fact/{fact_id}/provenance")
+async def api_bedrock_provenance(fact_id: int) -> Any:
+    """Which model asserted this, from which frame, and what it replaced."""
+    if backend is None:
+        return {"fact": None, "lineage": []}
+    return await asyncio.to_thread(backend.bedrock_provenance, fact_id)
+
+
+@app.post("/api/bedrock/purge/{uid}")
+async def api_bedrock_purge(uid: int) -> Any:
+    """Hard erasure of one individual's entire record. Irreversible by design."""
+    if backend is None:
+        return {"facts": 0, "entities": 0, "snapshots": 0}
+    return await asyncio.to_thread(backend.bedrock_purge, uid)
+
+
+# -- DREAMSTATE: what this place normally looks like, and where reality departs from it ------
+@app.get("/api/dream/divergences")
+async def api_dream_divergences(sid: str | None = None, limit: int = 100) -> Any:
+    """Fired divergences, newest first. Declared BEFORE /api/dream/{sid} so the literal path
+    wins the route match."""
+    if backend is None:
+        return {"divergences": []}
+    return await asyncio.to_thread(backend.dream_divergences, sid, limit)
+
+
+@app.post("/api/dream/divergence/{div_id}/verdict")
+async def api_dream_verdict(div_id: int, payload: dict | None = None) -> Any:
+    if backend is None:
+        return {"ok": False}
+    return await asyncio.to_thread(backend.dream_verdict, div_id, (payload or {}).get("verdict"))
+
+
+@app.get("/api/dream/{sid}")
+async def api_dream(sid: str) -> Any:
+    """Live expectation state: per-cell sigma, per-bucket maturity, muted cells."""
+    if backend is None:
+        return {"status": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.dream_status, sid)
+
+
+@app.get("/api/dream/{sid}/plate")
+async def api_dream_plate(sid: str) -> Response:
+    """The learned background plate: what this camera expects to be there. 204 until warm."""
+    if backend is None:
+        return Response(status_code=503)
+    data = await asyncio.to_thread(backend.dream_plate, sid)
+    if not data:
+        return Response(status_code=204)
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/dream/{sid}/pulse")
+async def api_dream_pulse(sid: str, hours: int = 24) -> Any:
+    if backend is None:
+        return {"pulse": []}
+    return await asyncio.to_thread(backend.dream_pulse, sid, hours)
+
+
+@app.post("/api/dream/{sid}/mute")
+async def api_dream_mute(sid: str, payload: dict | None = None) -> Any:
+    """Silence the flag that flaps and the tree that sways."""
+    if backend is None:
+        return {"muted": []}
+    p = payload or {}
+    cells = [int(c) for c in (p.get("cells") or [])]
+    return await asyncio.to_thread(backend.dream_mute, sid, cells,
+                                   int(p.get("from_hour", 0)), int(p.get("to_hour", 24)))
+
+
+@app.post("/api/dream/{sid}/threshold")
+async def api_dream_threshold(sid: str, payload: dict | None = None) -> Any:
+    if backend is None:
+        return {"threshold": 5.0}
+    return await asyncio.to_thread(backend.dream_threshold, sid,
+                                   float((payload or {}).get("sigma", 5.0)))
+
+
+@app.post("/api/dream/{sid}/reset")
+async def api_dream_reset(sid: str, payload: dict | None = None) -> Any:
+    """`reregister` tries to realign against the stored plate; `relearn` forgets the camera."""
+    if backend is None:
+        return {"ok": False}
+    return await asyncio.to_thread(backend.dream_reset, sid,
+                                   str((payload or {}).get("mode", "relearn")))
+
+
+# -- FOG OF WAR: the observability field and its complement ---------------------------------
+@app.get("/api/coverage/{sid}")
+async def api_coverage(sid: str, task: str | None = None, height: float | None = None) -> Any:
+    """What this camera can and cannot see, right now. Always 200 with
+    {"coverage": {...}} or {"coverage": null, "reason": "..."}."""
+    if backend is None:
+        return {"coverage": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.coverage_scene, sid, task, height)
+
+
+@app.get("/api/coverage/{sid}/blindspots")
+async def api_blind_spots(sid: str) -> Any:
+    """Persistent blind spots, ranked by area times traffic times losses."""
+    if backend is None:
+        return {"spots": []}
+    return await asyncio.to_thread(backend.blind_spots, sid)
+
+
+@app.post("/api/blindspots/{spot_id}/dismiss")
+async def api_dismiss_blind_spot(spot_id: int, payload: dict | None = None) -> Any:
+    if backend is None:
+        return {"ok": False}
+    on = bool((payload or {}).get("on", True))
+    return await asyncio.to_thread(backend.dismiss_blind_spot, spot_id, on)
+
+
+@app.get("/api/coverage/{sid}/report")
+async def api_coverage_report(sid: str) -> Any:
+    """A printable coverage statement: task, percentage, DORI bands, blind spots, methodology."""
+    if backend is None:
+        return {"report": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.coverage_report, sid)
+
+
+# -- GRAIN: the behavioural grain of the place (movement only, never appearance) ------------
+@app.get("/api/grain/{sid}")
+async def api_grain(sid: str, bucket: int | None = None, cls: str = "person") -> Any:
+    """The learned movement field for one time bucket: per-cell heading roses, speeds and how
+    strongly the place prefers a direction."""
+    if backend is None:
+        return {"status": None, "reason": "backend_down"}
+    return await asyncio.to_thread(backend.grain_field, sid, bucket, cls)
+
+
+@app.get("/api/grain/{sid}/tracks")
+async def api_grain_tracks(sid: str, limit: int = 100, unusual: int = 0) -> Any:
+    if backend is None:
+        return {"tracks": []}
+    return await asyncio.to_thread(backend.grain_ledger, sid, limit, bool(unusual))
+
+
+@app.get("/api/grain/track/{track_id}/precedents")
+async def api_grain_precedents(track_id: int, n: int = 6) -> Any:
+    """The closest historical trajectories by shape. "The last three times someone did this it
+    was the courier" is worth more to an operator than a confidence number."""
+    if backend is None:
+        return {"precedents": []}
+    return await asyncio.to_thread(backend.grain_precedents, track_id, n)
+
+
+@app.post("/api/grain/track/{track_id}/verdict")
+async def api_grain_verdict(track_id: int, payload: dict | None = None) -> Any:
+    if backend is None:
+        return {"ok": False}
+    verdict = (payload or {}).get("verdict")
+    return await asyncio.to_thread(backend.grain_verdict, track_id, verdict)
+
+
+@app.post("/api/grain/{sid}/mute")
+async def api_grain_mute(sid: str, payload: dict | None = None) -> Any:
+    """Paint cells out of scoring (the doorway where staff always loiter)."""
+    if backend is None:
+        return {"muted": []}
+    cells = [int(c) for c in ((payload or {}).get("cells") or [])]
+    return await asyncio.to_thread(backend.grain_mute, sid, cells)
+
+
 # -- long-term identity: subjects / dossiers / reconstruction (features 5/6/7) --------------
 @app.get("/api/subjects")
 async def api_subjects(cls: str | None = None, limit: int = 200, order: str = "last_seen") -> Any:

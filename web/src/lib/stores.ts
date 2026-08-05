@@ -1,13 +1,15 @@
 // OVERSEER — shared reactive state (svelte stores).
 import { get, writable } from 'svelte/store'
 import type {
-  Alert, Camera, ConnState, Detection, FrameMeta, Metric, OOITarget, SystemStat, TimelineEvent,
+  Alert, BedrockQuery, BedrockResult, BlindSpot, Camera, ConnState, Coverage, Detection,
+  Divergence, DreamStatus, FogLoss, FrameMeta, GrainStatus, GrainTrackRow, Metric, OOITarget,
+  Probe, ProbeFrame, SystemStat, TimelineEvent,
 } from './types'
 import { MODULES } from './lexicon'
 import { fpRate } from './feedback'
 import { api } from './api'
 
-export type Mode = 'pov' | 'montage' | 'topology' | 'forensic' | 'archive' | 'case' | 'roster'
+export type Mode = 'pov' | 'montage' | 'topology' | 'forensic' | 'archive' | 'case' | 'roster' | 'bedrock'
 
 export const booted = writable(false)
 export type Stage = 'boot' | 'select' | 'live'
@@ -114,7 +116,10 @@ function seedModules() {
   try { saved = JSON.parse(localStorage.getItem(MODULES_LS) || '{}') } catch { saved = {} }
   return MODULES.map((m) => ({
     ...m,
-    on: m.key in saved ? !!saved[m.key] : !['heatmap', 'motion', 'tactical', 'ghosts', 'social'].includes(m.key),
+    on: m.key in saved
+      ? !!saved[m.key]
+      : !['heatmap', 'motion', 'tactical', 'ghosts', 'social',
+          'dream', 'unseen', 'grain', 'listen'].includes(m.key),
   }))
 }
 export const modules = writable(seedModules())
@@ -166,6 +171,39 @@ export const investigateCase = writable<number | null>(null) // open case id in 
 export const suggestionsOpen = writable(false)               // smart suggestions advisor screen
 export const spatialOpen = writable<string | null>(null)     // 3D spatial scene for a camera (source id)
 export const walkthroughAuto = writable(false)               // request the spatial view to open straight into live WALKTHROUGH mode
+// ── PERCEPTION suite ────────────────────────────────────────────────────────────────────────
+// Four engines that model the PLACE rather than the objects in it, plus BEDROCK (a mode) which
+// makes everything they assert queryable. Each has a live overlay (gated by its MODULES key) and
+// a dedicated screen (gated by the store below).
+export const dreamConsole = writable<number | 'live' | null>(null)   // DREAMSTATE console; number = divergence id
+export const coverageScreen = writable(false)                        // FOG OF WAR coverage screen
+export const grainScreen = writable(false)                           // GRAIN model browser
+export const eardrumDrawer = writable(false)                         // EARDRUM bottom drawer
+export const listenPlacing = writable(false)                         // EARDRUM probe placement mode on the feed
+export const probes = writable<Probe[]>([])                          // live probe roster for the active camera
+export const probeFrames = writable<Record<string, ProbeFrame>>({})  // newest spectral frame per probe id
+export const divergences = writable<Divergence[]>([])                // DREAMSTATE divergence feed (newest first)
+export const dreamStatus = writable<DreamStatus | null>(null)        // maturity + current sigma for the active cam
+export const coverage = writable<Coverage | null>(null)              // FOG OF WAR field for the active cam
+export const blindSpots = writable<BlindSpot[]>([])                  // FOG OF WAR ranked blind-spot ledger
+export const fogLosses = writable<FogLoss[]>([])                     // live LOST IN FOG countdowns
+export const grainStatus = writable<GrainStatus | null>(null)        // GRAIN maturity + field for the active cam
+export const grainTracks = writable<GrainTrackRow[]>([])             // GRAIN ledger: scored tracks, newest first
+// BEDROCK query state (survives leaving/re-entering the mode so a long query is not lost).
+export const bedrockQuery = writable<BedrockQuery | null>(null)
+export const bedrockResult = writable<BedrockResult | null>(null)
+export const bedrockAsOf = writable<number | null>(null)              // transaction-time handle; null = LIVE
+
+/** Push a divergence to the top of the feed (newest first), cap 200. */
+export function pushDivergence(d: Divergence) {
+  divergences.update((list) => [d, ...list.filter((x) => x.id !== d.id)].slice(0, 200))
+}
+
+/** Merge one probe's newest spectral frame (arrives over the WS at ~4 Hz). */
+export function applyProbeFrame(f: ProbeFrame) {
+  probeFrames.update((m) => ({ ...m, [String(f.id)]: f }))
+}
+
 export const dossierOpen = writable(false)  // stationary editor panel for the selected tracklet
 export const alertsScreen = writable(false)                  // cross-camera alerts board (all cameras)
 export const operatorOpen = writable(false)                  // central AI Operator console (voice + text)

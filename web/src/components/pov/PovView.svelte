@@ -1,14 +1,20 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen, spatialOpen, modules } from '../../lib/stores'
+  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen, spatialOpen, modules, listenPlacing } from '../../lib/stores'
   import { SIM } from '../../lib/sim'
   import { LEX } from '../../lib/lexicon'
   import { api } from '../../lib/api'
   import { sfx } from '../../lib/audio'
   import type { Detection } from '../../lib/types'
   import { initFeedGL, type FeedGL } from '../../lib/hud/feedgl'
+  import ConformityGauge from './ConformityGauge.svelte'
   import DetectionLayer from './DetectionLayer.svelte'
+  import DreamRibbon from './DreamRibbon.svelte'
+  import DreamVeil from './DreamVeil.svelte'
+  import FogOverlay from './FogOverlay.svelte'
   import GhostLayer from './GhostLayer.svelte'
+  import GrainField from './GrainField.svelte'
+  import ListenProbes from './ListenProbes.svelte'
   import SocialXray from './SocialXray.svelte'
   import TacticalMap from './TacticalMap.svelte'
   import MatchHighlight from './MatchHighlight.svelte'
@@ -29,6 +35,13 @@
   let ghostsOn = $derived(!!$modules.find((m) => m.key === 'ghosts')?.on)
   let socialOn = $derived(!!$modules.find((m) => m.key === 'social')?.on)
   let tacticalOn = $derived(!!$modules.find((m) => m.key === 'tactical')?.on)
+  // PERCEPTION overlays: they model the place, so they ride inside the zoom wrapper with the
+  // detections (the fog belongs to the ground, not to the screen).
+  let unseenOn = $derived(!!$modules.find((m) => m.key === 'unseen')?.on)
+  let grainOn = $derived(!!$modules.find((m) => m.key === 'grain')?.on)
+  let dreamOn = $derived(!!$modules.find((m) => m.key === 'dream')?.on)
+  // EARDRUM brackets stay visible whenever listening is on OR the operator is placing probes
+  let listenOn = $derived(!!$modules.find((m) => m.key === 'listen')?.on || $listenPlacing)
   let showOverlays = $derived((live && !failed) || SIM)
 
   // 3D fly-between: the old feed zooms out and banks away in perspective while the
@@ -114,12 +127,18 @@
     {/if}
 
     <div class="grid-overlay"></div>
+    {#if grainOn && showOverlays}<GrainField />{/if}
+    {#if unseenOn && showOverlays}<FogOverlay />{/if}
     <DetectionLayer />
+    {#if grainOn && showOverlays}<ConformityGauge />{/if}
+    {#if dreamOn && showOverlays}<DreamVeil />{/if}
     {#if ghostsOn && showOverlays}<GhostLayer />{/if}
     {#if socialOn && showOverlays}<SocialXray />{/if}
     <MatchHighlight />
   </div>
 
+  {#if listenOn && showOverlays}<ListenProbes />{/if}
+  {#if dreamOn && showOverlays}<DreamRibbon />{/if}
   {#if tacticalOn && showOverlays}<TacticalMap />{/if}
 
   {#if connecting}

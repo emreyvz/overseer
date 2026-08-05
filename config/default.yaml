@@ -297,6 +297,97 @@ spatial:
                           # so disocclusion holes are filled with real surface, not black voids
   texture_width: 960      # a crisp copy of the frame is sent alongside the coarse mesh and
                           # UV-mapped onto it — full-detail texture without a heavy mesh
+
+# ── PERCEPTION SUITE ────────────────────────────────────────────────────────────────────────
+# Four engines that model the PLACE rather than the objects in it, plus BEDROCK which makes
+# everything they assert queryable. Each is independently toggleable because together they DO
+# cost analysis fps on a single-process box (the GIL is the ceiling, not the maths).
+
+# DREAMSTATE — a per-camera expectation model. Learns what this place normally looks like at
+# this hour and reports, in calibrated sigma, where reality departs from it. It never
+# classifies: the only output is DIVERGENCE, never THREAT.
+dream:
+  enabled: true
+  tier: auto              # a = statistical expectation field (no training, usable in ~40 min)
+                          # b = latent predictor over the ReID encoder's tokens (trained nightly)
+                          # auto = b when a trained predictor exists for the camera, else a
+  grid: [24, 14]          # cell grid over the frame
+  rate_hz: 2.0            # observation rate (NEVER per-frame: dense flow is the known bottleneck)
+  buckets: 6              # time-of-day buckets; statistics are kept per bucket
+  sigma_threshold: 5.0    # a cell qualifies above this many robust sigma
+  min_cells: 3            # ...and a divergence needs a connected blob of at least this many
+  persist_s: 2.0          # ...held for at least this long. All three, or it does not fire.
+  alert_sigma: 7.0        # above this the divergence is also raised as an alert
+  forget_half_life_days: 21   # slow drift (seasons, sun angle) is learned; fast change is not
+  min_observations: 300   # a bucket below this is UNLEARNED and is excluded from firing
+  train:
+    nightly_at: "03:30"
+    gpu_ceiling: 0.6      # skip the nightly train while the GPU is busier than this
+    history_days: 7
+
+# FOG OF WAR — the observability field, and its complement. Four independent channels combine
+# into one `unseen` scalar per ground cell; coverage is reported against EN 62676-4 (DORI).
+coverage:
+  enabled: true
+  cell_m: 0.5
+  horizon_m: 60
+  dori_task: recognise    # detect | observe | recognise | identify (25 / 63 / 125 / 250 px per m)
+  target_height_m: 1.7    # 0.5 crouching | 1.0 crawling | 1.7 standing — a wedge that hides a
+                          # crouching person but not a standing one is a different fact
+  channels:               # per-channel weights; any can be zeroed to isolate a cause
+    geometric: 1.0        # ray-occlusion shadow volumes from the depth field
+    optical: 1.0          # pixels-per-metre against the DORI thresholds
+    radiometric: 0.7      # local SNR, clipping, motion blur
+    empirical: 1.0        # where tracks actually die (the honest channel)
+  persist_ratio: 0.9      # a shadow present in this fraction of 24 h samples is PERSISTENT
+  lost_tolerance: 2.5     # LOST IN FOG fires at this multiple of the predicted traversal time
+  min_cell_samples: 20    # below this the empirical channel reports INSUFFICIENT DATA, not zero
+
+# GRAIN — the behavioural grain of the place. Scores MOVEMENT ONLY: no appearance, identity or
+# demographic feature ever reaches the model (enforced by tests/test_grain.py).
+grain:
+  enabled: true
+  tier: auto              # a = spatially-conditioned Markov field | b = + GRU sequence density
+  grid: [48, 27]          # ground-plane cell grid
+  dt: 0.5                 # trajectory resampling interval (s)
+  buckets: 6
+  density_buckets: 3
+  min_tracks: 2000        # nothing is scored until the model has seen this many tracks
+  min_cell_obs: 40        # a cell below this returns UNJUDGED — "we do not know this place"
+  min_track_s: 4.0        # shorter tracks carry too little evidence to judge
+  percentile_threshold: 0.5   # flag below this percentile
+  alert_percentile: 0.1       # ...and raise an alert below this one
+  forget_half_life_days: 21
+  suspend_above_density: 3    # in a crowd, suspend rather than fire confidently
+  precedents: 6           # nearest historical trajectories shown in the WHY card
+
+# EARDRUM — sub-pixel surface motion as a vibration channel. The structural band cannot carry
+# intelligible speech (speech fundamentals start ~85 Hz); the acoustic band can, so it is
+# opt-in, logged when enabled, and hard-limited in code rather than only in the UI.
+eardrum:
+  enabled: true
+  max_probes: 8
+  roi: 64                 # probe ROI size in px (square)
+  worker_hz: 30           # consumption rate of the raw-frame ring
+  window: 1024            # STFT window
+  reanchor_s: 10.0        # reference patch re-anchor interval (fights thermal drift)
+  reference_required: true    # without a REF probe every reading includes camera shake
+  min_texture: 0.12       # refuse to place a probe below this Shi-Tomasi score
+  acoustic_band:
+    enabled: false        # rolling-shutter high band — OFF by default
+    acknowledged: false   # must be explicitly acknowledged in settings before it can be enabled
+
+# BEDROCK — a bitemporal fact store projected from the existing tables. Valid time is when a
+# thing was true; transaction time is when we came to believe it. Corrections never delete.
+bedrock:
+  enabled: true
+  open_after: 3           # observations of a stable value before an interval opens
+  close_after: 5          # ...and of its absence before the interval closes
+  max_facts_per_hour: 4000    # write budget; exceeding it escalates the debouncer, never the disk
+  retention_days: 120     # after this, presence facts roll up to daily aggregates
+  vocab_version: 1
+  purge_enabled: true     # PURGE SUBJECT hard-deletes every fact for one individual (erasure)
+
 # Correlated threat scoring: co-occurring events within window_seconds on one camera are
 # fused into a graded threat. Dangerous combinations escalate a firing alert's severity, and
 # a high/critical combination with no matching rule is surfaced as its own CORRELATED THREAT
