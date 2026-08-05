@@ -15,7 +15,7 @@
   import DominantRail from './rails/DominantRail.svelte'
   import AuxiliaryRail from './rails/AuxiliaryRail.svelte'
   import TimelineDrawer from './TimelineDrawer.svelte'
-  import { mode, stage, pickerView, watchlistOpen, operatorOpen, suggestionsOpen, commandOpen, triggerGlitch } from '../lib/stores'
+  import { mode, stage, pickerView, watchlistOpen, operatorOpen, suggestionsOpen, commandOpen, triggerGlitch, perceptionPanel } from '../lib/stores'
   import { sfx } from '../lib/audio'
 
   // Bottom nav — clickable, active-highlighted. Kept lean; heavier tools live in ⌘.
@@ -25,6 +25,7 @@
     { label: 'FORENSIC', key: 'A', mode: 'forensic', act: () => mode.set('forensic') },
     { label: 'CASES', key: 'K', mode: 'case', act: () => mode.set('case') },
     { label: 'BEDROCK', key: 'B', mode: 'bedrock', act: () => mode.set('bedrock') },
+    { label: 'PERCEPTION', key: 'P', mode: '', act: () => perceptionPanel.update((v) => !v) },
     { label: 'WATCHLIST', key: 'W', mode: '', act: () => watchlistOpen.set(true) },
     { label: 'OPERATOR', key: 'I', mode: '', act: () => operatorOpen.set(true) },
     { label: 'SUGGEST', key: 'G', mode: '', act: () => suggestionsOpen.set(true) },

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen, spatialOpen, modules, listenPlacing } from '../../lib/stores'
+  import { activeCam, cameras, conn, povZoom, flashBanner, enrollOpen, spatialOpen, modules, listenPlacing, perceptionPanel } from '../../lib/stores'
   import { SIM } from '../../lib/sim'
   import { LEX } from '../../lib/lexicon'
   import { api } from '../../lib/api'
@@ -14,7 +14,9 @@
   import FogOverlay from './FogOverlay.svelte'
   import GhostLayer from './GhostLayer.svelte'
   import GrainField from './GrainField.svelte'
+  import PerceptionHud from './PerceptionHud.svelte'
   import ListenProbes from './ListenProbes.svelte'
+  import PerceptionPanel from './PerceptionPanel.svelte'
   import SocialXray from './SocialXray.svelte'
   import TacticalMap from './TacticalMap.svelte'
   import MatchHighlight from './MatchHighlight.svelte'
@@ -137,9 +139,14 @@
     <MatchHighlight />
   </div>
 
+  <!-- Perception CHROME renders out here, not inside .zoomwrap. The wrapper is transformed, so
+       it forms its own stacking context down at the video layer and anything inside it is
+       painted under every rail regardless of z-index. That is why these readouts were invisible. -->
   {#if listenOn && showOverlays}<ListenProbes />{/if}
+  {#if showOverlays}<PerceptionHud />{/if}
   {#if dreamOn && showOverlays}<DreamRibbon />{/if}
   {#if tacticalOn && showOverlays}<TacticalMap />{/if}
+  {#if $perceptionPanel}<PerceptionPanel />{/if}
 
   {#if connecting}
     <!-- keep the camera's thumbnail on screen while connecting so there is no black flash -->
@@ -175,7 +182,40 @@
       ⛶ 3D SPATIAL
     </button>
   {/if}
+  {#if connecting}
+    <!-- keep the camera's thumbnail on screen while connecting so there is no black flash -->
+    {#if $activeCam}<div class="cthumb"><LiveThumb id={$activeCam} fps={4} /></div>{/if}
+    <div class="connecting">
+      <div class="cspin"></div>
+      <div class="ctext caps">{$conn === 'reconnecting' ? 'RECONNECTING' : 'CONNECTING'} → {cam?.name ?? 'CAM —'}</div>
+      <div class="csub caps">ESTABLISHING FEED<span class="cdot"></span></div>
+    </div>
+  {:else if !SIM && (!live || failed)}
+    <NoSignal />
+  {/if}
 
+  {#if live && !failed}<PtzPad />{/if}
+
+  <!-- look-closer: catch layer, scan reticle, and enrollable hits -->
+  {#if inspectOn && live && !failed}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="inspectcatch" onclick={lookCloser} role="presentation"></div>
+  {/if}
+  {#if scanning}<div class="scanret" style={`left:${scanPt.x * 100}%;top:${scanPt.y * 100}%`}></div>{/if}
+  {#each hits as h (h.id)}
+    <button class="ihit" style={`left:${h.bbox[0] * 100}%;top:${h.bbox[1] * 100}%;width:${h.bbox[2] * 100}%;height:${h.bbox[3] * 100}%`}
+      onclick={() => enrollOpen.set(h)} title="enroll this target">
+      <span class="ihlabel caps">{h.klass} {Math.round(h.conf * 100)}% · ⊕</span>
+    </button>
+  {/each}
+  {#if live && !failed}
+    <button class="inspectbtn caps" class:on={inspectOn} onclick={() => { inspectOn = !inspectOn; hits = []; sfx('click', { volume: 0.3 }) }}>
+      ⌖ SCAN POINT{inspectOn ? ' · ON' : ''}
+    </button>
+    <button class="spatialbtn caps" onclick={() => { if ($activeCam) { spatialOpen.set($activeCam); sfx('click', { volume: 0.3 }) } }}>
+      ⛶ 3D SPATIAL
+    </button>
+  {/if}
   {#if switching && panOld && panNew}
     <div class="fly">
       <div class="scene">

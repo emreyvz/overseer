@@ -195,6 +195,7 @@
     <div class="hint caps">DRAG A BOX ON A TEXTURED, RIGID SURFACE. THE FIRST PROBE BECOMES THE REFERENCE.</div>
   {/if}
 
+
   {#if refused}
     <div class="refused caps">{refused}</div>
   {/if}

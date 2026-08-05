@@ -12,7 +12,6 @@
   import { onDestroy, onMount } from 'svelte'
   import { grainStatus } from '../../lib/stores'
   import { buildStreaks, type FieldDensity, type Streak } from '../../lib/grain'
-  import { sfx } from '../../lib/audio'
 
   const TICK_MS = 50            // 20 fps
   const DRIFT = 0.16            // loops per second along a streak's own direction
@@ -77,11 +76,6 @@
     }
   }
 
-  function cycleDensity() {
-    density = density === 'sparse' ? 'normal' : density === 'normal' ? 'dense' : 'sparse'
-    sfx('click', { volume: 0.2 })
-  }
-
   onMount(() => { raf = requestAnimationFrame(frame) })
   onDestroy(() => cancelAnimationFrame(raf))
 </script>
@@ -89,34 +83,10 @@
 {#if st}
   <div class="gf">
     <canvas bind:this={cv} class="field"></canvas>
-    <button class="chip caps" onclick={cycleDensity} title="Field density">
-      ⇅ {density}
-    </button>
-    {#if !st.mature}
-      <div class="learning caps">
-        <span class="lbar"><span class="lfill" style={`width:${Math.round(st.maturity * 100)}%`}></span></span>
-        LEARNING THE GRAIN · {st.tracks.toLocaleString()} TRACKS · {Math.round(st.maturity * 100)}% · NOT YET SCORING
-      </div>
-    {:else if st.suspended}
-      <div class="learning caps susp">SUSPENDED · {st.suspended}</div>
-    {:else if st.stale}
-      <div class="learning caps susp">SCENE CHANGED · GRAIN INVALID</div>
-    {/if}
   </div>
 {/if}
 
 <style>
   .gf { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
   .field { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .chip { position: absolute; right: 62px; top: 148px; pointer-events: auto;
-    padding: 3px 8px; border: 1px solid var(--hairline); background: rgba(4,7,10,0.55);
-    color: var(--ink-ghost); font-size: 8px; letter-spacing: 0.14em; cursor: crosshair; }
-  .chip:hover { color: var(--cyan); border-color: var(--cyan); }
-  .learning { position: absolute; left: 50%; top: 26px; transform: translateX(-50%);
-    display: flex; align-items: center; gap: 10px; padding: 5px 12px;
-    background: rgba(4,7,10,0.78); border: 1px solid color-mix(in srgb, var(--jade) 40%, transparent);
-    color: var(--jade); font-size: 8px; letter-spacing: 0.14em; white-space: nowrap; }
-  .learning.susp { border-color: color-mix(in srgb, var(--amber) 40%, transparent); color: var(--amber); }
-  .lbar { position: relative; width: 90px; height: 3px; background: var(--hairline); }
-  .lfill { position: absolute; inset: 0 auto 0 0; background: var(--jade); transition: width 600ms; }
 </style>
