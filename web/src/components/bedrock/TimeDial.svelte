@@ -10,6 +10,7 @@
   import { WINDOWS } from '../../lib/bedrock'
   import { sfx } from '../../lib/audio'
   import type { BedrockQuery } from '../../lib/types'
+  import Explain from '../Explain.svelte'
 
   let { query, asOf, oldest, delta, onwindow, onasof }: {
     query: BedrockQuery
@@ -72,7 +73,7 @@
 
 <footer class="band">
   <div class="col">
-    <span class="tk caps">VALID TIME</span>
+    <span class="tk caps">WHEN IT HAPPENED <Explain term="valid time" bare /></span>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="track valid" bind:this={vt}>
       <span class="brush" style={`left:${bFrom}%; width:${Math.max(1, bTo - bFrom)}%`}></span>
@@ -93,7 +94,7 @@
   </div>
 
   <div class="col tx">
-    <span class="tk caps amb">AS BELIEVED ON</span>
+    <span class="tk caps amb">WHAT WE KNEW BACK THEN <Explain term="transaction time" bare /></span>
     <div class="track belief" bind:this={tt}>
       <span class="dots"></span>
       <span class="past" style={`width:${txPct}%`}></span>
