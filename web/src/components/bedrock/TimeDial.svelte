@@ -119,7 +119,7 @@
   .band { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 18px;
     padding: 9px 18px; border-top: 1px solid var(--hairline); background: #04070a; flex: 0 0 auto; }
   .col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .tk { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.18em; }
+  .tk { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.18em; }
   .tk.amb { color: color-mix(in srgb, var(--amber) 70%, transparent); }
   .track { position: relative; height: 14px; background: rgba(236,236,236,0.05);
     border: 1px solid var(--hairline); cursor: crosshair; }
@@ -131,18 +131,18 @@
   .grip { position: absolute; top: -2px; width: 9px; height: 18px; margin-left: -4px; padding: 0;
     background: #04070a; border: 1px solid var(--cyan); cursor: ew-resize; touch-action: none; }
   .grip.amb { border-color: var(--amber); top: -4px; height: 16px; }
-  .livecap { position: absolute; right: 2px; top: -11px; font-size: 6px; color: var(--ink-ghost);
+  .livecap { position: absolute; right: 2px; top: -11px; font-size: 10px; color: var(--ink-ghost);
     letter-spacing: 0.14em; }
-  .stampsm { font-size: 7px; color: var(--ink-dim); letter-spacing: 0.1em; white-space: nowrap;
+  .stampsm { font-size: 10px; color: var(--ink-dim); letter-spacing: 0.1em; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
   .dim { color: var(--ink-ghost); } .amb { color: var(--amber); }
   .delta { color: var(--amber); }
   .wins { display: flex; gap: 3px; }
   .win { padding: 3px 6px; border: 1px solid var(--hairline); background: none; color: var(--ink-ghost);
-    font-size: 7px; letter-spacing: 0.12em; cursor: crosshair; }
+    font-size: 10px; letter-spacing: 0.12em; cursor: crosshair; }
   .win:hover { color: var(--cyan); border-color: var(--cyan); }
   .ret { padding: 7px 12px; border: 1px solid var(--ink-dim); background: none; color: var(--ink-dim);
-    font-size: 8px; letter-spacing: 0.14em; cursor: crosshair; white-space: nowrap; }
+    font-size: 11px; letter-spacing: 0.14em; cursor: crosshair; white-space: nowrap; }
   .ret:hover:not(:disabled) { border-color: var(--amber); color: var(--amber); }
   .ret:disabled { opacity: 0.35; }
 </style>

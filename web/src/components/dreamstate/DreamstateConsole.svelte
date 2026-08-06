@@ -147,8 +147,9 @@
   </header>
 
   <ScreenIntro
-    what="Moments when this camera stopped looking like it normally does at this time of day."
-    hint="Drag the divider to slide between what it expected and what actually happened." />
+    what="Moments when this camera stopped looking like it normally does at this hour."
+    hint="It cannot tell you WHAT changed, only that something here is not usual."
+    look="Drag the divider across the picture: left is what it expected, right is what is there." />
 
   {#if loading}
     <div class="empty caps"><span class="pulse">READING THE RECORD_</span></div>
@@ -323,23 +324,23 @@
   .top { display: flex; align-items: center; gap: 12px; padding: 11px 22px;
     border-bottom: 1px solid var(--hairline); font-size: var(--fs-label);
     letter-spacing: var(--tracking); background: #04070a; z-index: 2; }
-  .eyebrow { color: var(--scarlet); } .cnt { color: var(--ink-dim); font-size: 9px; } .spacer { flex: 1; }
+  .eyebrow { color: var(--scarlet); } .cnt { color: var(--ink-dim); font-size: 11px; } .spacer { flex: 1; }
   .gauge { position: relative; width: 40px; height: 40px; }
   .gauge svg { width: 40px; height: 40px; transform: rotate(-90deg); }
   .gauge .track { fill: none; stroke: var(--hairline); stroke-width: 4; }
   .gauge .prog { fill: none; stroke: var(--jade); stroke-width: 4; stroke-linecap: round;
     transition: stroke-dashoffset 700ms cubic-bezier(0.16, 1, 0.3, 1); }
   .gval { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 9px; color: var(--jade); letter-spacing: 0; }
-  .glabel { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.16em; margin-left: -4px; }
-  .chip { padding: 4px 8px; border: 1px solid var(--hairline); color: var(--ink-dim); font-size: 8px; }
+    font-size: 11px; color: var(--jade); letter-spacing: 0; }
+  .glabel { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.16em; margin-left: -4px; }
+  .chip { padding: 4px 8px; border: 1px solid var(--hairline); color: var(--ink-dim); font-size: 11px; }
   .x { padding: 6px 12px; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: none;
-    cursor: crosshair; font-size: 9px; letter-spacing: var(--tracking); }
+    cursor: crosshair; font-size: 11px; letter-spacing: var(--tracking); }
   .x:hover { border-color: var(--scarlet); color: var(--scarlet); }
 
   .empty { flex: 1; display: flex; flex-direction: column; gap: 14px; align-items: center;
     justify-content: center; color: var(--ink-dim); letter-spacing: 0.16em; text-align: center; padding: 0 40px; }
-  .empty .sub { font-size: 9px; color: var(--ink-ghost); max-width: 520px; line-height: 1.7; }
+  .empty .sub { font-size: 11px; color: var(--ink-ghost); max-width: 520px; line-height: 1.7; }
   .empty .big { font-size: 26px; letter-spacing: var(--tracking-wide); color: var(--amber); }
   .warnring { width: 54px; height: 54px; border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent);
     border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--amber); font-size: 22px; }
@@ -349,7 +350,7 @@
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px 1fr; }
   .queue { border-right: 1px solid var(--hairline); overflow-y: auto; padding: 12px 10px 40px;
     background: rgba(4,7,10,0.4); }
-  .qgrp { display: flex; align-items: center; gap: 7px; font-size: 8px; color: var(--ink-dim);
+  .qgrp { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-dim);
     letter-spacing: 0.16em; margin: 14px 6px 7px; }
   .qgrp:first-child { margin-top: 4px; }
   .qd { width: 6px; height: 6px; border-radius: 50%; }
@@ -368,10 +369,10 @@
   .qmid { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
   .qttl { font-size: 11px; color: var(--ink-dim); }
   .qrow.on .qttl { color: var(--ink); }
-  .qsub { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.1em; }
-  .qsig { font-size: 9px; color: var(--scarlet); }
+  .qsub { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; }
+  .qsig { font-size: 11px; color: var(--scarlet); }
   .lempty { display: flex; flex-direction: column; gap: 12px; align-items: center; padding: 50px 10px;
-    color: var(--ink-dim); font-size: 9px; letter-spacing: 0.14em; text-align: center; line-height: 1.8; }
+    color: var(--ink-dim); font-size: 11px; letter-spacing: 0.14em; text-align: center; line-height: 1.8; }
   .okring { width: 48px; height: 48px; border: 1px solid color-mix(in srgb, var(--jade) 50%, transparent);
     border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--jade);
     font-size: 20px; animation: breathe 4s ease-in-out infinite; }
@@ -386,7 +387,7 @@
   .noplate { display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center;
     height: 100%; background: repeating-linear-gradient(45deg, #0a0d12 0 8px, #070a0e 8px 16px);
     color: var(--ink-ghost); font-size: 10px; letter-spacing: 0.16em; text-align: center; padding: 0 20px; }
-  .np2 { font-size: 8px; }
+  .np2 { font-size: 11px; }
   .mark { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .blob { fill: none; stroke: var(--scarlet); stroke-width: 1.4; vector-effect: non-scaling-stroke;
     stroke-dasharray: 5 3; animation: ants 2.6s linear infinite; }
@@ -397,20 +398,20 @@
   .dhandle { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
     border: 1px solid var(--cyan); background: #04070a; }
   .dlabel { position: absolute; left: 50%; top: calc(50% + 16px); transform: translateX(-50%);
-    font-size: 8px; color: var(--cyan); letter-spacing: 0.12em; white-space: nowrap; }
-  .stamp { position: absolute; left: 12px; bottom: 10px; font-size: 8px; color: var(--ink-dim);
+    font-size: 11px; color: var(--cyan); letter-spacing: 0.12em; white-space: nowrap; }
+  .stamp { position: absolute; left: 12px; bottom: 10px; font-size: 11px; color: var(--ink-dim);
     background: rgba(4,7,10,0.7); padding: 3px 8px; letter-spacing: 0.1em; }
-  .triage { position: absolute; right: 12px; top: 10px; font-size: 8px; padding: 3px 8px;
+  .triage { position: absolute; right: 12px; top: 10px; font-size: 11px; padding: 3px 8px;
     background: rgba(4,7,10,0.72); letter-spacing: 0.12em; }
   .t-subject { color: var(--scarlet); } .t-scene { color: var(--cyan); }
 
   .lower { flex: 0 0 auto; display: grid; grid-template-columns: 1.1fr 1fr 0.9fr; gap: 1px;
     background: var(--hairline); max-height: 38%; }
   .pnl { background: #05070a; padding: 11px 14px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
-  .pk { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.18em; }
+  .pk { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.18em; }
   /* Plain-language notes under a machine label: the caps line names the panel, this says what
      the operator is actually looking at. */
-  .qnote, .pnote { font-size: 9px; color: var(--ink-ghost); line-height: 1.55; letter-spacing: 0;
+  .qnote, .pnote { font-size: 11px; color: var(--ink-ghost); line-height: 1.55; letter-spacing: 0;
     text-transform: none; }
   .qnote { margin: 0 4px 8px; }
   .pnote { margin: -2px 0 4px; }
@@ -421,34 +422,34 @@
   .tick { flex: 1; min-width: 1px; background: var(--ink-ghost); }
   .tick.hot { background: var(--scarlet); box-shadow: 0 0 4px var(--scarlet-glow); }
   .thr { position: absolute; left: 0; right: 0; height: 1px; background: var(--scarlet); opacity: 0.45; }
-  .tlx { display: flex; justify-content: space-between; font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.12em; }
+  .tlx { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.12em; }
 
   .grid { display: grid; gap: 1px; }
   .cell { aspect-ratio: 1; background: var(--scarlet); }
   .cell.hot { box-shadow: 0 0 4px var(--scarlet-glow); }
   .cell.mute { background: var(--ink-ghost); opacity: 0.5 !important; }
-  .cinfo { font-size: 8px; color: var(--ink-dim); letter-spacing: 0.12em; min-height: 12px; }
+  .cinfo { font-size: 11px; color: var(--ink-dim); letter-spacing: 0.12em; min-height: 12px; }
 
   .vacts { display: flex; gap: 7px; }
   .ok, .flag, .mini, .go, .alt { display: inline-flex; align-items: center; justify-content: center;
     gap: 6px; border: 1px solid var(--ink-dim); background: none; color: var(--ink-dim);
     cursor: crosshair; letter-spacing: 0.12em; }
-  .ok, .flag { flex: 1; padding: 9px 0; font-size: 9px; }
+  .ok, .flag { flex: 1; padding: 9px 0; font-size: 11px; }
   .ok:hover:not(:disabled) { border-color: var(--jade); color: var(--jade); }
   .flag:hover:not(:disabled) { border-color: var(--scarlet); color: var(--scarlet); }
-  .mini { padding: 6px 10px; font-size: 8px; }
+  .mini { padding: 6px 10px; font-size: 11px; }
   .mini:hover:not(:disabled) { border-color: var(--cyan); color: var(--cyan); }
   .go { padding: 11px 20px; font-size: 11px; border-color: var(--cyan); color: var(--cyan); letter-spacing: 0.16em; }
   .go:hover:not(:disabled) { background: var(--cyan); color: #04070a; }
   .alt { padding: 11px 20px; font-size: 11px; letter-spacing: 0.16em; }
   .alt:hover:not(:disabled) { border-color: var(--scarlet); color: var(--scarlet); }
   .ok:disabled, .flag:disabled, .mini:disabled, .go:disabled, .alt:disabled { opacity: 0.4; }
-  .ok .k, .flag .k { border: 1px solid var(--ink-ghost); padding: 0 4px; font-size: 8px; }
+  .ok .k, .flag .k { border: 1px solid var(--ink-ghost); padding: 0 4px; font-size: 11px; }
 
   .slider { width: 100%; accent-color: var(--cyan); cursor: crosshair; }
-  .scap { font-size: 8px; color: var(--cyan); letter-spacing: 0.1em; line-height: 1.5; }
+  .scap { font-size: 11px; color: var(--cyan); letter-spacing: 0.1em; line-height: 1.5; }
   .scap .dim { color: var(--ink-ghost); }
-  .note { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.1em; line-height: 1.6; margin-top: auto; }
+  .note { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; line-height: 1.6; margin-top: auto; }
 
   @media (max-width: 1000px) { .lower { grid-template-columns: 1fr 1fr; } }
 </style>

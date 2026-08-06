@@ -216,8 +216,9 @@
   </header>
 
   <ScreenIntro
-    what="How people normally move through this camera, and everyone today who did not."
-    hint="Left: which normal. Middle: the learned flow. Right: today's odd ones, rarest first." />
+    what="How people normally move through here, and everyone today who did not."
+    hint="It learns the usual paths from months of traffic, then flags journeys that do not fit."
+    look="The list on the right: today's rarest journeys. Click one to watch it replay." />
 
   {#if !st}
     <div class="empty caps"><span class="pulse">READING THE GRAIN_</span></div>
@@ -241,7 +242,7 @@
             <text class="hubt" x="60" y="63">{st.buckets[grainBucket ?? st.bucket]}</text>
           </svg>
         </div>
-        <div class="hint caps">1-6 JUMP TO A BUCKET</div>
+        <div class="hint caps">OR PRESS 1-6</div>
 
         <div class="ck caps">WHO IT IS WATCHING</div>
         <div class="chips">
@@ -252,20 +253,20 @@
         </div>
 
         {#if compare}
-          <div class="ck caps">COMPARE AGAINST</div>
+          <div class="ck caps">COMPARE WITH WHICH PART OF THE DAY</div>
           <div class="chips wrap">
             {#each st.buckets as b, i}
               <button class="tog caps sm" class:on={compareBucket === i}
                 onclick={() => { compareBucket = i; toggleCompare(); toggleCompare() }}>{b}</button>
             {/each}
           </div>
-          <div class="hint caps">SCARLET STREAKS EXIST THERE BUT NOT HERE</div>
+          <div class="hint caps">RED STREAKS: PEOPLE WALK THAT WAY THEN, BUT NOT NOW</div>
         {/if}
 
         {#if muteMode}
-          <div class="ck caps">MUTE</div>
+          <div class="ck caps">IGNORE THESE PATCHES</div>
           <div class="hint caps">
-            CLICK CELLS TO EXCLUDE THEM FROM SCORING · {muted.length} MUTED.
+            CLICK PATCHES OF GROUND TO STOP JUDGING ANYONE STANDING THERE · {muted.length} MUTED.
             USE THIS FOR THE DOORWAY WHERE STAFF ALWAYS WAIT.
           </div>
         {/if}
@@ -327,7 +328,7 @@
               {/if}
             </div>
           {:else}
-            <div class="ihint caps">HOVER THE FRAME TO INSPECT A CELL · CLICK TO PIN</div>
+            <div class="ihint caps">MOVE THE MOUSE OVER THE PICTURE TO INSPECT A SPOT · CLICK TO KEEP IT</div>
           {/if}
         </div>
       </main>
@@ -417,15 +418,15 @@
   .top { display: flex; align-items: center; gap: 12px; padding: 11px 22px;
     border-bottom: 1px solid var(--hairline); font-size: var(--fs-label);
     letter-spacing: var(--tracking); background: #04070a; z-index: 2; }
-  .eyebrow { color: var(--scarlet); } .cnt { color: var(--ink-dim); font-size: 9px; } .spacer { flex: 1; }
-  .chip { padding: 4px 9px; border: 1px solid var(--hairline); color: var(--amber); font-size: 8px; letter-spacing: 0.12em; }
+  .eyebrow { color: var(--scarlet); } .cnt { color: var(--ink-dim); font-size: 11px; } .spacer { flex: 1; }
+  .chip { padding: 4px 9px; border: 1px solid var(--hairline); color: var(--amber); font-size: 11px; letter-spacing: 0.12em; }
   .chip.mature { color: var(--jade); }
   .ref, .x { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
     border: 1px solid var(--ink-dim); color: var(--ink-dim); background: none; cursor: crosshair;
-    font-size: 9px; letter-spacing: var(--tracking); }
+    font-size: 11px; letter-spacing: var(--tracking); }
   .ref:hover { border-color: var(--cyan); color: var(--cyan); }
   .ref.on { border-color: var(--cyan); color: var(--cyan); background: rgba(56,208,227,0.1); }
-  .ref .k, .ok .k, .flag .k { border: 1px solid var(--ink-ghost); padding: 0 4px; font-size: 8px; color: var(--ink-ghost); }
+  .ref .k, .ok .k, .flag .k { border: 1px solid var(--ink-ghost); padding: 0 4px; font-size: 11px; color: var(--ink-ghost); }
   .x:hover { border-color: var(--scarlet); color: var(--scarlet); }
 
   .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--ink-dim); letter-spacing: 0.16em; }
@@ -435,27 +436,27 @@
   .cond, .ledger { overflow-y: auto; padding: 14px 12px 30px; background: rgba(4,7,10,0.4); }
   .cond { border-right: 1px solid var(--hairline); }
   .ledger { border-left: 1px solid var(--hairline); }
-  .ck { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.18em; margin: 14px 2px 8px; }
+  .ck { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.18em; margin: 14px 2px 8px; }
   .ck:first-child { margin-top: 0; }
   /* Plain-language notes sit under a machine label and carry the meaning, so the caps line can
      stay short without leaving the operator to guess what it is counting. */
-  .qnote { font-size: 9px; color: var(--ink-ghost); line-height: 1.55; margin: 0 4px 8px; }
+  .qnote { font-size: 11px; color: var(--ink-ghost); line-height: 1.55; margin: 0 4px 8px; }
   .srank { font-size: 11px; color: var(--ink-dim); line-height: 1.6; margin: 4px 0 2px; }
   .srank b { color: var(--ink); font-weight: 500; }
-  .fhead { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.18em; margin: 8px 0 2px; }
-  .hint { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.12em; line-height: 1.6; margin-top: 6px; }
+  .fhead { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.18em; margin: 8px 0 2px; }
+  .hint { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.12em; line-height: 1.6; margin-top: 6px; }
 
   .dial svg { width: 100%; max-width: 190px; display: block; margin: 0 auto; }
   .seg { fill: rgba(124,130,136,0.09); stroke: #04070a; stroke-width: 1.5; cursor: crosshair; transition: fill 160ms; }
   .seg:hover { fill: rgba(56,208,227,0.18); }
   .seg.on { fill: rgba(56,208,227,0.32); }
   .hub { fill: #04070a; stroke: var(--hairline); }
-  .hubt { fill: var(--cyan); font-size: 7px; text-anchor: middle; font-family: var(--font-mono); letter-spacing: 0.1em; }
+  .hubt { fill: var(--cyan); font-size: 10px; text-anchor: middle; font-family: var(--font-mono); letter-spacing: 0.1em; }
 
   .chips { display: flex; gap: 6px; } .chips.wrap { flex-wrap: wrap; }
   .tog { padding: 5px 10px; border: 1px solid var(--hairline); background: none; color: var(--ink-dim);
-    cursor: crosshair; font-size: 9px; letter-spacing: 0.12em; }
-  .tog.sm { font-size: 7px; padding: 4px 6px; }
+    cursor: crosshair; font-size: 11px; letter-spacing: 0.12em; }
+  .tog.sm { font-size: 10px; padding: 4px 6px; }
   .tog:hover { color: var(--ink); } .tog.on { border-color: var(--cyan); color: var(--cyan); }
 
   .stage { min-width: 0; display: flex; flex-direction: column; }
@@ -470,19 +471,19 @@
   .inspect { display: flex; gap: 18px; align-items: flex-start; padding: 12px 18px;
     border-top: 1px solid var(--hairline); min-height: 128px; background: rgba(4,7,10,0.5); }
   .ins { display: flex; flex-direction: column; gap: 6px; }
-  .ik { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.16em; }
+  .ik { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.16em; }
   .rose { width: 92px; height: 92px; }
   .rbg { fill: none; stroke: var(--hairline); }
   .rpoly { fill: rgba(56,208,227,0.18); stroke: var(--cyan); stroke-width: 1; }
   .hist { display: flex; align-items: flex-end; gap: 2px; height: 80px; }
   .hb { width: 6px; background: var(--ink-dim); }
   .ins.stats { gap: 5px; }
-  .sk { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.14em; display: flex; gap: 8px; }
+  .sk { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.14em; display: flex; gap: 8px; }
   .sv { color: var(--ink); } .sv.un { color: var(--amber); }
-  .unote { font-size: 8px; color: var(--amber); letter-spacing: 0.1em; line-height: 1.6; max-width: 300px; margin-top: 4px; }
-  .ihint { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.14em; align-self: center; }
+  .unote { font-size: 11px; color: var(--amber); letter-spacing: 0.1em; line-height: 1.6; max-width: 300px; margin-top: 4px; }
+  .ihint { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.14em; align-self: center; }
 
-  .qgrp { display: flex; align-items: center; gap: 7px; font-size: 8px; color: var(--ink-dim); letter-spacing: 0.16em; margin: 12px 4px 7px; }
+  .qgrp { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-dim); letter-spacing: 0.16em; margin: 12px 4px 7px; }
   .qgrp:first-child { margin-top: 0; }
   .qd { width: 6px; height: 6px; border-radius: 50%; }
   .qd.u { background: var(--scarlet); box-shadow: 0 0 6px var(--scarlet); }
@@ -500,11 +501,11 @@
   .qmid { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
   .qttl { font-size: 10px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .qrow.on .qttl { color: var(--ink); }
-  .qsub { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.1em; }
-  .qp { font-size: 9px; letter-spacing: 0.06em; }
+  .qsub { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; }
+  .qp { font-size: 11px; letter-spacing: 0.06em; }
   .s-unusual { color: var(--scarlet); } .s-ordinary { color: var(--ink-dim); } .s-unjudged { color: var(--ink-ghost); }
   .lempty { display: flex; flex-direction: column; gap: 12px; align-items: center; padding: 40px 10px;
-    color: var(--ink-dim); font-size: 9px; letter-spacing: 0.14em; text-align: center; }
+    color: var(--ink-dim); font-size: 11px; letter-spacing: 0.14em; text-align: center; }
   .okring { width: 44px; height: 44px; border: 1px solid color-mix(in srgb, var(--jade) 50%, transparent);
     border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--jade); font-size: 18px; }
 
@@ -513,7 +514,7 @@
   .swhy { font-size: 10px; color: var(--ink-dim); line-height: 1.6; margin: 0; }
   .facs { display: flex; flex-direction: column; gap: 4px; }
   .fac { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 7px; }
-  .fk { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.1em; }
+  .fk { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.1em; }
   .fbar { position: relative; height: 4px; background: var(--hairline); }
   .fmid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--ink-ghost); opacity: 0.6; }
   .ffill { position: absolute; top: 0; bottom: 0; background: var(--ink-dim); }
@@ -521,13 +522,13 @@
   .sact { display: flex; gap: 7px; }
   .ok, .flag { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     padding: 8px 0; border: 1px solid var(--ink-dim); background: none; color: var(--ink-dim);
-    cursor: crosshair; font-size: 9px; letter-spacing: 0.12em; }
+    cursor: crosshair; font-size: 11px; letter-spacing: 0.12em; }
   .ok:hover { border-color: var(--jade); color: var(--jade); }
   .flag:hover { border-color: var(--scarlet); color: var(--scarlet); }
 
   .foot { display: flex; align-items: center; justify-content: space-between; gap: 20px;
     padding: 10px 22px; border-top: 1px solid var(--hairline); background: #04070a;
-    font-size: 8px; letter-spacing: 0.14em; }
+    font-size: 11px; letter-spacing: 0.14em; }
   .fl { color: var(--ink-dim); }
   .fr { color: var(--ink-ghost); }
 

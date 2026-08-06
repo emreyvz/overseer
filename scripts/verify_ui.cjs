@@ -5,7 +5,9 @@ const { app, BrowserWindow } = require('electron')
 app.commandLine.appendSwitch('no-sandbox')
 app.commandLine.appendSwitch('use-gl', 'angle')
 app.commandLine.appendSwitch('use-angle', 'swiftshader')
-setTimeout(() => { console.log('HARD TIMEOUT'); process.exit(1) }, 180000)
+// 15 checks, each paying for a fresh BrowserWindow. Under software GL that setup can cost the
+// best part of a minute on a loaded machine, so this ceiling is a runaway guard, not a budget.
+setTimeout(() => { console.log('HARD TIMEOUT'); process.exit(1) }, 1800000)
 // destroying each window between cases would otherwise fire window-all-closed and quit the app
 // after the first surface, which is why an earlier run only ever reported one result
 app.on('window-all-closed', () => {})
@@ -25,7 +27,9 @@ const CASES = [
   ['eardrum',      '.ed',               ['.strip', '.sgram', '.analysis .card', '.intro'], 2],
   ['probes',       '.lp.placing',       ['.tools', '.probe .c']],
   ['bedrock',      '.bd',               ['.lens .clauses', '.seg', '.band .track', '.intro'], 2],
-  ['fog',          '.hud .col .card',   ['.ring', '.band', '.mean']],
+  // The readout card must carry its heading, what it is FOR, and a visible way in. The DORI
+  // band list used to live here and was moved to the screen that button opens.
+  ['fog',          '.hud .col .card',   ['.ring', '.hd .nm', '.hd .for', 'button.open']],
 ]
 
 app.whenReady().then(async () => {

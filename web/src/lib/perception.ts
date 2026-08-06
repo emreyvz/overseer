@@ -23,7 +23,10 @@ export interface Feature {
   next: string
   /** Where its detail screen lives, for the OPEN action. */
   open: () => void
-  openLabel: string
+  /** A function, not a string: the label has to name what will ACTUALLY happen, and for Eardrum
+   *  that depends on whether any probes exist yet. A button that lies about its destination is
+   *  how an operator ends up on a screen they did not know they could open. */
+  openLabel: () => string
   accel: string               // the keyboard accelerator, shown but never required
 }
 
@@ -36,7 +39,7 @@ export const FEATURES: Feature[] = [
       + 'tells you how much of the view you are actually covering.',
     next: 'Press the coverage ring to see each blind spot and what would fix it.',
     open: () => coverageScreen.set(true),
-    openLabel: 'COVERAGE REPORT',
+    openLabel: () => 'SEE EVERY BLIND SPOT',
     accel: 'U',
   },
   {
@@ -46,7 +49,7 @@ export const FEATURES: Feature[] = [
       + 'not match. It cannot tell you WHAT happened, only that something here is not usual.',
     next: 'Leave it on for a day. It stays blank until it has learned, and blank means calm.',
     open: () => dreamConsole.set('live'),
-    openLabel: 'COMPARE WITH MEMORY',
+    openLabel: () => 'COMPARE NOW WITH WHAT IT REMEMBERS',
     accel: 'M',
   },
   {
@@ -57,17 +60,21 @@ export const FEATURES: Feature[] = [
       + 'It never looks at what anyone looks like.',
     next: 'Needs a couple of weeks of traffic before it will judge anyone.',
     open: () => grainScreen.set(true),
-    openLabel: 'LEARNED MODEL',
+    openLabel: () => 'SEE THE LEARNED MOVEMENT MODEL',
     accel: 'H',
   },
   {
     key: 'listen',
     name: 'EARDRUM',
     what: 'Reads vibration from movements too small to see in the picture, so a camera with no '
-      + 'microphone can tell you a machine is running rough or something struck a surface.',
+      + 'microphone can tell you a motor is running rough or something struck a surface, days '
+      + 'before anyone would hear it.',
     next: 'Draw a box on a machine or a rail, then freeze a baseline while it is healthy.',
-    open: () => { listenPlacing.set(true) },
-    openLabel: 'PLACE A PROBE',
+    // With probes already placed there was NO route to the analysis except a shortcut you had to
+    // already know, so the operator reported that the Eardrum UI simply did not open. The way in
+    // now depends on what you have: place your first probe, or read the ones you have.
+    open: () => { if (get(probes).length) eardrumDrawer.set(true); else listenPlacing.set(true) },
+    openLabel: () => (get(probes).length ? 'SEE WHAT THE PROBES HEAR' : 'PLACE YOUR FIRST PROBE'),
     accel: 'L',
   },
   {
@@ -77,7 +84,7 @@ export const FEATURES: Feature[] = [
       + 'and what the system believed at the time rather than what it believes now.',
     next: 'Open it and press BUILD THE RECORD once to import the history you already have.',
     open: () => { stage.set('live'); mode.set('bedrock') },
-    openLabel: 'OPEN BEDROCK',
+    openLabel: () => 'ASK THE RECORD A QUESTION',
     accel: 'B',
   },
 ]

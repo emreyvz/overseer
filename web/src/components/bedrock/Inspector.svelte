@@ -146,36 +146,36 @@
   .insp { display: flex; flex-direction: column; gap: 8px; padding: 14px 12px 30px; overflow-y: auto;
     border-left: 1px solid var(--hairline); background: rgba(4,7,10,0.4); }
   .ih { display: flex; align-items: center; gap: 8px; }
-  .ik { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.18em; }
+  .ik { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.18em; }
   .x { margin-left: auto; background: none; border: none; color: var(--ink-ghost); font-size: 10px; cursor: crosshair; }
   .x:hover { color: var(--scarlet); }
   .shot { width: 100%; aspect-ratio: 16/9; object-fit: cover; border: 1px solid var(--hairline); }
   .shot.ph { display: flex; align-items: center; justify-content: center; color: var(--ink-ghost);
-    font-size: 8px; letter-spacing: 0.12em; background: repeating-linear-gradient(45deg, #0a0d12 0 8px, #070a0e 8px 16px); }
+    font-size: 11px; letter-spacing: 0.12em; background: repeating-linear-gradient(45deg, #0a0d12 0 8px, #070a0e 8px 16px); }
   .claim { font-size: 13px; color: var(--ink); letter-spacing: 0.04em; line-height: 1.4; }
-  .sub { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.1em; }
+  .sub { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.1em; }
   .prov { display: flex; flex-direction: column; gap: 4px; margin: 0; }
   .prov > div { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; }
-  .prov dt { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.14em; }
-  .prov dd { margin: 0; font-size: 9px; color: var(--ink-dim); display: flex; align-items: center; gap: 6px; }
+  .prov dt { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.14em; }
+  .prov dd { margin: 0; font-size: 11px; color: var(--ink-dim); display: flex; align-items: center; gap: 6px; }
   .amb { color: var(--amber) !important; }
   .cbar { position: relative; width: 54px; height: 3px; background: var(--hairline); }
   .cfill { position: absolute; inset: 0 auto 0 0; background: var(--cyan); }
   .facts { display: flex; flex-direction: column; gap: 3px; }
-  .frow { display: flex; align-items: baseline; gap: 8px; font-size: 9px; }
+  .frow { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
   .fp { color: var(--ink-dim); letter-spacing: 0.08em; flex: 1; line-height: 1.5; }
-  .fc { color: var(--ink-ghost); font-size: 8px; }
+  .fc { color: var(--ink-ghost); font-size: 11px; }
   .strike { text-decoration: line-through; color: var(--ink-ghost) !important; }
   .lin { display: flex; flex-direction: column; gap: 4px; }
-  .lrow { display: flex; flex-direction: column; gap: 1px; font-size: 9px; }
-  .lmeta { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.1em; }
-  .none { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.12em; }
+  .lrow { display: flex; flex-direction: column; gap: 1px; font-size: 11px; }
+  .lmeta { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; }
+  .none { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.12em; }
   .none.pad { padding: 30px 6px; text-align: center; }
   .acts { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
   .purge { position: relative; overflow: hidden; padding: 9px 0; border: 1px solid var(--ink-dim);
-    background: none; color: var(--ink-dim); font-size: 9px; letter-spacing: 0.14em; cursor: crosshair; }
+    background: none; color: var(--ink-dim); font-size: 11px; letter-spacing: 0.14em; cursor: crosshair; }
   .purge:hover { border-color: var(--scarlet); color: var(--scarlet); }
   .pfill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--scarlet); opacity: 0.28; }
   .ptxt { position: relative; }
-  .pnote { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.1em; line-height: 1.6; }
+  .pnote { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; line-height: 1.6; }
 </style>
