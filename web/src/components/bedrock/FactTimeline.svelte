@@ -138,10 +138,10 @@
 <style>
   .tl { display: flex; flex-direction: column; min-height: 0; height: 100%; }
   .axis { position: relative; height: 18px; border-bottom: 1px solid var(--hairline); flex: 0 0 auto; }
-  .ax { position: absolute; top: 3px; transform: translateX(-50%); font-size: 7px;
+  .ax { position: absolute; top: 3px; transform: translateX(-50%); font-size: 10px;
     color: var(--ink-ghost); letter-spacing: 0.1em; white-space: nowrap; }
   .fit { position: absolute; right: 6px; top: 1px; padding: 2px 6px; border: 1px solid var(--hairline);
-    background: #04070a; color: var(--ink-dim); font-size: 7px; letter-spacing: 0.12em; cursor: crosshair; }
+    background: #04070a; color: var(--ink-dim); font-size: 10px; letter-spacing: 0.12em; cursor: crosshair; }
   .fit:hover { color: var(--cyan); border-color: var(--cyan); }
 
   .ribbon { position: relative; display: flex; align-items: flex-end; gap: 1px; height: 26px;
@@ -156,9 +156,9 @@
     border-bottom: 1px solid rgba(236,236,236,0.05); }
   .gutter { display: flex; align-items: center; gap: 7px; padding: 0 8px; min-width: 0; }
   .thumb { width: 24px; height: 18px; object-fit: cover; border: 1px solid var(--hairline); flex: 0 0 auto; }
-  .thumb.ph { display: flex; align-items: center; justify-content: center; font-size: 7px;
+  .thumb.ph { display: flex; align-items: center; justify-content: center; font-size: 10px;
     color: var(--ink-ghost); letter-spacing: 0.06em; }
-  .ename { font-size: 8px; color: var(--ink-dim); letter-spacing: 0.08em; white-space: nowrap;
+  .ename { font-size: 11px; color: var(--ink-dim); letter-spacing: 0.08em; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
   .bars { position: relative; height: 100%; }
   .bar { position: absolute; height: 8px; padding: 0; border: none; background: var(--fc);
@@ -173,9 +173,9 @@
   .conf { position: absolute; left: 0; bottom: -2px; height: 1px; background: currentColor;
     opacity: 0.9; }
 
-  .none { padding: 30px; text-align: center; color: var(--ink-ghost); font-size: 9px; letter-spacing: 0.14em; }
+  .none { padding: 30px; text-align: center; color: var(--ink-ghost); font-size: 11px; letter-spacing: 0.14em; }
   .legend { display: flex; align-items: center; gap: 12px; padding: 6px 10px; flex: 0 0 auto;
-    border-top: 1px solid var(--hairline); font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.12em; }
+    border-top: 1px solid var(--hairline); font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.12em; }
   .lg { display: inline-flex; align-items: center; gap: 5px; }
   .ldot { width: 6px; height: 3px; }
   .spacer { flex: 1; } .dim { color: var(--ink-ghost); opacity: 0.7; }

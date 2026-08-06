@@ -186,13 +186,36 @@
         TEXTURE: {textureWord}
       </div>
     {/if}
+    <!-- "Why am I placing these? What do I get out of it?" was the operator's actual question,
+         and nothing on this overlay answered it. Purpose first, mechanics second. -->
+    <div class="why">
+      <div class="wt">WHAT YOU ARE DOING</div>
+      <p class="wp">
+        Turning a spot in the picture into a <b>vibration sensor</b>. Overseer tracks how that
+        surface trembles, down to movements far smaller than one pixel.
+      </p>
+      <div class="wt">WHAT YOU GET</div>
+      <p class="wp">
+        A camera with no microphone that can tell you a motor is running rough, a fan is out of
+        balance, or something struck a surface — days before anyone would hear it.
+      </p>
+      <div class="wt">WHERE TO PUT IT</div>
+      <p class="wp">
+        Drag a box on something <b>rigid and patterned</b>: a machine housing, a rail, a bolt.
+        Smooth or moving things give nothing to measure.
+      </p>
+      <p class="wp last">
+        Your <b>first</b> box becomes the reference. Put that one on something that does
+        <b>not</b> vibrate, so the camera's own shake can be subtracted from all the others.
+      </p>
+    </div>
     <div class="tools caps">
       <button class="tb" onclick={suggest}>◈ SUGGEST PROBES</button>
       {#if candidates.length}<button class="tb" onclick={acceptAll}>ACCEPT ALL<span class="k">A</span></button>{/if}
-      <button class="tb" onclick={() => { eardrumDrawer.set(true) }}>⌁ ANALYSE<span class="k">⇧L</span></button>
+      <button class="tb" onclick={() => { eardrumDrawer.set(true) }}>⌁ SEE WHAT THEY HEAR<span class="k">⇧L</span></button>
       <button class="tb x" onclick={() => listenPlacing.set(false)}>✕ DONE</button>
     </div>
-    <div class="hint caps">DRAG A BOX ON A TEXTURED, RIGID SURFACE. THE FIRST PROBE BECOMES THE REFERENCE.</div>
+    <div class="hint caps">DRAG A BOX ON A TEXTURED, RIGID SURFACE</div>
   {/if}
 
 
@@ -247,16 +270,32 @@
   .b:nth-child(2) { height: 6px; } .b:nth-child(3) { height: 8px; }
   .b.on { background: var(--cyan); }
 
-  .tools { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); display: flex;
+  /* Below the top status strip, which it used to overlap and make both unreadable. */
+  .tools { position: absolute; left: 50%; top: 62px; transform: translateX(-50%); display: flex;
     gap: 7px; pointer-events: auto; }
-  .tb { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
-    border: 1px solid var(--hairline); background: rgba(4,7,10,0.8); color: var(--ink-dim);
-    font-size: 8px; letter-spacing: 0.14em; cursor: crosshair; }
+  .tb { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px;
+    border: 1px solid var(--hairline); background: rgba(4,7,10,0.86); color: var(--ink-dim);
+    font-size: 10px; letter-spacing: 0.14em; cursor: crosshair; }
   .tb:hover { border-color: var(--cyan); color: var(--cyan); }
   .tb.x:hover { border-color: var(--scarlet); color: var(--scarlet); }
-  .tb .k { border: 1px solid var(--ink-ghost); padding: 0 3px; font-size: 7px; }
-  .hint { position: absolute; left: 50%; bottom: 118px; transform: translateX(-50%); font-size: 8px;
+  .tb .k { border: 1px solid var(--ink-ghost); padding: 0 3px; font-size: 8px; }
+  .hint { position: absolute; left: 50%; bottom: 118px; transform: translateX(-50%); font-size: 10px;
     color: var(--ink-ghost); letter-spacing: 0.14em; white-space: nowrap; }
+
+  /* The purpose panel. It sits clear of the right rail and states, in order, what the operator
+     is doing, what they get for it, and where to aim — the three things they asked and the
+     overlay never answered. Left column, so it never covers the box being dragged. */
+  /* Clear of the modules rail (left ~30-180px) and of the coach card that occupies the upper
+     left. At left:22px it sat directly underneath the rail and could not be read at all. */
+  .why { position: absolute; left: 200px; bottom: 96px; width: 296px; pointer-events: auto;
+    padding: 13px 14px; background: rgba(4,7,10,0.88); border: 1px solid var(--hairline);
+    border-left: 2px solid var(--cyan); backdrop-filter: blur(3px);
+    animation: rin 260ms var(--ease) both; }
+  .wt { font-size: 9px; color: var(--cyan); letter-spacing: 0.18em; margin-top: 11px; }
+  .wt:first-child { margin-top: 0; }
+  .wp { font-size: 11px; color: var(--ink-dim); line-height: 1.55; margin: 4px 0 0; }
+  .wp.last { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--hairline); }
+  .wp b { color: var(--ink); font-weight: 500; }
   .refused { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     padding: 8px 14px; border: 1px solid var(--scarlet); background: rgba(4,7,10,0.85);
     color: var(--scarlet); font-size: 9px; letter-spacing: 0.14em;

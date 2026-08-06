@@ -182,8 +182,9 @@
   </header>
 
   <ScreenIntro
-    what="Every patch of ground this camera cannot usefully watch, worst first."
-    hint="Pick one on the left to see why it is blind and what would fix it." />
+    what="Every patch of ground this camera cannot usefully watch."
+    hint="You get a ranked list of gaps, the reason for each, and what would fix it."
+    look="The list on the left, worst first. Click one." />
 
   {#if building && !cov}
     <div class="empty caps"><span class="pulse">MAPPING THE UNSEEN_</span></div>
@@ -360,7 +361,7 @@
     border-bottom: 1px solid var(--hairline); font-size: var(--fs-label);
     letter-spacing: var(--tracking); background: #04070a; z-index: 2; }
   .eyebrow { color: var(--scarlet); }
-  .cnt { color: var(--ink-dim); font-size: 9px; }
+  .cnt { color: var(--ink-dim); font-size: 11px; }
   .spacer { flex: 1; }
   .gauge { position: relative; width: 40px; height: 40px; }
   .gauge svg { width: 40px; height: 40px; transform: rotate(-90deg); }
@@ -368,20 +369,20 @@
   .gauge .prog { fill: none; stroke: var(--cyan); stroke-width: 4; stroke-linecap: round;
     transition: stroke-dashoffset 700ms cubic-bezier(0.16, 1, 0.3, 1); }
   .gval { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 9px; color: var(--cyan); letter-spacing: 0; }
+    font-size: 11px; color: var(--cyan); letter-spacing: 0; }
   /* The header reads as a sentence — "counted as covered if close enough to IDENTIFY for a
      STANDING target" — instead of three unlabelled chips you have to already understand. */
-  .fieldlbl { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.14em; }
-  .fieldval { font-size: 9px; color: var(--ink); letter-spacing: 0.14em; }
-  .pnote { font-size: 9px; color: var(--ink-ghost); line-height: 1.55; letter-spacing: 0;
+  .fieldlbl { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.14em; }
+  .fieldval { font-size: 11px; color: var(--ink); letter-spacing: 0.14em; }
+  .pnote { font-size: 11px; color: var(--ink-ghost); line-height: 1.55; letter-spacing: 0;
     margin: -2px 0 2px; }
   .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px;
     border: 1px solid var(--hairline); color: var(--ink-dim); background: none; cursor: crosshair;
-    font-size: 9px; letter-spacing: 0.12em; }
+    font-size: 11px; letter-spacing: 0.12em; }
   .chip:hover { border-color: var(--cyan); color: var(--cyan); }
-  .chip .k { border: 1px solid var(--ink-ghost); padding: 0 4px; font-size: 8px; color: var(--ink-ghost); }
+  .chip .k { border: 1px solid var(--ink-ghost); padding: 0 4px; font-size: 11px; color: var(--ink-ghost); }
   .ref, .x { padding: 6px 12px; border: 1px solid var(--ink-dim); color: var(--ink-dim);
-    background: none; cursor: crosshair; font-size: 9px; letter-spacing: var(--tracking); }
+    background: none; cursor: crosshair; font-size: 11px; letter-spacing: var(--tracking); }
   .ref:hover { border-color: var(--cyan); color: var(--cyan); }
   .ref:disabled { opacity: 0.45; }
   .x:hover { border-color: var(--scarlet); color: var(--scarlet); }
@@ -389,7 +390,7 @@
   .empty { flex: 1; display: flex; flex-direction: column; gap: 14px; align-items: center;
     justify-content: center; color: var(--ink-dim); letter-spacing: 0.16em; text-align: center;
     padding: 0 40px; }
-  .empty .sub { font-size: 9px; color: var(--ink-ghost); max-width: 520px; line-height: 1.7; }
+  .empty .sub { font-size: 11px; color: var(--ink-ghost); max-width: 520px; line-height: 1.7; }
   .okring, .warnring { width: 54px; height: 54px; border-radius: 50%; display: flex;
     align-items: center; justify-content: center; font-size: 22px; }
   .okring { border: 1px solid color-mix(in srgb, var(--jade) 50%, transparent); color: var(--jade);
@@ -402,7 +403,7 @@
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px 1fr; }
   .queue { border-right: 1px solid var(--hairline); overflow-y: auto; padding: 12px 10px 40px;
     background: rgba(4,7,10,0.4); }
-  .qgrp { display: flex; align-items: center; gap: 7px; font-size: 8px; color: var(--ink-dim);
+  .qgrp { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-dim);
     letter-spacing: 0.16em; margin: 14px 6px 7px; }
   .qgrp:first-child { margin-top: 4px; }
   .qd { width: 6px; height: 6px; border-radius: 50%; }
@@ -421,8 +422,8 @@
   .qmid { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
   .qttl { font-size: 11px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .qrow.on .qttl { color: var(--ink); }
-  .qsub { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.1em; }
-  .qn { font-size: 8px; color: var(--scarlet); letter-spacing: 0.06em; flex: 0 0 auto; }
+  .qsub { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.1em; }
+  .qn { font-size: 11px; color: var(--scarlet); letter-spacing: 0.06em; flex: 0 0 auto; }
 
   .stage { min-width: 0; overflow-y: auto; display: flex; flex-direction: column; }
   .hero { position: relative; aspect-ratio: 16 / 9; max-height: 42vh; background: #05070a;
@@ -435,20 +436,20 @@
     vector-effect: non-scaling-stroke; stroke-dasharray: 6 3; animation: ants 3s linear infinite, spulse 2.4s ease-in-out infinite; }
   @keyframes ants { to { stroke-dashoffset: -18; } }
   @keyframes spulse { 50% { fill-opacity: 0.75; } }
-  .camtag { position: absolute; top: 10px; left: 12px; font-size: 9px; color: var(--ink);
+  .camtag { position: absolute; top: 10px; left: 12px; font-size: 11px; color: var(--ink);
     letter-spacing: 0.14em; text-shadow: 0 0 5px #000; }
-  .kindtag { position: absolute; top: 10px; right: 12px; font-size: 8px; letter-spacing: 0.14em;
+  .kindtag { position: absolute; top: 10px; right: 12px; font-size: 11px; letter-spacing: 0.14em;
     padding: 3px 7px; background: rgba(4,7,10,0.72); }
   .k-occlusion { color: var(--cyan); } .k-resolution { color: var(--amber); }
   .k-radiometric { color: var(--amber); } .k-empirical { color: var(--scarlet); }
   .k-indeterminate { color: var(--ink-dim); }
-  .ptag { position: absolute; bottom: 10px; left: 12px; font-size: 8px; color: var(--scarlet);
+  .ptag { position: absolute; bottom: 10px; left: 12px; font-size: 11px; color: var(--scarlet);
     background: rgba(4,7,10,0.72); padding: 3px 8px; letter-spacing: 0.1em; }
 
   .detail { padding: 20px 26px 24px; display: flex; flex-direction: column; gap: 11px;
     animation: rise 380ms both cubic-bezier(0.16, 1, 0.3, 1); }
   @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
-  .kind { font-size: 8px; color: var(--scarlet); letter-spacing: 0.2em; }
+  .kind { font-size: 11px; color: var(--scarlet); letter-spacing: 0.2em; }
   .stitle { font-size: 22px; font-weight: 500; color: var(--ink); margin: 0; }
   .swhy { font-size: 12px; color: var(--ink-dim); line-height: 1.7; margin: 0; max-width: 760px; }
   .swhy b { color: var(--ink); font-weight: 500; }
@@ -458,32 +459,32 @@
     margin: 8px 0 4px; }
   .pnl { border: 1px solid var(--hairline); padding: 12px 13px; display: flex;
     flex-direction: column; gap: 8px; background: rgba(4,7,10,0.35); }
-  .pk { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.18em; }
+  .pk { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.18em; }
   /* The channel names are now full phrases rather than one-word jargon, so the label column has
      to be wide enough to hold "HIDDEN BEHIND SOMETHING" without wrapping mid-word. */
   .chan { display: grid; grid-template-columns: minmax(0, 1fr) 62px 30px; align-items: center;
     gap: 8px; background: none; border: none; padding: 3px 0; cursor: crosshair; text-align: left; }
   .chan.muted { opacity: 0.3; }
-  .ck { font-size: 8px; color: var(--ink-dim); letter-spacing: 0.1em; line-height: 1.4; }
+  .ck { font-size: 11px; color: var(--ink-dim); letter-spacing: 0.1em; line-height: 1.4; }
   .cbar { position: relative; height: 4px; background: var(--hairline); }
   .cfill { position: absolute; inset: 0 auto 0 0; background: var(--ink-dim); transition: width 400ms; }
   .cfill.lead { background: var(--cyan); box-shadow: 0 0 8px color-mix(in srgb, var(--cyan) 70%, transparent); }
-  .cv { font-size: 8px; color: var(--ink-dim); text-align: right; }
+  .cv { font-size: 11px; color: var(--ink-dim); text-align: right; }
 
   .demo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
   .dcol { display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .dbox { width: 22px; background: var(--ink-dim); }
   .dbox.need { background: var(--cyan); box-shadow: 0 0 10px color-mix(in srgb, var(--cyan) 50%, transparent); }
-  .dlbl { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.1em; text-align: center; line-height: 1.5; }
-  .dnote { grid-column: 1 / -1; font-size: 8px; color: var(--amber); letter-spacing: 0.1em;
+  .dlbl { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.1em; text-align: center; line-height: 1.5; }
+  .dnote { grid-column: 1 / -1; font-size: 11px; color: var(--amber); letter-spacing: 0.1em;
     text-align: center; margin-top: 4px; }
-  .ev { font-size: 9px; color: var(--ink-dim); letter-spacing: 0.1em; line-height: 1.7; }
+  .ev { font-size: 11px; color: var(--ink-dim); letter-spacing: 0.1em; line-height: 1.7; }
   .evsub { color: var(--ink-ghost); margin-top: 5px; }
 
   .rem { display: flex; align-items: baseline; gap: 8px; font-size: 10px; color: var(--ink-dim); line-height: 1.6; }
   .rdot { width: 4px; height: 4px; background: var(--jade); flex: 0 0 auto; transform: translateY(-2px); }
   .rtxt { flex: 1; }
-  .rgain { color: var(--jade); font-size: 8px; white-space: nowrap; }
+  .rgain { color: var(--jade); font-size: 11px; white-space: nowrap; }
 
   .actions { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
   .go { padding: 11px 22px; border: 1px solid var(--cyan); background: none; color: var(--cyan);
@@ -493,7 +494,7 @@
     cursor: crosshair; font-size: 11px; letter-spacing: 0.16em; }
   .alt:hover:not(:disabled) { border-color: var(--scarlet); color: var(--scarlet); }
   .alt:disabled { opacity: 0.4; }
-  .hint { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.14em; }
+  .hint { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.14em; }
 
   @media (max-width: 720px) {
     .body { grid-template-columns: 1fr; grid-template-rows: 38% 1fr; }

@@ -219,16 +219,16 @@
   .top { display: flex; align-items: center; gap: 12px; padding: 11px 20px;
     border-bottom: 1px solid var(--hairline); font-size: var(--fs-label);
     letter-spacing: var(--tracking); background: #04070a; }
-  .eyebrow { color: var(--scarlet); } .cnt { color: var(--ink-dim); font-size: 9px; } .spacer { flex: 1; }
+  .eyebrow { color: var(--scarlet); } .cnt { color: var(--ink-dim); font-size: 11px; } .spacer { flex: 1; }
   .seg { display: flex; border: 1px solid var(--hairline); }
   .sb { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; background: none;
-    border: none; border-right: 1px solid var(--hairline); color: var(--ink-dim); font-size: 8px;
+    border: none; border-right: 1px solid var(--hairline); color: var(--ink-dim); font-size: 11px;
     letter-spacing: 0.12em; cursor: crosshair; }
   .sb:last-child { border-right: none; }
   .sb.on { color: var(--cyan); background: rgba(56,208,227,0.09); }
-  .sb .k { border: 1px solid var(--ink-ghost); padding: 0 3px; font-size: 7px; color: var(--ink-ghost); }
+  .sb .k { border: 1px solid var(--ink-ghost); padding: 0 3px; font-size: 10px; color: var(--ink-ghost); }
   .x { padding: 6px 12px; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: none;
-    cursor: crosshair; font-size: 9px; letter-spacing: var(--tracking); }
+    cursor: crosshair; font-size: 11px; letter-spacing: var(--tracking); }
   .x:hover { border-color: var(--scarlet); color: var(--scarlet); }
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 340px 1fr 320px; }
@@ -237,7 +237,7 @@
   .mid { flex: 1; display: flex; align-items: center; justify-content: center; gap: 14px;
     color: var(--ink-dim); letter-spacing: 0.16em; font-size: 10px; position: relative; }
   .mid.col { flex-direction: column; text-align: center; padding: 0 40px; }
-  .mid .sub { font-size: 9px; color: var(--ink-ghost); max-width: 560px; line-height: 1.8; }
+  .mid .sub { font-size: 11px; color: var(--ink-ghost); max-width: 560px; line-height: 1.8; }
   .mid .big { font-size: 24px; color: var(--ink); letter-spacing: var(--tracking-wide); }
   .mid .warn { color: var(--amber); font-size: 12px; letter-spacing: 0.16em; }
   .pulse { animation: pl 1.2s ease-in-out infinite; } @keyframes pl { 50% { opacity: 0.4; } }
@@ -258,15 +258,15 @@
   .node { fill: #04070a; stroke: var(--cyan); stroke-width: 0.7; cursor: crosshair; }
   .node:hover { fill: var(--cyan); }
   .nlabel { fill: var(--ink-dim); font-size: 2.4px; text-anchor: middle; font-family: var(--font-mono); }
-  .ghint { padding: 8px 12px; font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.14em;
+  .ghint { padding: 8px 12px; font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.14em;
     border-top: 1px solid var(--hairline); }
 
   .table { flex: 1; min-height: 0; overflow-y: auto; }
   .trow { display: grid; grid-template-columns: 118px 1fr 110px 110px 44px 110px; gap: 10px;
     width: 100%; text-align: left; padding: 5px 12px; background: none; border: none;
-    border-bottom: 1px solid rgba(236,236,236,0.05); color: var(--ink-dim); font-size: 9px;
+    border-bottom: 1px solid rgba(236,236,236,0.05); color: var(--ink-dim); font-size: 11px;
     letter-spacing: 0.05em; cursor: crosshair; }
-  .trow.th { color: var(--ink-ghost); font-size: 7px; letter-spacing: 0.16em; position: sticky;
+  .trow.th { color: var(--ink-ghost); font-size: 10px; letter-spacing: 0.16em; position: sticky;
     top: 0; background: #05070a; cursor: default; }
   .trow:hover:not(.th) { background: rgba(56,208,227,0.05); }
   .trow.on { background: rgba(56,208,227,0.1); color: var(--ink); }
@@ -274,8 +274,8 @@
 
   .hovercard { position: absolute; right: 14px; bottom: 40px; padding: 8px 10px;
     display: flex; flex-direction: column; gap: 3px; pointer-events: none; }
-  .hp { font-size: 9px; color: var(--ink); letter-spacing: 0.1em; }
-  .hm { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.12em; }
+  .hp { font-size: 11px; color: var(--ink); letter-spacing: 0.1em; }
+  .hm { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.12em; }
 
   @media (max-width: 1200px) { .body { grid-template-columns: 280px 1fr 260px; } }
 </style>

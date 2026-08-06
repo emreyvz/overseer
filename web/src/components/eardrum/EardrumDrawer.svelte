@@ -226,8 +226,9 @@
   </header>
 
   <ScreenIntro
-    what="Vibration read off surfaces in the picture, from movements far too small to see."
-    hint="Pick a probe below to see what it is picking up." />
+    what="A camera with no microphone, telling you a machine is running rough."
+    hint="It measures how much a surface trembles, from movements far smaller than one pixel."
+    look="Pick a probe below. The chart on the right is what that surface is doing." />
 
   {#if !list.length}
     <div class="empty caps">
@@ -368,39 +369,45 @@
 </div>
 
 <style>
-  .ed { position: absolute; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 260px;
+  /* Opaque, not the shared translucent .panel carbon. Over a live feed and two rails, 86% let the
+     nav bar and the fog card read straight through the charts — the drawer looked broken and
+     nothing in it was legible. A drawer that covers content has to actually cover it.
+     52vh because at 38vh the analysis column was cut off at the bottom of the screen. */
+  .ed { position: absolute; left: 0; right: 0; bottom: 0; height: 52vh; min-height: 420px;
+    max-height: 660px; background: #05070a;
     z-index: var(--z-panel); display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 -18px 44px rgba(0,0,0,0.75);
     border-top: 1px solid var(--hairline); animation: up 260ms cubic-bezier(0.16, 1, 0.3, 1) both; }
   @keyframes up { from { transform: translateY(100%); } }
   .top { display: flex; align-items: center; gap: 10px; padding: 8px 16px;
     border-bottom: 1px solid var(--hairline); font-size: var(--fs-label); letter-spacing: var(--tracking); }
-  .eyebrow { color: var(--scarlet); } .cnt { color: var(--ink-dim); font-size: 9px; } .spacer { flex: 1; }
+  .eyebrow { color: var(--scarlet); } .cnt { color: var(--ink-dim); font-size: 11px; } .spacer { flex: 1; }
   .warnchip { padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
-    color: var(--amber); font-size: 7px; letter-spacing: 0.1em; }
+    color: var(--amber); font-size: 10px; letter-spacing: 0.1em; }
   .warnchip.hot { border-color: color-mix(in srgb, var(--scarlet) 55%, transparent); color: var(--scarlet); }
   .tb { position: relative; overflow: hidden; padding: 5px 10px; border: 1px solid var(--ink-dim);
-    background: none; color: var(--ink-dim); font-size: 8px; letter-spacing: 0.12em; cursor: crosshair; }
+    background: none; color: var(--ink-dim); font-size: 11px; letter-spacing: 0.12em; cursor: crosshair; }
   .tb:hover:not(:disabled) { border-color: var(--cyan); color: var(--cyan); }
   .tb.on { border-color: var(--cyan); color: var(--cyan); background: rgba(56,208,227,0.1); }
   .tb:disabled { opacity: 0.35; }
-  .why { font-size: 6px; color: var(--ink-ghost); letter-spacing: 0.1em; max-width: 190px;
+  .why { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; max-width: 190px;
     line-height: 1.5; }
   .hfill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(56,208,227,0.3); }
   .ht { position: relative; }
   .x { padding: 5px 9px; border: 1px solid var(--ink-dim); background: none; color: var(--ink-dim);
-    font-size: 9px; cursor: crosshair; }
+    font-size: 11px; cursor: crosshair; }
   .x:hover { border-color: var(--scarlet); color: var(--scarlet); }
 
   .empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 10px; color: var(--ink-dim); font-size: 10px; letter-spacing: 0.16em; }
-  .empty .sub { font-size: 8px; color: var(--ink-ghost); }
+  .empty .sub { font-size: 11px; color: var(--ink-ghost); }
   .rings { position: relative; width: 40px; height: 40px; }
   .rings span { position: absolute; inset: 0; border: 1px solid var(--cyan); border-radius: 50%;
     opacity: 0; animation: ring 2.4s ease-out infinite; }
   .rings span:nth-child(2) { animation-delay: 0.8s; } .rings span:nth-child(3) { animation-delay: 1.6s; }
   @keyframes ring { 0% { transform: scale(0.2); opacity: 0.8; } 100% { transform: scale(1); opacity: 0; } }
   .go { padding: 8px 16px; border: 1px solid var(--cyan); background: none; color: var(--cyan);
-    font-size: 9px; letter-spacing: 0.16em; cursor: crosshair; }
+    font-size: 11px; letter-spacing: 0.16em; cursor: crosshair; }
   .go:hover { background: var(--cyan); color: #04070a; }
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px 1fr 300px; }
@@ -412,45 +419,45 @@
   .prow.on { background: rgba(56,208,227,0.09); border-color: var(--hairline); border-left-color: var(--cyan); }
   .prow.ref { opacity: 0.7; border-bottom: 1px solid var(--hairline); }
   .pmid { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-  .pn { font-size: 9px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pn { font-size: 11px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .prow.on .pn { color: var(--ink); }
-  .psub { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.1em; }
+  .psub { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; }
   .prow.warn .psub { color: var(--amber); } .prow.hot .psub { color: var(--scarlet); }
   .spark { display: flex; align-items: flex-end; gap: 1px; height: 16px; width: 50px; flex: 0 0 auto; }
   .sb { flex: 1; background: var(--ink-ghost); min-height: 1px; }
   .prow.hot .sb { background: var(--scarlet); }
-  .prow.add { justify-content: center; color: var(--ink-ghost); font-size: 8px;
+  .prow.add { justify-content: center; color: var(--ink-ghost); font-size: 11px;
     letter-spacing: 0.14em; border: 1px dashed var(--hairline); }
   .prow.add:hover { color: var(--cyan); border-color: var(--cyan); }
 
   .centre { position: relative; display: flex; flex-direction: column; min-width: 0; }
   .scope { height: 44px; width: 100%; border-bottom: 1px solid var(--hairline); flex: 0 0 auto; }
   .sgram { flex: 1; width: 100%; min-height: 0; }
-  .sgax { display: flex; justify-content: space-between; padding: 3px 8px; font-size: 7px;
+  .sgax { display: flex; justify-content: space-between; padding: 3px 8px; font-size: 10px;
     color: var(--ink-ghost); letter-spacing: 0.12em; border-top: 1px solid var(--hairline); }
   .sgax .mid2 { color: var(--ink-ghost); }
 
   .modal { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .modal .mid { flex: 1; display: flex; align-items: center; justify-content: center;
-    color: var(--ink-dim); font-size: 9px; letter-spacing: 0.14em; }
+    color: var(--ink-dim); font-size: 11px; letter-spacing: 0.14em; }
   .shape { flex: 1; min-height: 0; }
   .rest { fill: none; stroke: var(--ink-ghost); stroke-width: 0.4; stroke-dasharray: 2 2; }
   .mode { fill: none; stroke: var(--cyan); stroke-width: 0.8; }
   .node { fill: var(--cyan); }
   .mlist { display: flex; flex-direction: column; gap: 3px; padding: 6px 10px;
     border-top: 1px solid var(--hairline); }
-  .mrow { font-size: 8px; color: var(--ink-dim); letter-spacing: 0.12em; }
-  .mnote { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.1em; line-height: 1.5; }
+  .mrow { font-size: 11px; color: var(--ink-dim); letter-spacing: 0.12em; }
+  .mnote { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; line-height: 1.5; }
 
   .analysis { overflow-y: auto; border-left: 1px solid var(--hairline); padding: 8px;
     display: flex; flex-direction: column; gap: 8px; }
   .card { border: 1px solid var(--hairline); padding: 8px 9px; display: flex; flex-direction: column; gap: 6px; }
-  .ck { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.18em; }
+  .ck { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.18em; }
   /* The card title names the panel; this line says what the operator is actually looking at.
      Lower case and un-tracked on purpose, so it reads as a sentence rather than more chrome. */
-  .cnote { font-size: 9px; color: var(--ink-ghost); line-height: 1.5; letter-spacing: 0;
+  .cnote { font-size: 11px; color: var(--ink-ghost); line-height: 1.5; letter-spacing: 0;
     text-transform: none; margin: 2px 0 4px; }
-  .clbl { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.18em; margin-top: 6px; }
+  .clbl { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.18em; margin-top: 6px; }
   .spec { width: 100%; height: 70px; }
   .live { fill: none; stroke: var(--cyan); stroke-width: 1; vector-effect: non-scaling-stroke; }
   .base { fill: none; stroke: var(--jade); stroke-width: 1; stroke-dasharray: 3 2;
@@ -458,33 +465,33 @@
   .floor { stroke: var(--ink-ghost); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
   .pk { stroke: var(--ink-dim); stroke-width: 1; opacity: 0.35; vector-effect: non-scaling-stroke; }
   .pk.new { stroke: var(--scarlet); opacity: 0.8; }
-  .floorlbl { font-size: 6px; color: var(--ink-ghost); letter-spacing: 0.1em; }
+  .floorlbl { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; }
   .peaks { display: flex; flex-direction: column; gap: 2px; }
-  .prow2 { display: flex; align-items: baseline; gap: 6px; font-size: 8px; }
+  .prow2 { display: flex; align-items: baseline; gap: 6px; font-size: 11px; }
   .phz { color: var(--ink); } .pdb { color: var(--ink-ghost); }
   .tagn { color: var(--scarlet); } .tags { color: var(--amber); } .tagr { color: var(--amber); }
-  .none { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.12em; }
+  .none { font-size: 11px; color: var(--ink-ghost); letter-spacing: 0.12em; }
   .pulse { animation: pl 1.2s ease-in-out infinite; } @keyframes pl { 50% { opacity: 0.4; } }
 
   .f0 { font-size: 10px; color: var(--ink); letter-spacing: 0.1em; }
   .harms { display: flex; flex-direction: column; gap: 3px; }
-  .hrow { display: grid; grid-template-columns: 20px 1fr; gap: 6px; align-items: center; font-size: 7px; }
+  .hrow { display: grid; grid-template-columns: 20px 1fr; gap: 6px; align-items: center; font-size: 10px; }
   .ho { color: var(--ink-ghost); }
   .hbar { position: relative; height: 4px; background: var(--hairline); }
   .hfill2 { position: absolute; inset: 0 auto 0 0; background: var(--cyan); }
-  .verdict { font-size: 9px; color: var(--amber); letter-spacing: 0.1em; line-height: 1.4; }
-  .why { font-size: 7px; color: var(--ink-dim); letter-spacing: 0.1em; }
-  .conf { display: flex; align-items: center; gap: 4px; font-size: 7px; color: var(--ink-ghost); }
+  .verdict { font-size: 11px; color: var(--amber); letter-spacing: 0.1em; line-height: 1.4; }
+  .why { font-size: 10px; color: var(--ink-dim); letter-spacing: 0.1em; }
+  .conf { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--ink-ghost); }
   .pip { width: 10px; height: 3px; background: var(--hairline); }
   .pip.on { background: var(--amber); }
 
-  .band { font-size: 8px; color: var(--cyan); letter-spacing: 0.1em; }
+  .band { font-size: 11px; color: var(--cyan); letter-spacing: 0.1em; }
   .play { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 0;
-    border: 1px solid var(--ink-dim); background: none; color: var(--ink-dim); font-size: 8px;
+    border: 1px solid var(--ink-dim); background: none; color: var(--ink-dim); font-size: 11px;
     letter-spacing: 0.14em; cursor: crosshair; }
   .play:hover { border-color: var(--cyan); color: var(--cyan); }
-  .play .k { border: 1px solid var(--ink-ghost); padding: 0 3px; font-size: 7px; }
-  .disc { font-size: 6px; color: var(--ink-ghost); letter-spacing: 0.1em; line-height: 1.6; }
+  .play .k { border: 1px solid var(--ink-ghost); padding: 0 3px; font-size: 10px; }
+  .disc { font-size: 10px; color: var(--ink-ghost); letter-spacing: 0.1em; line-height: 1.6; }
 
   @media (max-width: 1000px) { .body { grid-template-columns: 150px 1fr 240px; } }
 </style>

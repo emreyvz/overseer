@@ -76,6 +76,9 @@
         eardrum: () => { on('listen'); eardrumDrawer.set(true) },
         probes: () => { on('listen'); listenPlacing.set(true) },
         bedrock: () => { mode.set('bedrock') },
+        // The entry point itself is a surface worth capturing: it is where an operator finds out
+        // these engines exist at all, and it was shipped with its explanations collapsed.
+        perception: () => { on('unseen'); on('grain'); perceptionPanel.set(true) },
       }
       const target = shot ? PERCEPTION[shot] : undefined
       if (target) {
