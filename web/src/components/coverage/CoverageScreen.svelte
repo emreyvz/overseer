@@ -14,6 +14,8 @@
   import { SIM } from '../../lib/sim'
   import type { BlindKind, BlindSpot, DoriTask } from '../../lib/types'
   import LiveThumb from '../LiveThumb.svelte'
+  import Explain from '../Explain.svelte'
+  import ScreenIntro from '../ScreenIntro.svelte'
 
   let { onclose }: { onclose: () => void } = $props()
 
@@ -26,6 +28,15 @@
     occlusion: 'HIDDEN BEHIND SOMETHING', resolution: 'TOO FAR TO RESOLVE',
     radiometric: 'TOO DARK, BLOWN OR BLURRED', empirical: 'TRACKS KEEP DYING HERE',
     indeterminate: 'GLASS OR WATER · DEPTH IS UNRELIABLE',
+  }
+  // The four channels arrive from the backend under their engineering names. Nobody outside this
+  // codebase knows what "optical" or "empirical" mean as a cause of blindness, so each is shown
+  // as what it actually means and keeps its real name inside the explanation.
+  const CHAN: Record<string, { label: string; term: string }> = {
+    geometric: { label: 'HIDDEN BEHIND SOMETHING', term: 'occlusion' },
+    optical: { label: 'TOO FAR TO MAKE ANYONE OUT', term: 'dori' },
+    radiometric: { label: 'TOO DARK OR TOO BRIGHT', term: 'radiometric' },
+    empirical: { label: 'PEOPLE VANISH HERE', term: 'empirical' },
   }
   const RC = 2 * Math.PI * 26
 
@@ -146,7 +157,7 @@
     <span class="cnt">{open.length} BLIND SPOT{open.length === 1 ? '' : 'S'}</span>
     <span class="spacer"></span>
     {#if cov}
-      <div class="gauge" title="Coverage of the observed ground at the chosen task">
+      <div class="gauge">
         <svg viewBox="0 0 60 60">
           <circle class="track" cx="30" cy="30" r="26" />
           <circle class="prog" cx="30" cy="30" r="26"
@@ -154,15 +165,25 @@
         </svg>
         <span class="gval">{Math.round(cov.percent)}%</span>
       </div>
-      <button class="chip caps" onclick={cycleTask} title="Cycle the DORI task (T)">{cov.task}<span class="k">T</span></button>
-      <button class="chip caps" onclick={cycleHeight} title="Cycle the target height (H)">
-        {HEIGHTS.find(([h]) => h === fogHeight)?.[1] ?? 'STANDING'}<span class="k">H</span>
-      </button>
+      <span class="fieldlbl caps"><Explain term="coverage" plain /></span>
+      <!-- The task name is rendered OUTSIDE the button so it can carry its own explanation:
+           nesting one interactive element inside another steals the click and breaks keyboard
+           traversal. The button next to it does the cycling. -->
+      <span class="fieldlbl caps">COUNTED AS COVERED IF CLOSE ENOUGH TO</span>
+      <span class="fieldval caps"><Explain term={cov.task} /></span>
+      <button class="chip caps" onclick={cycleTask} title="Change what counts as covered">↻<span class="k">T</span></button>
+      <span class="fieldlbl caps">FOR A</span>
+      <span class="fieldval caps">{HEIGHTS.find(([h]) => h === fogHeight)?.[1] ?? 'STANDING'}</span>
+      <button class="chip caps" onclick={cycleHeight} title="Change the assumed target height">↻<span class="k">H</span></button>
     {/if}
     <button class="ref caps" onclick={exportReport} disabled={busy}>{exported ? '✓ EXPORTED' : '⤓ EXPORT REPORT'}</button>
     <button class="ref caps" onclick={() => reload(true)}>↻ RESCAN</button>
     <button class="x caps" onclick={onclose}>✕ CLOSE</button>
   </header>
+
+  <ScreenIntro
+    what="Every patch of ground this camera cannot usefully watch, worst first."
+    hint="Pick one on the left to see why it is blind and what would fix it." />
 
   {#if building && !cov}
     <div class="empty caps"><span class="pulse">MAPPING THE UNSEEN_</span></div>
@@ -185,7 +206,10 @@
     <div class="body">
       <aside class="queue">
         {#if persistent.length}
-          <div class="qgrp caps"><span class="qd p"></span>PERSISTENT<span class="qgn">{persistent.length}</span></div>
+          <div class="qgrp caps">
+            <span class="qd p"></span><Explain term="persistent" plain />
+            <span class="qgn">{persistent.length}</span>
+          </div>
           {#each persistent as s (s.id)}
             <button class="qrow" class:on={sel?.id === s.id} onclick={() => (selId = s.id)}>
               <span class="glyph">{KIND_GLYPH[s.kind]}</span>
@@ -198,7 +222,10 @@
           {/each}
         {/if}
         {#if transient.length}
-          <div class="qgrp caps"><span class="qd t"></span>TRANSIENT<span class="qgn">{transient.length}</span></div>
+          <div class="qgrp caps">
+            <span class="qd t"></span><Explain term="transient" plain />
+            <span class="qgn">{transient.length}</span>
+          </div>
           {#each transient as s (s.id)}
             <button class="qrow" class:on={sel?.id === s.id} onclick={() => (selId = s.id)}>
               <span class="glyph">{KIND_GLYPH[s.kind]}</span>
@@ -246,28 +273,29 @@
               <div class="panels">
                 <section class="pnl">
                   <div class="pk caps">WHY IT IS BLIND</div>
+                  <div class="pnote">Four separate reasons. The longest bar is the one to fix.</div>
                   {#each Object.entries(sel.channels) as [k, v]}
                     <button class="chan" class:muted={channelMute[k]} onclick={() => (channelMute = { ...channelMute, [k]: !channelMute[k] })}>
-                      <span class="ck caps">{k}</span>
+                      <span class="ck caps"><Explain term={CHAN[k]?.term ?? k}>{CHAN[k]?.label ?? k}</Explain></span>
                       <span class="cbar"><span class="cfill" class:lead={v >= 0.5} style={`width:${Math.round(v * 100)}%`}></span></span>
                       <span class="cv caps">{pct(v)}</span>
                     </button>
                   {/each}
-                  <div class="hint caps">1-4 ISOLATE A CHANNEL</div>
+                  <div class="hint caps">CLICK A REASON TO HIDE IT · OR PRESS 1-4</div>
                 </section>
 
                 <section class="pnl">
-                  <div class="pk caps">EVIDENCE</div>
+                  <div class="pk caps">HOW WE KNOW</div>
                   {#if sel.kind === 'resolution' || (demo && demo.have < demo.need)}
                     {#if demo}
                       <div class="demo">
                         <div class="dcol">
                           <div class="dbox" style={`height:${Math.max(6, Math.min(78, demo.have * 0.36))}px`}></div>
-                          <div class="dlbl caps">HAVE<br />{demo.have} PX/M</div>
+                          <div class="dlbl caps">YOU HAVE<br /><Explain term="px/m">{demo.have} PX/M</Explain></div>
                         </div>
                         <div class="dcol">
                           <div class="dbox need" style={`height:${Math.max(6, Math.min(78, demo.need * 0.36))}px`}></div>
-                          <div class="dlbl caps">NEED<br />{demo.need} PX/M</div>
+                          <div class="dlbl caps">YOU NEED<br />{demo.need} PX/M</div>
                         </div>
                         <div class="dnote caps">A TARGET HERE IS {Math.round((demo.have / demo.need) * 100)}% OF WHAT {demo.task} REQUIRES</div>
                       </div>
@@ -341,6 +369,12 @@
     transition: stroke-dashoffset 700ms cubic-bezier(0.16, 1, 0.3, 1); }
   .gval { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     font-size: 9px; color: var(--cyan); letter-spacing: 0; }
+  /* The header reads as a sentence — "counted as covered if close enough to IDENTIFY for a
+     STANDING target" — instead of three unlabelled chips you have to already understand. */
+  .fieldlbl { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.14em; }
+  .fieldval { font-size: 9px; color: var(--ink); letter-spacing: 0.14em; }
+  .pnote { font-size: 9px; color: var(--ink-ghost); line-height: 1.55; letter-spacing: 0;
+    margin: -2px 0 2px; }
   .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px;
     border: 1px solid var(--hairline); color: var(--ink-dim); background: none; cursor: crosshair;
     font-size: 9px; letter-spacing: 0.12em; }
@@ -425,10 +459,12 @@
   .pnl { border: 1px solid var(--hairline); padding: 12px 13px; display: flex;
     flex-direction: column; gap: 8px; background: rgba(4,7,10,0.35); }
   .pk { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.18em; }
-  .chan { display: grid; grid-template-columns: 84px 1fr 34px; align-items: center; gap: 8px;
-    background: none; border: none; padding: 2px 0; cursor: crosshair; text-align: left; }
+  /* The channel names are now full phrases rather than one-word jargon, so the label column has
+     to be wide enough to hold "HIDDEN BEHIND SOMETHING" without wrapping mid-word. */
+  .chan { display: grid; grid-template-columns: minmax(0, 1fr) 62px 30px; align-items: center;
+    gap: 8px; background: none; border: none; padding: 3px 0; cursor: crosshair; text-align: left; }
   .chan.muted { opacity: 0.3; }
-  .ck { font-size: 8px; color: var(--ink-dim); letter-spacing: 0.1em; }
+  .ck { font-size: 8px; color: var(--ink-dim); letter-spacing: 0.1em; line-height: 1.4; }
   .cbar { position: relative; height: 4px; background: var(--hairline); }
   .cfill { position: absolute; inset: 0 auto 0 0; background: var(--ink-dim); transition: width 400ms; }
   .cfill.lead { background: var(--cyan); box-shadow: 0 0 8px color-mix(in srgb, var(--cyan) 70%, transparent); }

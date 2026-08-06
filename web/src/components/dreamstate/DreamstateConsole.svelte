@@ -17,6 +17,8 @@
   import { SIM } from '../../lib/sim'
   import type { DreamPulse, Divergence } from '../../lib/types'
   import LiveThumb from '../LiveThumb.svelte'
+  import Explain from '../Explain.svelte'
+  import ScreenIntro from '../ScreenIntro.svelte'
 
   let { open, onclose }: { open: number | 'live'; onclose: () => void } = $props()
 
@@ -127,10 +129,10 @@
   <header class="top caps">
     <span class="eyebrow">◈ DREAMSTATE</span>
     <span class="cnt">◉ {cam?.name ?? 'CAM —'}</span>
-    <span class="cnt">{list.length} DIVERGENCE{list.length === 1 ? '' : 'S'}</span>
+    <span class="cnt">{list.length} MOMENT{list.length === 1 ? '' : 'S'} THAT DID NOT MATCH</span>
     <span class="spacer"></span>
     {#if st}
-      <div class="gauge" title="How well this hour has been learned">
+      <div class="gauge">
         <svg viewBox="0 0 60 60">
           <circle class="track" cx="30" cy="30" r="26" />
           <circle class="prog" cx="30" cy="30" r="26"
@@ -138,11 +140,15 @@
         </svg>
         <span class="gval">{Math.round(st.maturity * 100)}%</span>
       </div>
-      <span class="glabel caps">MATURITY</span>
+      <span class="glabel caps"><Explain term="maturity" plain /></span>
       <span class="chip caps">TIER {st.tier}</span>
     {/if}
     <button class="x caps" onclick={onclose}>✕ CLOSE</button>
   </header>
+
+  <ScreenIntro
+    what="Moments when this camera stopped looking like it normally does at this time of day."
+    hint="Drag the divider to slide between what it expected and what actually happened." />
 
   {#if loading}
     <div class="empty caps"><span class="pulse">READING THE RECORD_</span></div>
@@ -162,7 +168,8 @@
     <div class="body">
       <aside class="queue">
         {#if unjudged.length}
-          <div class="qgrp caps"><span class="qd u"></span>UNJUDGED<span class="qgn">{unjudged.length}</span></div>
+          <div class="qgrp caps"><span class="qd u"></span>NEEDS YOUR CALL<span class="qgn">{unjudged.length}</span></div>
+          <div class="qnote">The number is <Explain term="sigma" plain />. Above 5 is rare here.</div>
           {#each unjudged as d (d.id)}
             <button class="qrow" class:on={sel?.id === d.id} onclick={() => (selId = d.id)}>
               <span class="pdot" style={`width:${5 + Math.min(6, d.peak_sigma / 2)}px; height:${5 + Math.min(6, d.peak_sigma / 2)}px`}></span>
@@ -175,7 +182,7 @@
           {/each}
         {/if}
         {#if flagged.length}
-          <div class="qgrp caps"><span class="qd f"></span>FLAGGED<span class="qgn">{flagged.length}</span></div>
+          <div class="qgrp caps"><span class="qd f"></span>YOU FLAGGED THESE<span class="qgn">{flagged.length}</span></div>
           {#each flagged as d (d.id)}
             <button class="qrow off" class:on={sel?.id === d.id} onclick={() => (selId = d.id)}>
               <span class="pdot"></span>
@@ -185,7 +192,7 @@
           {/each}
         {/if}
         {#if expected.length}
-          <div class="qgrp caps"><span class="qd e"></span>MARKED EXPECTED<span class="qgn">{expected.length}</span></div>
+          <div class="qgrp caps"><span class="qd e"></span>YOU SAID THESE WERE FINE<span class="qgn">{expected.length}</span></div>
           {#each expected as d (d.id)}
             <button class="qrow off" class:on={sel?.id === d.id} onclick={() => (selId = d.id)}>
               <span class="pdot ok"></span>
@@ -229,13 +236,15 @@
             aria-valuenow={Math.round(wipe)}
             onkeydown={(e) => { if (e.key === 'ArrowLeft') wipe = Math.max(2, wipe - 2); if (e.key === 'ArrowRight') wipe = Math.min(98, wipe + 2) }}>
             <span class="dhandle"></span>
-            <span class="dlabel caps">DREAM ◂ | ▸ WORLD</span>
+            <span class="dlabel caps">◂ WHAT IT EXPECTED · WHAT IS THERE NOW ▸</span>
           </button>
 
           {#if sel}
-            <span class="stamp caps">PREDICTED AT {when(sel.ts)} · Δ {sel.peak_sigma.toFixed(1)}σ</span>
+            <span class="stamp caps">{when(sel.ts)} · {sel.peak_sigma.toFixed(1)}σ FROM NORMAL</span>
             <span class="triage caps t-{sel.triage}">
-              {sel.triage === 'subject' ? '◈ SUBJECT BEHAVIOUR' : '◈ SCENE CHANGE'}
+              <Explain term={sel.triage === 'subject' ? 'subject behaviour' : 'scene change'}>
+                {sel.triage === 'subject' ? '◈ SOMEBODY WAS ACTING ODDLY' : '◈ THE PLACE ITSELF CHANGED'}
+              </Explain>
             </span>
           {/if}
         </div>
@@ -256,7 +265,8 @@
 
           <!-- cell inspector: where "normal" finally becomes visible -->
           <section class="pnl">
-            <div class="pk caps">EXPECTATION FIELD</div>
+            <div class="pk caps">WHERE IT LOOKS WRONG RIGHT NOW</div>
+            <div class="pnote">Each square is a patch of the view. Brighter means further from normal.</div>
             {#if st}
               <div class="grid" style={`grid-template-columns: repeat(${st.grid[0]}, 1fr)`}>
                 {#each st.cells as z, i}
@@ -280,14 +290,14 @@
 
           <!-- verdict + the sensitivity slider that measures instead of guessing -->
           <section class="pnl">
-            <div class="pk caps">VERDICT</div>
+            <div class="pk caps">YOUR CALL</div>
             <div class="vacts">
               <button class="ok caps" onclick={() => verdict(sel, 'expected')} disabled={!sel || busy}>✓ EXPECTED<span class="k">⏎</span></button>
               <button class="flag caps" onclick={() => verdict(sel, 'flagged')} disabled={!sel || busy}>⚑ FLAG<span class="k">F</span></button>
             </div>
             <button class="mini caps" onclick={() => muteCells(sel)} disabled={!sel || busy}>◱ MUTE THESE CELLS</button>
 
-            <div class="pk caps sens">SENSITIVITY</div>
+            <div class="pk caps sens">HOW TOUCHY IT SHOULD BE <Explain term="threshold" bare /></div>
             <input class="slider" type="range" min="3" max="8" step="0.1" bind:value={sigma}
               oninput={() => { /* live preview only */ }} onchange={applySigma} aria-label="sigma threshold" />
             <div class="scap caps">
@@ -398,6 +408,12 @@
     background: var(--hairline); max-height: 38%; }
   .pnl { background: #05070a; padding: 11px 14px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
   .pk { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.18em; }
+  /* Plain-language notes under a machine label: the caps line names the panel, this says what
+     the operator is actually looking at. */
+  .qnote, .pnote { font-size: 9px; color: var(--ink-ghost); line-height: 1.55; letter-spacing: 0;
+    text-transform: none; }
+  .qnote { margin: 0 4px 8px; }
+  .pnote { margin: -2px 0 4px; }
   .pk.sens { margin-top: 4px; }
 
   .tl { position: relative; display: flex; align-items: flex-end; gap: 1px; height: 74px;

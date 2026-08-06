@@ -18,6 +18,8 @@
   import { SIM } from '../../lib/sim'
   import type { GrainCellStat, GrainStatus, GrainTrackRow } from '../../lib/types'
   import LiveThumb from '../LiveThumb.svelte'
+  import Explain from '../Explain.svelte'
+  import ScreenIntro from '../ScreenIntro.svelte'
 
   let { onclose }: { onclose: () => void } = $props()
 
@@ -202,7 +204,10 @@
     {#if st}<span class="cnt">{st.tracks.toLocaleString()} TRACKS · {st.days} DAY{st.days === 1 ? '' : 'S'}</span>{/if}
     <span class="spacer"></span>
     {#if st}
-      <span class="chip caps" class:mature={st.mature}>{st.mature ? 'MATURE' : `LEARNING ${Math.round(st.maturity * 100)}%`}</span>
+      <span class="chip caps" class:mature={st.mature}>
+        {st.mature ? 'READY TO JUDGE' : `STILL LEARNING · ${Math.round(st.maturity * 100)}%`}
+        <Explain term="maturity" bare />
+      </span>
     {/if}
     <button class="ref caps" class:on={compare} onclick={toggleCompare}>⇄ COMPARE<span class="k">C</span></button>
     <button class="ref caps" class:on={muteMode} onclick={() => (muteMode = !muteMode)}>◱ MUTE<span class="k">M</span></button>
@@ -210,13 +215,17 @@
     <button class="x caps" onclick={onclose}>✕ CLOSE</button>
   </header>
 
+  <ScreenIntro
+    what="How people normally move through this camera, and everyone today who did not."
+    hint="Left: which normal. Middle: the learned flow. Right: today's odd ones, rarest first." />
+
   {#if !st}
     <div class="empty caps"><span class="pulse">READING THE GRAIN_</span></div>
   {:else}
     <div class="body">
       <!-- LEFT: which normality are we looking at -->
       <aside class="cond">
-        <div class="ck caps">HOUR OF DAY</div>
+        <div class="ck caps">WHICH PART OF THE DAY <Explain term="time bucket" bare /></div>
         <div class="dial">
           <svg viewBox="0 0 120 120">
             {#each st.buckets as b, i}
@@ -234,7 +243,7 @@
         </div>
         <div class="hint caps">1-6 JUMP TO A BUCKET</div>
 
-        <div class="ck caps">SUBJECT CLASS</div>
+        <div class="ck caps">WHO IT IS WATCHING</div>
         <div class="chips">
           {#each ['person', 'vehicle'] as c}
             <button class="tog caps" class:on={grainClass === c}
@@ -295,7 +304,7 @@
         <div class="inspect">
           {#if inspect}
             <div class="ins">
-              <div class="ik caps">HEADING</div>
+              <div class="ik caps"><Explain term="heading" plain /></div>
               <svg class="rose" viewBox="0 0 40 40">
                 <circle class="rbg" cx="20" cy="20" r="17" />
                 <polygon class="rpoly" points={rose(inspect)} />
@@ -308,10 +317,10 @@
               </div>
             </div>
             <div class="ins stats">
-              <div class="sk caps">OBSERVATIONS<span class="sv">{inspect.n.toLocaleString()}</span></div>
-              <div class="sk caps">DECIDEDNESS<span class="sv">{Math.round(inspect.concentration * 100)}%</span></div>
+              <div class="sk caps"><Explain term="observations" plain /><span class="sv">{inspect.n.toLocaleString()}</span></div>
+              <div class="sk caps"><Explain term="decidedness" plain /><span class="sv">{Math.round(inspect.concentration * 100)}%</span></div>
               <div class="sk caps">STATE
-                <span class="sv" class:un={!inspect.mature}>{inspect.mature ? 'LEARNED' : 'UNLEARNED'}</span>
+                <span class="sv" class:un={!inspect.mature}>{inspect.mature ? 'LEARNED' : 'STILL LEARNING'}</span>
               </div>
               {#if !inspect.mature}
                 <div class="unote caps">THE MODEL HAS NOT SEEN THIS SPOT ENOUGH TO JUDGE ANYONE IN IT.</div>
@@ -325,7 +334,8 @@
 
       <!-- RIGHT: the ledger -->
       <aside class="ledger">
-        <div class="qgrp caps"><span class="qd u"></span>AWAITING VERDICT<span class="qgn">{unjudged.length}</span></div>
+        <div class="qgrp caps"><span class="qd u"></span>NEEDS YOUR CALL<span class="qgn">{unjudged.length}</span></div>
+        <div class="qnote">Rarest first. The number is <Explain term="percentile" plain />.</div>
         {#each unjudged as t (t.id)}
           <button class="qrow" class:on={selTrack === t.id} onclick={() => { selTrack = t.id; replay = 0 }}>
             <svg class="pthumb" viewBox="0 0 40 26" preserveAspectRatio="none">
@@ -339,7 +349,7 @@
           </button>
         {/each}
         {#if marked.length}
-          <div class="qgrp caps"><span class="qd m"></span>MARKED<span class="qgn">{marked.length}</span></div>
+          <div class="qgrp caps"><span class="qd m"></span>YOU ALREADY DECIDED<span class="qgn">{marked.length}</span></div>
           {#each marked as t (t.id)}
             <button class="qrow off" class:on={selTrack === t.id} onclick={() => { selTrack = t.id; replay = 0 }}>
               <svg class="pthumb" viewBox="0 0 40 26" preserveAspectRatio="none">
@@ -361,8 +371,13 @@
 
         {#if sel}
           <div class="seldetail">
-            <div class="sk caps">{sel.det_id} · {sel.percentile.toFixed(1)}TH PERCENTILE</div>
+            <div class="sk caps">{sel.det_id}</div>
+            <p class="srank">
+              About <b>{sel.percentile.toFixed(0)} in 100</b> journeys through here looked like this one.
+              <Explain term="percentile" bare />
+            </p>
             {#if sel.why}<p class="swhy">{sel.why}</p>{/if}
+            <div class="fhead">WHAT MADE IT RARE</div>
             <div class="facs">
               {#each Object.entries(sel.factors) as [k, v]}
                 <div class="fac">
@@ -384,8 +399,9 @@
 
     <footer class="foot caps">
       <span class="fl">
-        LEARNED FROM {st.tracks.toLocaleString()} TRACKS OVER {st.days} DAY{st.days === 1 ? '' : 'S'}
-        · {st.mature ? 'MATURE' : 'STILL LEARNING'}
+        LEARNED FROM {st.tracks.toLocaleString()} JOURNEY{st.tracks === 1 ? '' : 'S'}
+        OVER {st.days} DAY{st.days === 1 ? '' : 'S'}
+        · {st.mature ? 'ENOUGH TO JUDGE' : 'NOT YET ENOUGH TO JUDGE ANYONE'}
       </span>
       <span class="fr">MOVEMENT ONLY · NO APPEARANCE, IDENTITY OR DEMOGRAPHIC FEATURE IS USED</span>
     </footer>
@@ -421,6 +437,12 @@
   .ledger { border-left: 1px solid var(--hairline); }
   .ck { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.18em; margin: 14px 2px 8px; }
   .ck:first-child { margin-top: 0; }
+  /* Plain-language notes sit under a machine label and carry the meaning, so the caps line can
+     stay short without leaving the operator to guess what it is counting. */
+  .qnote { font-size: 9px; color: var(--ink-ghost); line-height: 1.55; margin: 0 4px 8px; }
+  .srank { font-size: 11px; color: var(--ink-dim); line-height: 1.6; margin: 4px 0 2px; }
+  .srank b { color: var(--ink); font-weight: 500; }
+  .fhead { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.18em; margin: 8px 0 2px; }
   .hint { font-size: 8px; color: var(--ink-ghost); letter-spacing: 0.12em; line-height: 1.6; margin-top: 6px; }
 
   .dial svg { width: 100%; max-width: 190px; display: block; margin: 0 auto; }

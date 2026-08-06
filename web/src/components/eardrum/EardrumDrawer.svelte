@@ -12,6 +12,8 @@
   import { sfx } from '../../lib/audio'
   import { SIM } from '../../lib/sim'
   import type { Probe, ProbeSpectrum } from '../../lib/types'
+  import Explain from '../Explain.svelte'
+  import ScreenIntro from '../ScreenIntro.svelte'
 
   let { onclose }: { onclose: () => void } = $props()
 
@@ -189,7 +191,9 @@
     <span class="cnt">◉ {cam?.name ?? 'CAM —'}</span>
     <span class="cnt">{list.length} PROBE{list.length === 1 ? '' : 'S'}</span>
     {#if !refProbe && list.length}
-      <span class="warnchip caps">NO REFERENCE PROBE · READINGS INCLUDE CAMERA SHAKE</span>
+      <span class="warnchip caps">
+        NO <Explain term="reference probe" plain /> YET · EVERY READING STILL INCLUDES THE CAMERA'S OWN SHAKE
+      </span>
     {/if}
     {#if saturated}
       <span class="warnchip caps hot">CAMERA IS MOVING · MEASUREMENT SUSPENDED</span>
@@ -220,6 +224,10 @@
     <button class="tb caps" onclick={() => listenPlacing.set(true)}>+ ADD PROBE</button>
     <button class="x caps" onclick={onclose}>✕</button>
   </header>
+
+  <ScreenIntro
+    what="Vibration read off surfaces in the picture, from movements far too small to see."
+    hint="Pick a probe below to see what it is picking up." />
 
   {#if !list.length}
     <div class="empty caps">
@@ -255,7 +263,9 @@
             {#if modal === null}
               <div class="mid caps"><span class="pulse">DECOMPOSING_</span></div>
             {:else if !modal.length}
-              <div class="mid caps">MODAL ANALYSIS NEEDS THREE PROBES ON THE SAME STRUCTURE</div>
+              <div class="mid caps">
+                <Explain term="modal analysis" plain /> NEEDS THREE PROBES ON THE SAME STRUCTURE
+              </div>
             {:else}
               {@const m = modal[0]}
               {@const amp = Math.sin(modalPhase) * 14}
@@ -287,7 +297,8 @@
 
       <aside class="analysis">
         <section class="card">
-          <div class="ck caps">SPECTRUM</div>
+          <div class="ck caps"><Explain term="spectrum" plain /></div>
+          <div class="cnote">A spike means something is repeating at a steady rate. Left is slow, right is fast.</div>
           {#if spec && spec.psd.length}
             <svg class="spec" viewBox="0 0 100 100" preserveAspectRatio="none">
               {#if spec.baseline}
@@ -299,12 +310,14 @@
                 <line class="pk" class:new={pk.is_new} x1={peakX(spec, pk.hz)} x2={peakX(spec, pk.hz)} y1="0" y2="100" />
               {/each}
             </svg>
-            <div class="floorlbl caps">FLOOR · PEAKS BELOW ARE NOT REAL</div>
+            <div class="floorlbl caps">
+              <Explain term="noise floor" plain /> · ANYTHING UNDER THE DASHED LINE IS NOT REAL
+            </div>
             <div class="peaks">
               {#each spec.peaks.slice(0, 4) as pk}
                 <div class="prow2 caps">
                   <span class="phz">{pk.hz.toFixed(2)} Hz</span>
-                  <span class="pdb">{pk.prominence.toFixed(0)} dB</span>
+                  <span class="pdb" title="How far this spike stands out above the surrounding noise">{pk.prominence.toFixed(0)} dB</span>
                   {#if pk.is_new}<span class="tagn">NEW</span>{/if}
                   {#if pk.shift}<span class="tags">Δ {pk.shift > 0 ? '+' : ''}{pk.shift.toFixed(2)} Hz</span>{/if}
                   {#if pk.rise}<span class="tagr">+{pk.rise.toFixed(1)} dB</span>{/if}
@@ -319,8 +332,10 @@
 
         {#if spec?.interpretation}
           <section class="card">
-            <div class="ck caps">INTERPRETATION</div>
-            <div class="f0 caps">{spec.interpretation.f0.toFixed(2)} Hz · {spec.interpretation.rpm} RPM</div>
+            <div class="ck caps">WHAT THIS PATTERN USUALLY MEANS</div>
+            <div class="cnote">Reading the spikes the way a maintenance engineer would.</div>
+            <div class="f0 caps">RUNNING AT {spec.interpretation.rpm} RPM · {spec.interpretation.f0.toFixed(2)} Hz</div>
+            <div class="clbl caps">STRENGTH AT EACH <Explain term="harmonic" plain /></div>
             <div class="harms">
               {#each spec.interpretation.harmonics as h}
                 <div class="hrow caps">
@@ -339,7 +354,7 @@
         {/if}
 
         <section class="card">
-          <div class="ck caps">BAND</div>
+          <div class="ck caps">WHAT YOU CAN HEAR <Explain term="structural band" bare /></div>
           <div class="band caps">{BAND_LABEL[spec?.band ?? 'structural']}</div>
           <button class="play caps" onclick={play}>▶ PLAY 8s · +3 OCT<span class="k">P</span></button>
           <div class="disc caps">
@@ -431,6 +446,11 @@
     display: flex; flex-direction: column; gap: 8px; }
   .card { border: 1px solid var(--hairline); padding: 8px 9px; display: flex; flex-direction: column; gap: 6px; }
   .ck { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.18em; }
+  /* The card title names the panel; this line says what the operator is actually looking at.
+     Lower case and un-tracked on purpose, so it reads as a sentence rather than more chrome. */
+  .cnote { font-size: 9px; color: var(--ink-ghost); line-height: 1.5; letter-spacing: 0;
+    text-transform: none; margin: 2px 0 4px; }
+  .clbl { font-size: 7px; color: var(--ink-ghost); letter-spacing: 0.18em; margin-top: 6px; }
   .spec { width: 100%; height: 70px; }
   .live { fill: none; stroke: var(--cyan); stroke-width: 1; vector-effect: non-scaling-stroke; }
   .base { fill: none; stroke: var(--jade); stroke-width: 1; stroke-dasharray: 3 2;

@@ -10,6 +10,7 @@
   import { sfx } from '../../lib/audio'
   import { SIM } from '../../lib/sim'
   import type { BedrockEntity, BedrockFact } from '../../lib/types'
+  import Explain from '../Explain.svelte'
 
   let { entity, fact, onpurge, onclose }: {
     entity: BedrockEntity | null
@@ -62,7 +63,7 @@
 <aside class="insp">
   {#if fact}
     <header class="ih caps">
-      <span class="ik">PROVENANCE</span>
+      <span class="ik">HOW WE KNOW THIS <Explain term="provenance" bare /></span>
       <button class="x" onclick={onclose} aria-label="close">✕</button>
     </header>
     {#if fact.snapshot}
@@ -72,8 +73,8 @@
     {/if}
     <div class="claim caps">{label(fact)}</div>
     <dl class="prov">
-      <div><dt class="caps">ASSERTED BY</dt><dd>{fact.src_kind}{fact.model_id ? ` · ${fact.model_id}` : ''}</dd></div>
-      <div><dt class="caps">CONFIDENCE</dt>
+      <div><dt class="caps">WHAT SAW IT</dt><dd>{fact.src_kind}{fact.model_id ? ` · ${fact.model_id}` : ''}</dd></div>
+      <div><dt class="caps">HOW SURE</dt>
         <dd><span class="cbar"><span class="cfill" style={`width:${Math.round(fact.conf * 100)}%`}></span></span>
           {(fact.conf * 100).toFixed(0)}%</dd></div>
       <div><dt class="caps">SOURCE</dt><dd>{fact.src_ref ?? '—'}</dd></div>

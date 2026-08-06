@@ -17,6 +17,7 @@
   import FactTimeline from '../bedrock/FactTimeline.svelte'
   import TimeDial from '../bedrock/TimeDial.svelte'
   import Inspector from '../bedrock/Inspector.svelte'
+  import ScreenIntro from '../ScreenIntro.svelte'
 
   type View = 'timeline' | 'graph' | 'table'
   let view = $state<View>('timeline')
@@ -113,6 +114,10 @@
     </div>
     <button class="x caps" onclick={() => mode.set('pov')}>✕ CLOSE</button>
   </header>
+
+  <ScreenIntro
+    what="Ask the past a question, and see what the system believed at the time rather than only what it believes now."
+    hint="Build the question on the left. The two sliders at the bottom set when it happened and when we knew." />
 
   <div class="body">
     <QueryLens query={q} entities={res?.entities ?? []} onrun={run} onchange={(n) => bedrockQuery.set(n)} />
